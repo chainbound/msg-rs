@@ -12,9 +12,11 @@ It was built because we needed a Rust-native messaging library like those above.
     - [ ] Publish/Subscribe
     - [ ] Push/Pull
     - [ ] Survey/Respond
+- [ ] Stats (RTT, throughput, packet drops etc.)
 - [ ] Durable transports (built-in retries and reconnections)
 - [ ] Queuing
 - [ ] Pluggable transport layer (TCP, UDP, QUIC etc.)
+- [ ] Simulation modes with [Turmoil](https://github.com/tokio-rs/turmoil)
 
 ## Socket Types
 ### Request/Reply
