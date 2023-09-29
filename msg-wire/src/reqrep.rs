@@ -8,6 +8,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
+#[derive(Debug, Clone)]
 pub struct Message {
     header: Header,
     /// The message payload.
@@ -58,11 +59,14 @@ impl Header {
     }
 }
 
+#[derive(Default)]
 enum State {
+    #[default]
     Header,
     Payload(Header),
 }
 
+#[derive(Default)]
 pub struct Codec {
     /// The current state of the decoder.
     state: State,
@@ -70,9 +74,7 @@ pub struct Codec {
 
 impl Codec {
     pub fn new() -> Self {
-        Self {
-            state: State::Header,
-        }
+        Self::default()
     }
 }
 

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     pin::Pin,
     task::{ready, Context, Poll},
     time::Duration,
@@ -16,17 +16,14 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::wire;
-
-const EGRESS_BUFFER_SIZE: usize = 1024;
-const INGRESS_BUFFER_SIZE: usize = 1024;
+const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
 pub enum ReqError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
-    Wire(#[from] wire::reqrep::Error),
+    Wire(#[from] msg_wire::reqrep::Error),
 }
 
 pub enum Command {
@@ -58,7 +55,6 @@ impl Default for ReqOptions {
 
 pub struct ReqSocket {
     to_backend: mpsc::Sender<Command>,
-    from_backend: mpsc::Receiver<Bytes>,
 }
 
 impl ReqSocket {
@@ -82,10 +78,9 @@ pub trait Transport: AsyncRead + AsyncWrite + Unpin + Sync + Send {}
 
 pub struct ReqBackend<T: AsyncRead + AsyncWrite> {
     id_counter: u32,
-    to_socket: mpsc::Sender<Bytes>,
     from_socket: mpsc::Receiver<Command>,
-    conn: Framed<T, wire::reqrep::Codec>,
-    egress_queue: VecDeque<wire::reqrep::Message>,
+    conn: Framed<T, msg_wire::reqrep::Codec>,
+    egress_queue: VecDeque<msg_wire::reqrep::Message>,
     /// The currently active request, if any. Uses [`FxHashMap`] for performance.
     active_requests: FxHashMap<u32, oneshot::Sender<Result<Bytes, ReqError>>>,
 }
@@ -98,12 +93,11 @@ impl ReqSocket {
 
     pub async fn connect_with_options(target: &str, options: ReqOptions) -> Result<Self, ReqError> {
         // Initialize communication channels
-        let (to_backend, from_socket) = mpsc::channel(EGRESS_BUFFER_SIZE);
-        let (to_socket, from_backend) = mpsc::channel(INGRESS_BUFFER_SIZE);
+        let (to_backend, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: parse target string to get transport protocol, for now just assume TCP
 
-        // TODO: exponential backoff
+        // TODO: exponential backoff, should be handled in the `Durable` versions of our transports
         let stream = if options.retry_on_initial_failure {
             let mut attempts = 0;
             loop {
@@ -132,13 +126,13 @@ impl ReqSocket {
         };
 
         stream.set_nodelay(options.set_nodelay)?;
+        tracing::debug!("Connected to {}", target);
 
         // Create the socket backend
         let backend = ReqBackend {
             id_counter: 0,
-            to_socket,
             from_socket,
-            conn: Framed::new(stream, wire::reqrep::Codec::new()),
+            conn: Framed::new(stream, msg_wire::reqrep::Codec::new()),
             egress_queue: VecDeque::new(),
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
@@ -148,26 +142,17 @@ impl ReqSocket {
         // Spawn the backend task
         tokio::spawn(backend);
 
-        Ok(Self {
-            to_backend,
-            from_backend,
-        })
+        Ok(Self { to_backend })
     }
 }
 
 impl<T: AsyncRead + AsyncWrite> ReqBackend<T> {
-    fn new_message(&mut self, payload: Bytes) -> wire::reqrep::Message {
+    fn new_message(&mut self, payload: Bytes) -> msg_wire::reqrep::Message {
         let id = self.id_counter;
         // Wrap add here to avoid overflow
         self.id_counter = id.wrapping_add(1);
 
-        wire::reqrep::Message {
-            header: wire::reqrep::Header {
-                id,
-                size: payload.len() as u32,
-            },
-            payload,
-        }
+        msg_wire::reqrep::Message::new(id, payload)
     }
 }
 
@@ -178,12 +163,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqBackend<T> {
         let this = self.get_mut();
 
         loop {
+            let _ = this.conn.poll_flush_unpin(cx);
+
             // Check for incoming messages from the socket
             match this.conn.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(msg))) => {
                     if let Some(response) = this.active_requests.remove(&msg.id()) {
-                        println!("Sending response");
-                        let _ = response.send(Ok(msg.payload));
+                        let _ = response.send(Ok(msg.into_payload()));
                     }
 
                     continue;
@@ -200,10 +186,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqBackend<T> {
                 Poll::Pending => {}
             }
 
-            // Drain the egress queue
             if this.conn.poll_ready_unpin(cx).is_ready() {
+                // Drain the egress queue
                 if let Some(msg) = this.egress_queue.pop_front() {
                     // Generate the new message
+                    tracing::debug!("Sending msg {}", msg.id());
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
                             // We might be able to send more queued messages
@@ -225,6 +212,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqBackend<T> {
                     let id = msg.id();
                     this.egress_queue.push_back(msg);
                     this.active_requests.insert(id, response);
+
                     continue;
                 }
                 Poll::Ready(None) => {
@@ -239,22 +227,5 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqBackend<T> {
 
             return Poll::Pending;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_req_rep() {
-        tracing_subscriber::fmt::init();
-        let addr = "127.0.0.1:2000";
-
-        let req = ReqSocket::connect(addr).await.unwrap();
-        println!("Connected");
-        let response = req.request("Hello world".into()).await.unwrap();
-
-        println!("Response: {:?}", response);
     }
 }
