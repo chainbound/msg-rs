@@ -21,6 +21,7 @@ It was built because we needed a Rust-native messaging library like those above.
 Example:
 ```rust
 use msg::*;
+use bytes::Bytes;
 
 #[tokio::main]
 async fn main() {
@@ -31,13 +32,11 @@ async fn main() {
     let req = ReqSocket::connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
-        loop {
-            // Receive the request and respond with "hello"
-            let req = rep.recv().await.unwrap();
-            println!("Message: {:?}", req.msg());
+        // Receive the request and respond with "world"
+        let req = rep.recv().await.unwrap();
+        println!("Message: {:?}", req.msg());
 
-            req.respond(Bytes::from("world")).unwrap();
-        }
+        req.respond(Bytes::from("world")).unwrap();
     });
 
     let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
