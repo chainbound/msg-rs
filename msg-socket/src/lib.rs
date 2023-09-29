@@ -1,5 +1,8 @@
-pub mod rep;
-pub mod req;
+mod rep;
+mod req;
+
+pub use rep::*;
+pub use req::*;
 
 pub struct RequestId(u32);
 

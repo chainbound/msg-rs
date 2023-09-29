@@ -245,6 +245,11 @@ dependencies = [
 [[package]]
 name = "msg"
 version = "0.1.0"
+dependencies = [
+ "msg-socket",
+ "msg-transport",
+ "msg-wire",
+]
 
 [[package]]
 name = "msg-socket"
