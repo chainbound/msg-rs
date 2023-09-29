@@ -25,6 +25,7 @@ tokio-stream = "0.1"
 bytes = "1"
 thiserror = "1"
 tracing = "0.1"
+rand = "0.8"
 
 # performance
 rustc-hash = "1"

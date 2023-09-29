@@ -23,11 +23,16 @@ const DEFAULT_BUFFER_SIZE: usize = 1024;
 /// A reply socket. This socket can bind multiple times.
 pub struct RepSocket {
     from_backend: mpsc::Receiver<Request>,
+    local_addr: SocketAddr,
 }
 
 impl RepSocket {
     pub async fn recv(&mut self) -> Result<Request, RepError> {
         self.from_backend.recv().await.ok_or(RepError::SocketClosed)
+    }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
     }
 }
 
@@ -69,6 +74,7 @@ impl RepSocket {
 
         let listener = socket.listen(128)?;
         tracing::debug!("Listening on {}", addr);
+        let local_addr = listener.local_addr()?;
 
         let backend = RepBackend {
             listener,
@@ -78,7 +84,10 @@ impl RepSocket {
 
         tokio::spawn(backend);
 
-        Ok(Self { from_backend })
+        Ok(Self {
+            local_addr,
+            from_backend,
+        })
     }
 }
 
@@ -269,24 +278,45 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
     use crate::req::ReqSocket;
 
     use super::*;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep() {
         tracing_subscriber::fmt::init();
-        let mut sock = RepSocket::bind("127.0.0.1:4444").await.unwrap();
+        let mut sock = RepSocket::bind("127.0.0.1:0").await.unwrap();
 
-        let req = ReqSocket::connect("127.0.0.1:4444").await.unwrap();
+        let req = ReqSocket::connect(&sock.local_addr().to_string())
+            .await
+            .unwrap();
 
         tokio::spawn(async move {
-            let req = sock.from_backend.recv().await.unwrap();
-            req.respond(Bytes::from("world")).unwrap();
+            loop {
+                let req = sock.recv().await.unwrap();
+
+                req.respond(Bytes::from("hello")).unwrap();
+            }
         });
 
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let res = req.request(Bytes::from("hello")).await.unwrap();
-        println!("Response: {:?}", res);
+        let n_reqs = 100000;
+        let mut rng = rand::thread_rng();
+        let msg_vec: Vec<Bytes> = (0..n_reqs)
+            .map(|_| {
+                let mut vec = vec![0u8; 512];
+                rng.fill(&mut vec[..]);
+                Bytes::from(vec)
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        for msg in msg_vec {
+            let _res = req.request(msg).await.unwrap();
+            // println!("Response: {:?} {:?}", _res, req_start.elapsed());
+        }
+        let elapsed = start.elapsed();
+        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
     }
 }
