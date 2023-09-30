@@ -1,78 +1,29 @@
+use bytes::Bytes;
+use futures::{Future, SinkExt, StreamExt};
+use msg_wire::reqrep;
+use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Duration,
 };
-
-use bytes::Bytes;
-use futures::{Future, SinkExt, StreamExt};
-use rustc_hash::FxHashMap;
-use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::Framed;
 
-use msg_wire::reqrep;
+use super::{Command, ReqError, ReqOptions};
 
-mod backend;
-mod socket;
-// pub(crate) use backend::*;
-use backend::*;
-pub use socket::*;
-
-const DEFAULT_BUFFER_SIZE: usize = 1024;
-
-#[derive(Debug, Error)]
-pub enum ReqError {
-    #[error("IO error: {0:?}")]
-    Io(#[from] std::io::Error),
-    #[error("Wire protocol error: {0:?}")]
-    Wire(#[from] reqrep::Error),
-    #[error("Socket closed")]
-    SocketClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
-}
-
-pub enum Command {
-    Send {
-        message: Bytes,
-        response: oneshot::Sender<Result<Bytes, ReqError>>,
-    },
-}
-
-pub struct ReqOptions {
-    pub timeout: std::time::Duration,
-    pub retry_on_initial_failure: bool,
-    pub backoff_duration: std::time::Duration,
-    pub retry_attempts: Option<usize>,
-    pub set_nodelay: bool,
-}
-
-impl Default for ReqOptions {
-    fn default() -> Self {
-        Self {
-            timeout: std::time::Duration::from_secs(5),
-            retry_on_initial_failure: true,
-            backoff_duration: Duration::from_millis(200),
-            retry_attempts: None,
-            set_nodelay: true,
-        }
-    }
-}
-
-pub struct ReqBackend<T: AsyncRead + AsyncWrite> {
-    options: Arc<ReqOptions>,
-    id_counter: u32,
-    from_socket: mpsc::Receiver<Command>,
-    conn: Framed<T, reqrep::Codec>,
-    egress_queue: VecDeque<reqrep::Message>,
+pub(crate) struct ReqBackend<T: AsyncRead + AsyncWrite> {
+    pub(crate) options: Arc<ReqOptions>,
+    pub(crate) id_counter: u32,
+    pub(crate) from_socket: mpsc::Receiver<Command>,
+    pub(crate) conn: Framed<T, reqrep::Codec>,
+    pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently active request, if any. Uses [`FxHashMap`] for performance.
-    active_requests: FxHashMap<u32, oneshot::Sender<Result<Bytes, ReqError>>>,
+    pub(crate) active_requests: FxHashMap<u32, oneshot::Sender<Result<Bytes, ReqError>>>,
 }
 
 impl<T: AsyncRead + AsyncWrite> ReqBackend<T> {
