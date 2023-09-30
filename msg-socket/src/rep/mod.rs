@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
+use futures::{Future, SinkExt, Stream, StreamExt};
 use msg_transport::ServerTransport;
 use msg_wire::reqrep;
 use thiserror::Error;
@@ -117,25 +117,6 @@ impl<T: ServerTransport> RepSocket<T> {
         self.from_backend = Some(from_backend);
 
         Ok(())
-    }
-}
-
-struct PendingRequest {
-    id: u32,
-    response: oneshot::Receiver<Bytes>,
-}
-
-impl Future for PendingRequest {
-    type Output = Option<(u32, Bytes)>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        match this.response.poll_unpin(cx) {
-            Poll::Ready(Ok(response)) => Poll::Ready(Some((this.id, response))),
-            Poll::Ready(Err(_)) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
     }
 }
 
@@ -274,13 +255,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                 Poll::Ready(Some(result)) => {
                     tracing::trace!("Received message from peer {}: {:?}", this.addr, result);
                     let msg = result?;
+                    let msg_id = msg.id();
+
                     let (tx, rx) = oneshot::channel();
 
-                    // Spawn the pending request future, which will resolve once the response is sent.
-                    this.pending_requests.spawn(PendingRequest {
-                        id: msg.id(),
-                        response: rx,
-                    });
+                    // Spawn a task to listen for the response. On success, return message ID and response.
+                    this.pending_requests
+                        .spawn(async move { rx.await.ok().map(|res| (msg_id, res)) });
 
                     let request = Request {
                         source: this.addr,
