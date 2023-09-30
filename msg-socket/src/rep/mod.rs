@@ -13,7 +13,6 @@ use msg_wire::reqrep;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpSocket, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinSet,
 };
