@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 # msg
 msg-wire.workspace = true
+msg-transport.workspace = true
 
 bytes.workspace = true
 futures.workspace = true

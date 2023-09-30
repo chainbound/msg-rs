@@ -9,3 +9,6 @@ edition = "2021"
 msg-socket.workspace = true
 msg-transport.workspace = true
 msg-wire.workspace = true
+
+tokio.workspace = true
+bytes.workspace = true

@@ -22,16 +22,19 @@ It was built because we needed a Rust-native messaging library like those above.
 ### Request/Reply
 Example:
 ```rust
-use msg::*;
 use bytes::Bytes;
+
+use msg::{RepSocket, ReqSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
-    // Initialize the reply socket (server side)
-    let rep = RepSocket::bind("0.0.0.0:4444").await.unwrap();
+    // Initialize the reply socket (server side) with a transport
+    let mut rep = RepSocket::new(Tcp::new());
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
-    // Initialize the request socket (client side)
-    let req = ReqSocket::connect("0.0.0.0:4444").await.unwrap();
+    // Initialize the request socket (client side) with a transport
+    let mut req = ReqSocket::new(Tcp::new());
+    req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"
@@ -44,3 +47,5 @@ async fn main() {
     let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
     println!("Response: {:?}", res);
 }
+
+```

@@ -2,11 +2,13 @@ use std::{
     collections::VecDeque,
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt};
+use msg_transport::ServerTransport;
 use msg_wire::reqrep;
 use thiserror::Error;
 use tokio::{
@@ -21,26 +23,36 @@ use tokio_util::codec::Framed;
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 /// A reply socket. This socket can bind multiple times.
-pub struct RepSocket {
-    from_backend: mpsc::Receiver<Request>,
-    local_addr: SocketAddr,
+pub struct RepSocket<T: ServerTransport> {
+    from_backend: Option<mpsc::Receiver<Request>>,
+    transport: Option<T>,
+    local_addr: Option<SocketAddr>,
+    options: Arc<RepOptions>,
 }
 
-impl RepSocket {
+impl<T: ServerTransport> RepSocket<T> {
     pub async fn recv(&mut self) -> Result<Request, RepError> {
-        self.from_backend.recv().await.ok_or(RepError::SocketClosed)
+        self.from_backend
+            .as_mut()
+            .ok_or(RepError::SocketClosed)?
+            .recv()
+            .await
+            .ok_or(RepError::SocketClosed)
     }
 
-    pub fn local_addr(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> Option<SocketAddr> {
         self.local_addr
     }
 }
 
-impl Stream for RepSocket {
+impl<T: ServerTransport> Stream for RepSocket<T> {
     type Item = Request;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.from_backend.poll_recv(cx)
+        self.from_backend
+            .as_mut()
+            .expect("Inactive socket")
+            .poll_recv(cx)
     }
 }
 
@@ -52,6 +64,8 @@ pub enum RepError {
     Wire(#[from] msg_wire::reqrep::Error),
     #[error("Socket closed")]
     SocketClosed,
+    #[error("Transport error: {0:?}")]
+    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub struct RepOptions {
@@ -68,34 +82,51 @@ impl Default for RepOptions {
     }
 }
 
-impl RepSocket {
-    pub async fn bind(addr: &str) -> Result<Self, RepError> {
-        Self::bind_with_options(addr, RepOptions::default()).await
+impl<T: ServerTransport> RepSocket<T> {
+    pub fn new(transport: T) -> Self {
+        Self::new_with_options(transport, RepOptions::default())
     }
 
-    /// TODO: should we allow multiple binds?
-    pub async fn bind_with_options(addr: &str, options: RepOptions) -> Result<Self, RepError> {
-        let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-        let socket = TcpSocket::new_v4()?;
-        socket.set_nodelay(options.set_nodelay)?;
-        socket.bind(addr.parse().unwrap())?;
+    pub fn new_with_options(transport: T, options: RepOptions) -> Self {
+        Self {
+            from_backend: None,
+            transport: Some(transport),
+            local_addr: None,
+            options: Arc::new(options),
+        }
+    }
+}
 
-        let listener = socket.listen(128)?;
-        tracing::debug!("Listening on {}", addr);
-        let local_addr = listener.local_addr()?;
+impl<T: ServerTransport> RepSocket<T> {
+    pub async fn bind(&mut self, addr: &str) -> Result<(), RepError> {
+        let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+
+        // Take the transport here, so we can move it into the backend task
+        let mut transport = self.transport.take().unwrap();
+
+        transport
+            .bind(addr)
+            .await
+            .map_err(|e| RepError::Transport(Box::new(e)))?;
+
+        let local_addr = transport
+            .local_addr()
+            .map_err(|e| RepError::Transport(Box::new(e)))?;
+
+        tracing::debug!("Listening on {}", local_addr);
 
         let backend = RepBackend {
-            listener,
+            transport,
             peer_states: StreamMap::with_capacity(128),
             to_socket,
         };
 
         tokio::spawn(backend);
 
-        Ok(Self {
-            local_addr,
-            from_backend,
-        })
+        self.local_addr = Some(local_addr);
+        self.from_backend = Some(from_backend);
+
+        Ok(())
     }
 }
 
@@ -147,16 +178,16 @@ struct PeerState<T: AsyncRead + AsyncWrite> {
     egress_queue: VecDeque<reqrep::Message>,
 }
 
-struct RepBackend {
-    listener: TcpListener,
+struct RepBackend<T: ServerTransport> {
+    transport: T,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
     /// Note that when the [`PeerState`] stream ends, it will be silently removed
     /// from this map.
-    peer_states: StreamMap<SocketAddr, PeerState<TcpStream>>,
+    peer_states: StreamMap<SocketAddr, PeerState<T::Io>>,
     to_socket: mpsc::Sender<Request>,
 }
 
-impl Future for RepBackend {
+impl<T: ServerTransport + Unpin> Future for RepBackend<T> {
     type Output = Result<(), RepError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -178,7 +209,7 @@ impl Future for RepBackend {
                 continue;
             }
 
-            match this.listener.poll_accept(cx) {
+            match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
                     this.peer_states.insert(
                         addr,
@@ -283,6 +314,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
 #[cfg(test)]
 mod tests {
+    use msg_transport::Tcp;
     use rand::Rng;
 
     use crate::req::ReqSocket;
@@ -292,15 +324,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep() {
         tracing_subscriber::fmt::init();
-        let mut sock = RepSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut rep = RepSocket::new(Tcp::new());
+        rep.bind("127.0.0.1:0").await.unwrap();
 
-        let req = ReqSocket::connect(&sock.local_addr().to_string())
+        let mut req = ReqSocket::new(Tcp::new());
+        req.connect(&rep.local_addr().unwrap().to_string())
             .await
             .unwrap();
 
         tokio::spawn(async move {
             loop {
-                let req = sock.recv().await.unwrap();
+                let req = rep.recv().await.unwrap();
 
                 req.respond(Bytes::from("hello")).unwrap();
             }
@@ -328,9 +362,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_batch_req_rep() {
         tracing_subscriber::fmt::init();
-        let sock = RepSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut rep = RepSocket::new(Tcp::new());
+        rep.bind("127.0.0.1:0").await.unwrap();
 
-        let req = ReqSocket::connect(&sock.local_addr().to_string())
+        let mut req = ReqSocket::new(Tcp::new());
+        req.connect(&rep.local_addr().unwrap().to_string())
             .await
             .unwrap();
 
@@ -338,7 +374,7 @@ mod tests {
         let n_reqs = 100000;
 
         tokio::spawn(async move {
-            sock.map(|req| async move {
+            rep.map(|req| async move {
                 req.respond(Bytes::from("hello")).unwrap();
             })
             .buffer_unordered(par_factor)

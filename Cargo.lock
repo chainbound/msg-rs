@@ -246,9 +246,11 @@ dependencies = [
 name = "msg"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "msg-socket",
  "msg-transport",
  "msg-wire",
+ "tokio",
 ]
 
 [[package]]
@@ -258,6 +260,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "msg-transport",
  "msg-wire",
  "rand",
  "rustc-hash",
@@ -272,6 +275,12 @@ dependencies = [
 [[package]]
 name = "msg-transport"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "msg-wire"

@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     pin::Pin,
+    sync::Arc,
     task::{ready, Context, Poll},
     time::Duration,
 };
@@ -11,10 +12,12 @@ use rustc_hash::FxHashMap;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::Framed;
+
+use msg_transport::ClientTransport;
+use msg_wire::reqrep;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -23,7 +26,11 @@ pub enum ReqError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
-    Wire(#[from] msg_wire::reqrep::Error),
+    Wire(#[from] reqrep::Error),
+    #[error("Socket closed")]
+    SocketClosed,
+    #[error("Transport error: {0:?}")]
+    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub enum Command {
@@ -53,55 +60,70 @@ impl Default for ReqOptions {
     }
 }
 
-pub struct ReqSocket {
-    to_backend: mpsc::Sender<Command>,
+pub struct ReqSocket<T: ClientTransport> {
+    /// Command channel to the backend task.
+    to_backend: Option<mpsc::Sender<Command>>,
+    /// The underlying transport.
+    transport: T,
+    /// Options for the socket. These are shared with the backend task.
+    options: Arc<ReqOptions>,
 }
 
-impl ReqSocket {
+impl<T: ClientTransport> ReqSocket<T> {
+    pub fn new(transport: T) -> Self {
+        Self::new_with_options(transport, ReqOptions::default())
+    }
+
+    pub fn new_with_options(transport: T, options: ReqOptions) -> Self {
+        Self {
+            to_backend: None,
+            transport,
+            options: Arc::new(options),
+        }
+    }
+}
+
+impl<T: ClientTransport> ReqSocket<T> {
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        // TODO: error handling
         self.to_backend
+            .as_ref()
+            .ok_or(ReqError::SocketClosed)?
             .send(Command::Send {
                 message,
                 response: response_tx,
             })
             .await
-            .unwrap();
+            .map_err(|_| ReqError::SocketClosed)?;
 
-        response_rx.await.unwrap()
+        response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 }
 
-pub trait Transport: AsyncRead + AsyncWrite + Unpin + Sync + Send {}
-
 pub struct ReqBackend<T: AsyncRead + AsyncWrite> {
+    options: Arc<ReqOptions>,
     id_counter: u32,
     from_socket: mpsc::Receiver<Command>,
-    conn: Framed<T, msg_wire::reqrep::Codec>,
-    egress_queue: VecDeque<msg_wire::reqrep::Message>,
+    conn: Framed<T, reqrep::Codec>,
+    egress_queue: VecDeque<reqrep::Message>,
     /// The currently active request, if any. Uses [`FxHashMap`] for performance.
     active_requests: FxHashMap<u32, oneshot::Sender<Result<Bytes, ReqError>>>,
 }
 
-impl ReqSocket {
+impl<T: ClientTransport> ReqSocket<T> {
     /// Connects to the target with the default options.
-    pub async fn connect(target: &str) -> Result<Self, ReqError> {
-        Self::connect_with_options(target, ReqOptions::default()).await
-    }
-
-    pub async fn connect_with_options(target: &str, options: ReqOptions) -> Result<Self, ReqError> {
+    pub async fn connect(&mut self, target: &str) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_backend, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: parse target string to get transport protocol, for now just assume TCP
 
         // TODO: exponential backoff, should be handled in the `Durable` versions of our transports
-        let stream = if options.retry_on_initial_failure {
+        let stream = if self.options.retry_on_initial_failure {
             let mut attempts = 0;
             loop {
-                match TcpStream::connect(target).await {
+                match self.transport.connect(target).await {
                     Ok(stream) => break stream,
                     Err(e) => {
                         attempts += 1;
@@ -111,28 +133,31 @@ impl ReqSocket {
                             attempts
                         );
 
-                        if let Some(max_attempts) = options.retry_attempts {
+                        if let Some(max_attempts) = self.options.retry_attempts {
                             if attempts >= max_attempts {
-                                return Err(e.into());
+                                return Err(ReqError::Transport(Box::new(e)));
                             }
                         }
 
-                        tokio::time::sleep(options.backoff_duration).await;
+                        tokio::time::sleep(self.options.backoff_duration).await;
                     }
                 }
             }
         } else {
-            TcpStream::connect(target).await?
+            self.transport
+                .connect(target)
+                .await
+                .map_err(|e| ReqError::Transport(Box::new(e)))?
         };
 
-        stream.set_nodelay(options.set_nodelay)?;
         tracing::debug!("Connected to {}", target);
 
         // Create the socket backend
         let backend = ReqBackend {
+            options: Arc::clone(&self.options),
             id_counter: 0,
             from_socket,
-            conn: Framed::new(stream, msg_wire::reqrep::Codec::new()),
+            conn: Framed::new(stream, reqrep::Codec::new()),
             egress_queue: VecDeque::new(),
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
@@ -142,17 +167,19 @@ impl ReqSocket {
         // Spawn the backend task
         tokio::spawn(backend);
 
-        Ok(Self { to_backend })
+        self.to_backend = Some(to_backend);
+
+        Ok(())
     }
 }
 
 impl<T: AsyncRead + AsyncWrite> ReqBackend<T> {
-    fn new_message(&mut self, payload: Bytes) -> msg_wire::reqrep::Message {
+    fn new_message(&mut self, payload: Bytes) -> reqrep::Message {
         let id = self.id_counter;
         // Wrap add here to avoid overflow
         self.id_counter = id.wrapping_add(1);
 
-        msg_wire::reqrep::Message::new(id, payload)
+        reqrep::Message::new(id, payload)
     }
 }
 
