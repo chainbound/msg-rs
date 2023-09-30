@@ -12,3 +12,4 @@ msg-wire.workspace = true
 
 tokio.workspace = true
 bytes.workspace = true
+tokio-stream.workspace = true

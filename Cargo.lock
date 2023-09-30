@@ -251,6 +251,7 @@ dependencies = [
  "msg-transport",
  "msg-wire",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

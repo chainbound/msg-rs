@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use tokio_stream::StreamExt;
 
 use msg::{RepSocket, ReqSocket, Tcp};
 
@@ -14,7 +15,8 @@ async fn main() {
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"
-        let req = rep.recv().await.unwrap();
+        // RepSocket implements `Stream`
+        let req = rep.next().await.unwrap();
         println!("Message: {:?}", req.msg());
 
         req.respond(Bytes::from("world")).unwrap();

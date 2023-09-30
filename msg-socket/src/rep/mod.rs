@@ -30,15 +30,6 @@ pub struct RepSocket<T: ServerTransport> {
 }
 
 impl<T: ServerTransport> RepSocket<T> {
-    pub async fn recv(&mut self) -> Result<Request, RepError> {
-        self.from_backend
-            .as_mut()
-            .ok_or(RepError::SocketClosed)?
-            .recv()
-            .await
-            .ok_or(RepError::SocketClosed)
-    }
-
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.local_addr
     }
@@ -333,7 +324,7 @@ mod tests {
 
         tokio::spawn(async move {
             loop {
-                let req = rep.recv().await.unwrap();
+                let req = rep.next().await.unwrap();
 
                 req.respond(Bytes::from("hello")).unwrap();
             }
