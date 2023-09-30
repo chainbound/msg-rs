@@ -155,7 +155,6 @@ impl Future for RepBackend {
         let this = self.get_mut();
 
         loop {
-            tracing::trace!("Polling peer states");
             if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
                 match msg {
                     Ok(request) => {
@@ -205,7 +204,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
     /// Advances the state of the peer.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        tracing::trace!("Polling PeerState");
         let this = self.get_mut();
 
         loop {
@@ -243,7 +241,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                 _ => {}
             }
 
-            tracing::trace!("Polling connection");
             match this.conn.poll_next_unpin(cx) {
                 Poll::Ready(Some(result)) => {
                     tracing::trace!("Received message from peer {}: {:?}", this.addr, result);
