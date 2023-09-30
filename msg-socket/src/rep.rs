@@ -36,6 +36,14 @@ impl RepSocket {
     }
 }
 
+impl Stream for RepSocket {
+    type Item = Request;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.from_backend.poll_recv(cx)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RepError {
     #[error("IO error: {0:?}")]
@@ -315,5 +323,53 @@ mod tests {
         }
         let elapsed = start.elapsed();
         tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_batch_req_rep() {
+        tracing_subscriber::fmt::init();
+        let sock = RepSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let req = ReqSocket::connect(&sock.local_addr().to_string())
+            .await
+            .unwrap();
+
+        let par_factor = 64;
+        let n_reqs = 100000;
+
+        tokio::spawn(async move {
+            sock.map(|req| async move {
+                req.respond(Bytes::from("hello")).unwrap();
+            })
+            .buffer_unordered(par_factor)
+            .for_each(|_| async {})
+            .await;
+        });
+
+        let mut rng = rand::thread_rng();
+        let msg_vec: Vec<Bytes> = (0..n_reqs)
+            .map(|_| {
+                let mut vec = vec![0u8; 512];
+                rng.fill(&mut vec[..]);
+                Bytes::from(vec)
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+
+        tokio_stream::iter(msg_vec)
+            .map(|msg| req.request(msg))
+            .buffer_unordered(par_factor)
+            .for_each(|_| async {})
+            .await;
+
+        let elapsed = start.elapsed();
+        // On my machine (Mac M1 8 cores, 16 GB RAM: 400ms or about 250k req/s)
+        tracing::info!(
+            "{} reqs in {:?}, req/s: {}",
+            n_reqs,
+            elapsed,
+            n_reqs as f64 / elapsed.as_secs_f64()
+        );
     }
 }
