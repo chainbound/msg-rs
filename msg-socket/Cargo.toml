@@ -20,6 +20,7 @@ tracing.workspace = true
 async-trait.workspace = true
 tokio-stream.workspace = true
 rand.workspace = true
+parking_lot.workspace = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

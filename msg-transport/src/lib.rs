@@ -7,6 +7,8 @@ use tokio::{
     net::{TcpSocket, TcpStream},
 };
 
+mod durable;
+
 #[async_trait::async_trait]
 pub trait ClientTransport {
     type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
@@ -58,7 +60,7 @@ impl Tcp {
 
 #[async_trait::async_trait]
 impl ClientTransport for Tcp {
-    type Io = tokio::net::TcpStream;
+    type Io = TcpStream;
     type Error = std::io::Error;
 
     async fn connect(&self, addr: &str) -> Result<Self::Io, Self::Error> {

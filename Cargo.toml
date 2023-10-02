@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 tokio-stream = "0.1"
+parking_lot = "0.12"
 
 bytes = "1"
 thiserror = "1"

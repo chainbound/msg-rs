@@ -16,6 +16,7 @@ pub struct Message {
 }
 
 impl Message {
+    #[inline]
     pub fn new(id: u32, payload: Bytes) -> Self {
         Self {
             header: Header {
@@ -26,18 +27,27 @@ impl Message {
         }
     }
 
+    #[inline]
     pub fn id(&self) -> u32 {
         self.header.id
     }
 
+    #[inline]
     pub fn payload_size(&self) -> u32 {
         self.header.size
     }
 
+    #[inline]
+    pub fn size(&self) -> usize {
+        Header::len() + self.payload_size() as usize
+    }
+
+    #[inline]
     pub fn payload(&self) -> &Bytes {
         &self.payload
     }
 
+    #[inline]
     pub fn into_payload(self) -> Bytes {
         self.payload
     }

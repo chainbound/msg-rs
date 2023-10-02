@@ -263,6 +263,7 @@ dependencies = [
  "futures",
  "msg-transport",
  "msg-wire",
+ "parking_lot",
  "rand",
  "rustc-hash",
  "thiserror",

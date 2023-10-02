@@ -7,15 +7,19 @@ use rustc_hash::FxHashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
-use super::{Command, ReqBackend, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
+use crate::req::stats::SocketStats;
+
+use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 
 pub struct ReqSocket<T: ClientTransport> {
     /// Command channel to the backend task.
-    to_backend: Option<mpsc::Sender<Command>>,
+    to_driver: Option<mpsc::Sender<Command>>,
     /// The underlying transport.
     transport: T,
     /// Options for the socket. These are shared with the backend task.
     options: Arc<ReqOptions>,
+    /// Socket statistics. These are shared with the backend task.
+    stats: Arc<SocketStats>,
 }
 
 impl<T: ClientTransport> ReqSocket<T> {
@@ -25,18 +29,21 @@ impl<T: ClientTransport> ReqSocket<T> {
 
     pub fn new_with_options(transport: T, options: ReqOptions) -> Self {
         Self {
-            to_backend: None,
+            to_driver: None,
             transport,
             options: Arc::new(options),
+            stats: Arc::new(SocketStats::default()),
         }
     }
-}
 
-impl<T: ClientTransport> ReqSocket<T> {
+    pub fn stats(&self) -> &SocketStats {
+        &self.stats
+    }
+
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
 
-        self.to_backend
+        self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
             .send(Command::Send {
@@ -48,13 +55,11 @@ impl<T: ClientTransport> ReqSocket<T> {
 
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
-}
 
-impl<T: ClientTransport> ReqSocket<T> {
     /// Connects to the target with the default options.
     pub async fn connect(&mut self, target: &str) -> Result<(), ReqError> {
         // Initialize communication channels
-        let (to_backend, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: parse target string to get transport protocol, for now just assume TCP
 
@@ -92,7 +97,7 @@ impl<T: ClientTransport> ReqSocket<T> {
         tracing::debug!("Connected to {}", target);
 
         // Create the socket backend
-        let backend = ReqBackend {
+        let driver = ReqDriver {
             options: Arc::clone(&self.options),
             id_counter: 0,
             from_socket,
@@ -100,13 +105,14 @@ impl<T: ClientTransport> ReqSocket<T> {
             egress_queue: VecDeque::new(),
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
-            active_requests: FxHashMap::default(),
+            pending_requests: FxHashMap::default(),
+            stats: Arc::clone(&self.stats),
         };
 
         // Spawn the backend task
-        tokio::spawn(backend);
+        tokio::spawn(driver);
 
-        self.to_backend = Some(to_backend);
+        self.to_driver = Some(to_driver);
 
         Ok(())
     }
