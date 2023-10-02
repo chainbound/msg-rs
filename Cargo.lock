@@ -247,11 +247,15 @@ name = "msg"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "futures",
  "msg-socket",
  "msg-transport",
  "msg-wire",
+ "rand",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
