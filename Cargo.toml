@@ -1,14 +1,14 @@
+[workspace]
+members = ["msg", "msg-socket", "msg-wire", "msg-transport"]
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"                               # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
+authors = ["Jonas Bostoen", "Nicolas Racchi"]
+homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[workspace]
-members = ["msg", "msg-socket", "msg-wire", "msg-transport"]
 
 [workspace.dependencies]
 msg-wire = { path = "./msg-wire" }
@@ -29,3 +29,7 @@ rand = "0.8"
 
 # performance
 rustc-hash = "1"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = false
