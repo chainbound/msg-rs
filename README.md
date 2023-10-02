@@ -1,17 +1,29 @@
 # `msg-rs`
-> A flexible and lightweight messaging library for distributed systems built with Rust and Tokio.
+
+[![CI](https://github.com/chainbound/msg-rs/actions/workflows/ci.yml/badge.svg)][gh-ci]
+[![License](https://img.shields.io/badge/License-MIT-orange.svg)][mit-license]
+
+[gh-ci]: https://github.com/chainbound/msg-rs/actions/workflows/ci.yml
+[mit-license]: https://github.com/chainbound/msg-rs/blob/main/LICENSE
+
+**A flexible and lightweight messaging library for distributed systems built with Rust and Tokio.**
 
 ## Overview
+
 `msg-rs` is a messaging library that was inspired by projects like [ZeroMQ](https://zeromq.org/) and [Nanomsg](https://nanomsg.org/).
 It was built because we needed a Rust-native messaging library like those above.
 
+> **Warning**
+> This project is still in early development and is not ready for production use.
+
 ## Features
+
 - [ ] Multiple socket types
-    - [x] Request/Reply
-    - [ ] Channel
-    - [ ] Publish/Subscribe
-    - [ ] Push/Pull
-    - [ ] Survey/Respond
+  - [x] Request/Reply
+  - [ ] Channel
+  - [ ] Publish/Subscribe
+  - [ ] Push/Pull
+  - [ ] Survey/Respond
 - [ ] Stats (RTT, throughput, packet drops etc.)
 - [ ] Durable transports (built-in retries and reconnections)
 - [ ] Queuing
@@ -19,8 +31,11 @@ It was built because we needed a Rust-native messaging library like those above.
 - [ ] Simulation modes with [Turmoil](https://github.com/tokio-rs/turmoil)
 
 ## Socket Types
+
 ### Request/Reply
+
 Example:
+
 ```rust
 use bytes::Bytes;
 use tokio_stream::StreamExt;
@@ -50,3 +65,13 @@ async fn main() {
     println!("Response: {:?}", res);
 }
 ```
+
+## Contributions & Bug Reports
+
+Please report any bugs or issues you encounter by [opening a github issue](https://github.com/chainbound/msg-rs/issues/new).
+
+Pull requests are welcome! If you would like to contribute, please open an issue first to discuss the change you would like to make.
+
+## License
+
+This project is licensed under the [MIT license](https://github.com/chainbound/msg-rs/blob/main/LICENSE).
