@@ -1,17 +1,21 @@
 use bytes::{Buf, BufMut, Bytes};
 use tokio_util::codec::{Decoder, Encoder};
 
-/// Authentication codec
+/// Authentication codec.
 pub struct Codec {
     state: State,
 }
 
 impl Codec {
     /// Creates a new authentication codec for a client. This will put the
+    /// codec in the `Ack` state since it will be waiting for an ack.
     pub fn new_client() -> Self {
         Self { state: State::Ack }
     }
 
+    /// Creates a new authentication codec for a server. This will put the
+    /// codec in the `AuthReceive` state since it will be waiting for the
+    /// client to send its ID.
     pub fn new_server() -> Self {
         Self {
             state: State::AuthReceive,
@@ -21,7 +25,9 @@ impl Codec {
 
 #[derive(Debug, Clone)]
 enum State {
+    /// Waiting for the client to send its ID
     AuthReceive,
+    /// Waiting for the server to send an ACK
     Ack,
 }
 
