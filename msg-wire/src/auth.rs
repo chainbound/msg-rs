@@ -1,5 +1,19 @@
 use bytes::{Buf, BufMut, Bytes};
+use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
+
+/// The ID of the auth codec on the wire.
+const WIRE_ID: u8 = 0x01;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("IO error: {0:?}")]
+    Io(#[from] std::io::Error),
+    #[error("Invalid wire ID: {0}")]
+    WireId(u8),
+    #[error("Invalid ACK")]
+    InvalidAck,
+}
 
 /// Authentication codec.
 pub struct Codec {
@@ -40,15 +54,21 @@ pub enum Message {
 
 impl Decoder for Codec {
     type Item = Message;
-    type Error = std::io::Error;
+    type Error = Error;
 
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match self.state {
             // We are the server, waiting for the client to send its auth message
             State::AuthReceive => {
-                // We need at least 4 bytes to read the ID size
-                if src.len() < 4 {
+                // We need at least 5 bytes to read the wire ID and the auth ID
+                if src.len() < 1 + 4 {
                     return Ok(None);
+                }
+
+                // Wire ID check
+                let wire_id = src.get_u8();
+                if wire_id != WIRE_ID {
+                    return Err(Error::WireId(wire_id));
                 }
 
                 let id_size = src.get_u32();
@@ -62,8 +82,14 @@ impl Decoder for Codec {
             }
             // We are the client, and we are waiting for the server to send an ACK
             State::Ack => {
-                if src.is_empty() {
+                if src.len() < 2 {
                     return Ok(None);
+                }
+
+                // Wire ID check
+                let wire_id = src.get_u8();
+                if wire_id != WIRE_ID {
+                    return Err(Error::WireId(wire_id));
                 }
 
                 let ack = src.get_u8();
@@ -71,10 +97,7 @@ impl Decoder for Codec {
                 if ack == 1 {
                     Ok(Some(Message::Ack))
                 } else {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Invalid ACK",
-                    ))
+                    Err(Error::InvalidAck)
                 }
             }
         }
@@ -88,14 +111,15 @@ impl Encoder<Message> for Codec {
         match item {
             // We are the client, and we are sending the ID to the server
             Message::Auth(id) => {
-                self.state = State::AuthReceive;
-
-                dst.reserve(id.len());
+                self.state = State::Ack;
+                dst.reserve(1 + id.len());
+                dst.put_u8(WIRE_ID);
                 dst.put(id);
             }
             // We are the server, and we are sending an ACK to the client
             Message::Ack => {
-                dst.reserve(1);
+                dst.reserve(1 + 1);
+                dst.put_u8(WIRE_ID);
                 dst.put_u8(1);
             }
         }

@@ -2,10 +2,15 @@ use bytes::{Buf, BufMut, Bytes};
 use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
 
+/// The ID of the rep/req codec on the wire.
+const WIRE_ID: u8 = 0x02;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
+    #[error("Invalid wire ID: {0}")]
+    WireId(u8),
 }
 
 #[derive(Debug, Clone)]
@@ -96,8 +101,14 @@ impl Decoder for Codec {
         loop {
             match self.state {
                 State::Header => {
-                    if src.len() < Header::len() {
+                    if src.len() < 1 + Header::len() {
                         return Ok(None);
+                    }
+
+                    // Wire ID check
+                    let wire_id = src.get_u8();
+                    if wire_id != WIRE_ID {
+                        return Err(Error::WireId(wire_id));
                     }
 
                     // Construct the header
@@ -131,8 +142,9 @@ impl Encoder<Message> for Codec {
     type Error = Error;
 
     fn encode(&mut self, item: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
-        dst.reserve(8 + item.payload_size() as usize);
+        dst.reserve(1 + 8 + item.payload_size() as usize);
 
+        dst.put_u8(WIRE_ID);
         dst.put_u32(item.header.id);
         dst.put_u32(item.header.size);
         dst.put(item.payload);
