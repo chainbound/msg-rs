@@ -426,7 +426,7 @@ mod tests {
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
-                false
+                true
             }
         }
 
