@@ -45,7 +45,7 @@ pub struct ReqOptions {
 }
 
 impl ReqOptions {
-    pub fn with_client_id(mut self, client_id: Bytes) -> Self {
+    pub fn with_id(mut self, client_id: Bytes) -> Self {
         self.client_id = Some(client_id);
         self
     }
