@@ -1,20 +1,7 @@
-use std::{
-    collections::VecDeque,
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Context, Poll},
-    time::Duration,
-};
-
 use bytes::Bytes;
-use futures::{Future, SinkExt, StreamExt};
-use rustc_hash::FxHashMap;
+use std::time::Duration;
 use thiserror::Error;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
-};
-use tokio_util::codec::Framed;
+use tokio::sync::oneshot;
 
 use msg_wire::reqrep;
 
@@ -31,6 +18,8 @@ const DEFAULT_BUFFER_SIZE: usize = 1024;
 pub enum ReqError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
+    #[error("Authentication error: {0:?}")]
+    Auth(String),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] reqrep::Error),
     #[error("Socket closed")]
@@ -53,6 +42,13 @@ pub struct ReqOptions {
     pub backoff_duration: std::time::Duration,
     pub retry_attempts: Option<usize>,
     pub set_nodelay: bool,
+}
+
+impl ReqOptions {
+    pub fn with_client_id(mut self, client_id: Bytes) -> Self {
+        self.client_id = Some(client_id);
+        self
+    }
 }
 
 impl Default for ReqOptions {

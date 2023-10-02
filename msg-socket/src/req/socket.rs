@@ -1,10 +1,12 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use bytes::Bytes;
+use futures::SinkExt;
 use msg_transport::ClientTransport;
-use msg_wire::reqrep;
+use msg_wire::{auth, reqrep};
 use rustc_hash::FxHashMap;
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use crate::req::stats::SocketStats;
@@ -56,6 +58,31 @@ impl<T: ClientTransport> ReqSocket<T> {
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
+    /// Authenticates the client to the server.
+    async fn authenticate(&self, id: Bytes, stream: T::Io) -> Result<T::Io, ReqError> {
+        let mut conn = Framed::new(stream, auth::Codec::new_client());
+
+        tracing::debug!("Sending auth message: {:?}", id);
+        // Send the authentication message
+        let auth_msg = auth::Message::Auth(id);
+        conn.send(auth_msg).await?;
+        conn.flush().await?;
+
+        tracing::debug!("Waiting for ACK");
+        // Wait for the response
+        let ack = conn
+            .next()
+            .await
+            .ok_or(ReqError::SocketClosed)?
+            .map_err(|e| ReqError::Auth(e.to_string()))?;
+
+        if matches!(ack, auth::Message::Ack) {
+            Ok(conn.into_inner())
+        } else {
+            Err(ReqError::Auth("Invalid ACK".to_string()))
+        }
+    }
+
     /// Connects to the target with the default options.
     pub async fn connect(&mut self, target: &str) -> Result<(), ReqError> {
         // Initialize communication channels
@@ -64,7 +91,7 @@ impl<T: ClientTransport> ReqSocket<T> {
         // TODO: parse target string to get transport protocol, for now just assume TCP
 
         // TODO: exponential backoff, should be handled in the `Durable` versions of our transports
-        let stream = if self.options.retry_on_initial_failure {
+        let mut stream = if self.options.retry_on_initial_failure {
             let mut attempts = 0;
             loop {
                 match self.transport.connect(target).await {
@@ -95,6 +122,10 @@ impl<T: ClientTransport> ReqSocket<T> {
         };
 
         tracing::debug!("Connected to {}", target);
+
+        if let Some(ref id) = self.options.client_id {
+            stream = self.authenticate(id.clone(), stream).await?;
+        }
 
         // Create the socket backend
         let driver = ReqDriver {

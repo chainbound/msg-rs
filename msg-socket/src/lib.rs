@@ -1,6 +1,7 @@
 mod rep;
 mod req;
 
+use bytes::Bytes;
 pub use rep::*;
 pub use req::*;
 
@@ -18,4 +19,8 @@ impl RequestId {
     pub fn increment(&mut self) {
         self.0 = self.0.wrapping_add(1);
     }
+}
+
+pub trait Authenticator: Send + Sync + Unpin + 'static {
+    fn authenticate(&self, id: &Bytes) -> bool;
 }

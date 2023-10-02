@@ -9,7 +9,7 @@ use std::{
 use bytes::Bytes;
 use futures::{Future, SinkExt, Stream, StreamExt};
 use msg_transport::ServerTransport;
-use msg_wire::reqrep;
+use msg_wire::{auth, reqrep};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
@@ -19,12 +19,15 @@ use tokio::{
 use tokio_stream::StreamMap;
 use tokio_util::codec::Framed;
 
+use crate::Authenticator;
+
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 /// A reply socket. This socket can bind multiple times.
 pub struct RepSocket<T: ServerTransport> {
     from_backend: Option<mpsc::Receiver<Request>>,
     transport: Option<T>,
+    auth: Option<Box<dyn Authenticator>>,
     local_addr: Option<SocketAddr>,
     options: Arc<RepOptions>,
 }
@@ -52,6 +55,8 @@ pub enum RepError {
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] msg_wire::reqrep::Error),
+    #[error("Authentication error: {0}")]
+    Auth(String),
     #[error("Socket closed")]
     SocketClosed,
     #[error("Transport error: {0:?}")]
@@ -83,7 +88,13 @@ impl<T: ServerTransport> RepSocket<T> {
             transport: Some(transport),
             local_addr: None,
             options: Arc::new(options),
+            auth: None,
         }
+    }
+
+    pub fn with_auth<A: Authenticator>(mut self, authenticator: A) -> Self {
+        self.auth = Some(Box::new(authenticator));
+        self
     }
 }
 
@@ -109,6 +120,8 @@ impl<T: ServerTransport> RepSocket<T> {
             transport,
             peer_states: StreamMap::with_capacity(128),
             to_socket,
+            auth: self.auth.take(),
+            auth_tasks: JoinSet::new(),
         };
 
         tokio::spawn(backend);
@@ -156,9 +169,19 @@ struct RepBackend<T: ServerTransport> {
     /// from this map.
     peer_states: StreamMap<SocketAddr, PeerState<T::Io>>,
     to_socket: mpsc::Sender<Request>,
+    /// Optional connection authenticator
+    auth: Option<Box<dyn Authenticator>>,
+    /// Authentication tasks
+    auth_tasks: JoinSet<Result<AuthResult<T::Io>, RepError>>,
 }
 
-impl<T: ServerTransport + Unpin> Future for RepBackend<T> {
+struct AuthResult<S: AsyncRead + AsyncWrite> {
+    id: Bytes,
+    addr: SocketAddr,
+    stream: S,
+}
+
+impl<T: ServerTransport> Future for RepBackend<T> {
     type Output = Result<(), RepError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -180,18 +203,89 @@ impl<T: ServerTransport + Unpin> Future for RepBackend<T> {
                 continue;
             }
 
+            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
+                match auth {
+                    Ok(auth) => {
+                        // Run custom authenticator
+                        if this.auth.as_ref().unwrap().authenticate(&auth.id) {
+                            tracing::debug!(
+                                "Authentication passed for {:?} ({})",
+                                auth.id,
+                                auth.addr
+                            );
+
+                            this.peer_states.insert(
+                                auth.addr,
+                                PeerState {
+                                    addr: auth.addr,
+                                    pending_requests: JoinSet::new(),
+                                    conn: Framed::new(auth.stream, reqrep::Codec::new()),
+                                    egress_queue: VecDeque::new(),
+                                },
+                            );
+                        } else {
+                            tracing::warn!(
+                                "Authentication failed for {:?} ({})",
+                                auth.id,
+                                auth.addr
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error authenticating client: {:?}", e);
+                    }
+                }
+
+                continue;
+            }
+
+            // Poll the transport for new incoming connections
             match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
-                    this.peer_states.insert(
-                        addr,
-                        PeerState {
+                    // If authentication is enabled, start the authentication process
+                    if this.auth.is_some() {
+                        tracing::debug!("New connection from {}, authenticating", addr);
+
+                        this.auth_tasks.spawn(async move {
+                            let mut conn = Framed::new(stream, auth::Codec::new_server());
+
+                            tracing::debug!("Waiting for auth");
+                            // Wait for the response
+                            let auth = conn
+                                .next()
+                                .await
+                                .ok_or(RepError::SocketClosed)?
+                                .map_err(|e| RepError::Auth(e.to_string()))?;
+
+                            tracing::debug!("Auth received: {:?}", auth);
+
+                            let auth::Message::Auth(id) = auth else {
+                                return Err(RepError::Auth("Invalid auth message".to_string()));
+                            };
+
+                            // Send ack
+                            conn.send(auth::Message::Ack).await?;
+                            conn.flush().await?;
+
+                            Ok(AuthResult {
+                                id,
+                                addr,
+                                stream: conn.into_inner(),
+                            })
+                        });
+                    } else {
+                        this.peer_states.insert(
                             addr,
-                            pending_requests: JoinSet::new(),
-                            conn: Framed::new(stream, reqrep::Codec::new()),
-                            egress_queue: VecDeque::new(),
-                        },
-                    );
-                    tracing::debug!("New connection from {}, inserted into PeerStates", addr);
+                            PeerState {
+                                addr,
+                                pending_requests: JoinSet::new(),
+                                conn: Framed::new(stream, reqrep::Codec::new()),
+                                egress_queue: VecDeque::new(),
+                            },
+                        );
+
+                        tracing::debug!("New connection from {}", addr);
+                    }
 
                     continue;
                 }
@@ -311,7 +405,61 @@ mod tests {
             }
         });
 
-        let n_reqs = 100000;
+        let n_reqs = 1000;
+        let mut rng = rand::thread_rng();
+        let msg_vec: Vec<Bytes> = (0..n_reqs)
+            .map(|_| {
+                let mut vec = vec![0u8; 512];
+                rng.fill(&mut vec[..]);
+                Bytes::from(vec)
+            })
+            .collect();
+
+        let start = std::time::Instant::now();
+        for msg in msg_vec {
+            let _res = req.request(msg).await.unwrap();
+            // println!("Response: {:?} {:?}", _res, req_start.elapsed());
+        }
+        let elapsed = start.elapsed();
+        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_req_rep_auth() {
+        struct Auth;
+
+        impl Authenticator for Auth {
+            fn authenticate(&self, id: &Bytes) -> bool {
+                true
+            }
+        }
+
+        let _ = tracing_subscriber::fmt::try_init();
+        let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
+        rep.bind("127.0.0.1:0").await.unwrap();
+
+        // Initialize socket with a client ID. This will implicitly enable authentication.
+        let mut req = ReqSocket::new_with_options(
+            Tcp::new(),
+            ReqOptions::default().with_client_id(Bytes::from("REQ")),
+        );
+
+        req.connect(&rep.local_addr().unwrap().to_string())
+            .await
+            .unwrap();
+
+        tracing::info!("Connected to rep");
+
+        tokio::spawn(async move {
+            loop {
+                let req = rep.next().await.unwrap();
+                tracing::debug!("Received request");
+
+                req.respond(Bytes::from("hello")).unwrap();
+            }
+        });
+
+        let n_reqs = 1000;
         let mut rng = rand::thread_rng();
         let msg_vec: Vec<Bytes> = (0..n_reqs)
             .map(|_| {
