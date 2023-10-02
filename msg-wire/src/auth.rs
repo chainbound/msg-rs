@@ -11,8 +11,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Invalid wire ID: {0}")]
     WireId(u8),
-    #[error("Invalid ACK")]
-    InvalidAck,
+    #[error("Rejected")]
+    Rejected,
 }
 
 /// Authentication codec.
@@ -51,6 +51,8 @@ pub enum Message {
     Auth(Bytes),
     /// The server responds with an ACK
     Ack,
+    /// We reject the client
+    Reject,
 }
 
 impl Decoder for Codec {
@@ -72,10 +74,7 @@ impl Decoder for Codec {
                     return Err(Error::WireId(wire_id));
                 }
 
-                tracing::trace!("wire id: {}", wire_id);
-
                 if src.len() < 4 {
-                    tracing::trace!("not enough bytes");
                     return Ok(None);
                 }
 
@@ -107,11 +106,11 @@ impl Decoder for Codec {
 
                 let ack = src.get_u8();
 
-                if ack == 1 {
-                    Ok(Some(Message::Ack))
-                } else {
-                    Err(Error::InvalidAck)
+                if ack == 0 {
+                    return Err(Error::Rejected);
                 }
+
+                Ok(Some(Message::Ack))
             }
         }
     }
@@ -135,6 +134,11 @@ impl Encoder<Message> for Codec {
                 dst.reserve(1 + 1);
                 dst.put_u8(WIRE_ID);
                 dst.put_u8(1);
+            }
+            Message::Reject => {
+                dst.reserve(1 + 1);
+                dst.put_u8(WIRE_ID);
+                dst.put_u8(0);
             }
         }
 

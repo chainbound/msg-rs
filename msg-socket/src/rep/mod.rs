@@ -27,7 +27,7 @@ const DEFAULT_BUFFER_SIZE: usize = 1024;
 pub struct RepSocket<T: ServerTransport> {
     from_backend: Option<mpsc::Receiver<Request>>,
     transport: Option<T>,
-    auth: Option<Box<dyn Authenticator>>,
+    auth: Option<Arc<dyn Authenticator>>,
     local_addr: Option<SocketAddr>,
     options: Arc<RepOptions>,
 }
@@ -93,7 +93,7 @@ impl<T: ServerTransport> RepSocket<T> {
     }
 
     pub fn with_auth<A: Authenticator>(mut self, authenticator: A) -> Self {
-        self.auth = Some(Box::new(authenticator));
+        self.auth = Some(Arc::new(authenticator));
         self
     }
 }
@@ -170,7 +170,7 @@ struct RepBackend<T: ServerTransport> {
     peer_states: StreamMap<SocketAddr, PeerState<T::Io>>,
     to_socket: mpsc::Sender<Request>,
     /// Optional connection authenticator
-    auth: Option<Box<dyn Authenticator>>,
+    auth: Option<Arc<dyn Authenticator>>,
     /// Authentication tasks
     auth_tasks: JoinSet<Result<AuthResult<T::Io>, RepError>>,
 }
@@ -207,29 +207,17 @@ impl<T: ServerTransport> Future for RepBackend<T> {
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        if this.auth.as_ref().unwrap().authenticate(&auth.id) {
-                            tracing::debug!(
-                                "Authentication passed for {:?} ({})",
-                                auth.id,
-                                auth.addr
-                            );
+                        tracing::debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
 
-                            this.peer_states.insert(
-                                auth.addr,
-                                PeerState {
-                                    addr: auth.addr,
-                                    pending_requests: JoinSet::new(),
-                                    conn: Framed::new(auth.stream, reqrep::Codec::new()),
-                                    egress_queue: VecDeque::new(),
-                                },
-                            );
-                        } else {
-                            tracing::warn!(
-                                "Authentication failed for {:?} ({})",
-                                auth.id,
-                                auth.addr
-                            );
-                        }
+                        this.peer_states.insert(
+                            auth.addr,
+                            PeerState {
+                                addr: auth.addr,
+                                pending_requests: JoinSet::new(),
+                                conn: Framed::new(auth.stream, reqrep::Codec::new()),
+                                egress_queue: VecDeque::new(),
+                            },
+                        );
                     }
                     Err(e) => {
                         tracing::error!("Error authenticating client: {:?}", e);
@@ -243,9 +231,9 @@ impl<T: ServerTransport> Future for RepBackend<T> {
             match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
                     // If authentication is enabled, start the authentication process
-                    if this.auth.is_some() {
+                    if let Some(ref auth) = this.auth {
+                        let authenticator = Arc::clone(auth);
                         tracing::debug!("New connection from {}, authenticating", addr);
-
                         this.auth_tasks.spawn(async move {
                             let mut conn = Framed::new(stream, auth::Codec::new_server());
 
@@ -262,6 +250,14 @@ impl<T: ServerTransport> Future for RepBackend<T> {
                             let auth::Message::Auth(id) = auth else {
                                 return Err(RepError::Auth("Invalid auth message".to_string()));
                             };
+
+                            // If authentication fails, send a reject message and close the connection
+                            if !authenticator.authenticate(&id) {
+                                conn.send(auth::Message::Reject).await?;
+                                conn.flush().await?;
+                                conn.close().await?;
+                                return Err(RepError::Auth("Authentication failed".to_string()));
+                            }
 
                             // Send ack
                             conn.send(auth::Message::Ack).await?;
@@ -430,7 +426,7 @@ mod tests {
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
-                true
+                false
             }
         }
 
