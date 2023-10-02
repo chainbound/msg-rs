@@ -429,7 +429,7 @@ mod tests {
         struct Auth;
 
         impl Authenticator for Auth {
-            fn authenticate(&self, id: &Bytes) -> bool {
+            fn authenticate(&self, _id: &Bytes) -> bool {
                 true
             }
         }
