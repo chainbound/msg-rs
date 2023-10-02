@@ -13,3 +13,14 @@ msg-wire.workspace = true
 tokio.workspace = true
 bytes.workspace = true
 tokio-stream.workspace = true
+
+[dev-dependencies]
+# benchmarking
+tracing-subscriber = "0.3"
+futures.workspace = true
+tracing.workspace = true
+rand.workspace = true
+
+[[bench]]
+name = "req_res_localhost"
+harness = false
