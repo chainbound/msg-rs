@@ -25,11 +25,12 @@ const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 /// A reply socket. This socket can bind multiple times.
 pub struct RepSocket<T: ServerTransport> {
+    #[allow(unused)]
+    options: Arc<RepOptions>,
     from_backend: Option<mpsc::Receiver<Request>>,
     transport: Option<T>,
     auth: Option<Arc<dyn Authenticator>>,
     local_addr: Option<SocketAddr>,
-    options: Arc<RepOptions>,
 }
 
 impl<T: ServerTransport> RepSocket<T> {

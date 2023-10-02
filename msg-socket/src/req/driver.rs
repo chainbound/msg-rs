@@ -20,6 +20,7 @@ use msg_wire::reqrep;
 /// the the socket forward.
 pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     /// Options shared with the socket.
+    #[allow(unused)]
     pub(crate) options: Arc<ReqOptions>,
     /// Statistics shared with the socket.
     pub(crate) stats: Arc<SocketStats>,
