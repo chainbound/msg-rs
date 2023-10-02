@@ -9,3 +9,4 @@ edition = "2021"
 bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true

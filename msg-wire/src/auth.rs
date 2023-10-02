@@ -45,6 +45,7 @@ enum State {
     Ack,
 }
 
+#[derive(Debug, Clone)]
 pub enum Message {
     /// The client sends the ID to the server
     Auth(Bytes),
@@ -61,20 +62,30 @@ impl Decoder for Codec {
             // We are the server, waiting for the client to send its auth message
             State::AuthReceive => {
                 // We need at least 5 bytes to read the wire ID and the auth ID
-                if src.len() < 1 + 4 {
+                if src.is_empty() {
                     return Ok(None);
                 }
 
-                // Wire ID check
-                let wire_id = src.get_u8();
+                // Wire ID check (without advancing the cursor)
+                let wire_id = u8::from_be_bytes([src[0]]);
                 if wire_id != WIRE_ID {
                     return Err(Error::WireId(wire_id));
                 }
 
-                let id_size = src.get_u32();
+                tracing::trace!("wire id: {}", wire_id);
+
+                if src.len() < 4 {
+                    tracing::trace!("not enough bytes");
+                    return Ok(None);
+                }
+
+                let id_size = u32::from_be_bytes([src[1], src[2], src[3], src[4]]);
                 if src.len() < id_size as usize {
                     return Ok(None);
                 }
+
+                src.advance(1);
+                src.advance(4);
 
                 let id = src.split_to(id_size as usize).freeze();
                 self.state = State::Ack;
@@ -86,11 +97,13 @@ impl Decoder for Codec {
                     return Ok(None);
                 }
 
-                // Wire ID check
-                let wire_id = src.get_u8();
+                // Wire ID check (without advancing the cursor)
+                let wire_id = u8::from_be_bytes([src[0]]);
                 if wire_id != WIRE_ID {
                     return Err(Error::WireId(wire_id));
                 }
+
+                src.advance(1);
 
                 let ack = src.get_u8();
 
@@ -112,8 +125,9 @@ impl Encoder<Message> for Codec {
             // We are the client, and we are sending the ID to the server
             Message::Auth(id) => {
                 self.state = State::Ack;
-                dst.reserve(1 + id.len());
+                dst.reserve(1 + 4 + id.len());
                 dst.put_u8(WIRE_ID);
+                dst.put_u32(id.len() as u32);
                 dst.put(id);
             }
             // We are the server, and we are sending an ACK to the client

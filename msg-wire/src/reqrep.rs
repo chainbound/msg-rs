@@ -101,15 +101,22 @@ impl Decoder for Codec {
         loop {
             match self.state {
                 State::Header => {
-                    if src.len() < 1 + Header::len() {
+                    if src.is_empty() {
                         return Ok(None);
                     }
 
-                    // Wire ID check
-                    let wire_id = src.get_u8();
+                    // Wire ID check (without advancing the cursor)
+                    let wire_id = u8::from_be_bytes([src[0]]);
                     if wire_id != WIRE_ID {
                         return Err(Error::WireId(wire_id));
                     }
+
+                    if src.len() < Header::len() {
+                        return Ok(None);
+                    }
+
+                    // Only advance when we know we have enough bytes
+                    src.advance(1);
 
                     // Construct the header
                     let header = Header {
