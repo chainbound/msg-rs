@@ -11,7 +11,7 @@ static REPEAT_TIMES: usize = 10;
 
 /// Benchmark the throughput of a single request/response socket pair over localhost
 fn main() {
-    tracing_subscriber::fmt::init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     // create a multi-threaded tokio runtime
     let rt = tokio::runtime::Builder::new_multi_thread()
