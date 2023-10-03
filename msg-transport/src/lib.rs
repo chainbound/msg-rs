@@ -1,3 +1,4 @@
+use durable::{DurableTcpStream, ReconnectOptions};
 use std::{
     net::SocketAddr,
     task::{Context, Poll},
@@ -14,7 +15,7 @@ pub trait ClientTransport {
     type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn connect(&self, addr: &str) -> Result<Self::Io, Self::Error>;
+    async fn connect(&self, addr: SocketAddr) -> Result<Self::Io, Self::Error>;
 }
 
 #[async_trait::async_trait]
@@ -60,11 +61,15 @@ impl Tcp {
 
 #[async_trait::async_trait]
 impl ClientTransport for Tcp {
-    type Io = TcpStream;
+    type Io = DurableTcpStream<SocketAddr>;
     type Error = std::io::Error;
 
-    async fn connect(&self, addr: &str) -> Result<Self::Io, Self::Error> {
-        let stream = Self::Io::connect(addr).await?;
+    async fn connect(&self, addr: SocketAddr) -> Result<Self::Io, Self::Error> {
+        let stream = Self::Io::connect_with_options(
+            addr,
+            ReconnectOptions::new().with_exit_if_first_connect_fails(false),
+        )
+        .await?;
         stream.set_nodelay(self.options.set_nodelay)?;
         Ok(stream)
     }
