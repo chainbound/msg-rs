@@ -14,7 +14,7 @@ pub struct ReconnectOptions {
 
     /// If this is set to true, if the initial connect method of the stubborn-io item fails,
     /// then no further reconnects will be attempted
-    pub exit_if_first_connect_fails: bool,
+    pub with_block: bool,
 
     /// Invoked when the StubbornIo establishes a connection
     pub on_connect_callback: Box<dyn Fn() + Send + Sync>,
@@ -34,7 +34,7 @@ impl ReconnectOptions {
     pub fn new() -> Self {
         ReconnectOptions {
             retries_to_attempt_fn: Box::new(|| Box::new(ExpBackoffStrategy::default().into_iter())),
-            exit_if_first_connect_fails: true,
+            with_block: false,
             on_connect_callback: Box::new(|| {}),
             on_disconnect_callback: Box::new(|| {}),
             on_connect_fail_callback: Box::new(|| {}),
@@ -70,8 +70,8 @@ impl ReconnectOptions {
         self
     }
 
-    pub fn with_exit_if_first_connect_fails(mut self, value: bool) -> Self {
-        self.exit_if_first_connect_fails = value;
+    pub fn with_block(mut self, value: bool) -> Self {
+        self.with_block = value;
         self
     }
 

@@ -376,6 +376,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use msg_transport::Tcp;
     use rand::Rng;
 
@@ -419,6 +421,32 @@ mod tests {
         }
         let elapsed = start.elapsed();
         tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_req_rep_durable() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Initialize the request socket (client side) with a transport
+        let mut req = ReqSocket::new(Tcp::new());
+        // Try to connect even through the server isn't up yet
+        req.connect("0.0.0.0:4444").await.unwrap();
+
+        // Wait a moment to start the server
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut rep = RepSocket::new(Tcp::new());
+        rep.bind("0.0.0.0:4444").await.unwrap();
+
+        tokio::spawn(async move {
+            // Receive the request and respond with "world"
+            // RepSocket implements `Stream`
+            let req = rep.next().await.unwrap();
+            println!("Message: {:?}", req.msg());
+
+            req.respond(Bytes::from("world")).unwrap();
+        });
+
+        let _ = req.request(Bytes::from("hello")).await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

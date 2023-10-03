@@ -6,9 +6,9 @@ use std::{
     time::Duration,
 };
 
-use futures::Future;
+use futures::{Future, FutureExt};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use super::config::ReconnectOptions;
 
@@ -86,7 +86,7 @@ where
 /// Because it implements deref, you are able to invoke all of the original methods on the wrapped IO.
 pub struct DurableIo<T, C> {
     status: Status<T, C>,
-    underlying_io: T,
+    underlying_io: Option<T>,
     options: ReconnectOptions,
     ctor_arg: C,
 }
@@ -109,13 +109,13 @@ impl<T, C> Deref for DurableIo<T, C> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.underlying_io
+        self.underlying_io.as_ref().unwrap()
     }
 }
 
 impl<T, C> DerefMut for DurableIo<T, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.underlying_io
+        self.underlying_io.as_mut().unwrap()
     }
 }
 
@@ -133,61 +133,65 @@ where
 
     /// Connects or creates a handle to the UnderlyingIo item, with the given options.
     pub async fn connect_with_options(ctor_arg: C, options: ReconnectOptions) -> io::Result<Self> {
-        let tcp = match T::establish(ctor_arg.clone()).await {
+        let (status, tcp) = match T::establish(ctor_arg.clone()).await {
             Ok(tcp) => {
                 info!("Initial connection succeeded.");
                 (options.on_connect_callback)();
-                tcp
+                (Status::Connected, Some(tcp))
             }
             Err(e) => {
                 error!("Initial connection failed due to: {:?}.", e);
                 (options.on_connect_fail_callback)();
 
-                if options.exit_if_first_connect_fails {
-                    error!("Bailing after initial connection failure.");
-                    return Err(e);
-                }
+                if options.with_block {
+                    debug!("with_block set, attempting to reconnect now");
+                    let mut result = Err(e);
 
-                let mut result = Err(e);
+                    for (i, duration) in (options.retries_to_attempt_fn)().enumerate() {
+                        let reconnect_num = i + 1;
 
-                for (i, duration) in (options.retries_to_attempt_fn)().enumerate() {
-                    let reconnect_num = i + 1;
+                        info!(
+                            "Will re-perform initial connect attempt #{} in {:?}.",
+                            reconnect_num, duration
+                        );
 
-                    info!(
-                        "Will re-perform initial connect attempt #{} in {:?}.",
-                        reconnect_num, duration
-                    );
+                        tokio::time::sleep(duration).await;
 
-                    tokio::time::sleep(duration).await;
+                        info!("Attempting reconnect #{} now.", reconnect_num);
 
-                    info!("Attempting reconnect #{} now.", reconnect_num);
-
-                    match T::establish(ctor_arg.clone()).await {
-                        Ok(tcp) => {
-                            result = Ok(tcp);
-                            (options.on_connect_callback)();
-                            info!("Initial connection successfully established.");
-                            break;
+                        match T::establish(ctor_arg.clone()).await {
+                            Ok(tcp) => {
+                                result = Ok(tcp);
+                                (options.on_connect_callback)();
+                                info!("Initial connection successfully established.");
+                                break;
+                            }
+                            Err(e) => {
+                                (options.on_connect_fail_callback)();
+                                result = Err(e);
+                            }
                         }
+                    }
+
+                    match result {
+                        Ok(tcp) => (Status::Connected, Some(tcp)),
                         Err(e) => {
-                            (options.on_connect_fail_callback)();
-                            result = Err(e);
+                            error!("No more re-connect retries remaining. Never able to establish initial connection.");
+                            return Err(e);
                         }
                     }
-                }
-
-                match result {
-                    Ok(tcp) => tcp,
-                    Err(e) => {
-                        error!("No more re-connect retries remaining. Never able to establish initial connection.");
-                        return Err(e);
-                    }
+                } else {
+                    let mut reconnect_status = ReconnectStatus::new(&options);
+                    let ctor_arg = ctor_arg.clone();
+                    reconnect_status.reconnect_attempt =
+                        async move { T::establish(ctor_arg).await }.boxed();
+                    (Status::Disconnected(reconnect_status), None)
                 }
             }
         };
 
         Ok(DurableIo {
-            status: Status::Connected,
+            status,
             ctor_arg,
             underlying_io: tcp,
             options,
@@ -195,6 +199,7 @@ where
     }
 
     fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context) {
+        debug!("On disconnect called");
         match &mut self.status {
             // initial disconnect
             Status::Connected => {
@@ -247,6 +252,7 @@ where
     }
 
     fn poll_disconnect(mut self: Pin<&mut Self>, cx: &mut Context) {
+        debug!("poll_disconnect called");
         let (attempt, attempt_num) = match &mut self.status {
             Status::Connected => unreachable!(),
             Status::Disconnected(ref mut status) => (
@@ -262,7 +268,7 @@ where
                 cx.waker().wake_by_ref();
                 self.status = Status::Connected;
                 (self.options.on_connect_callback)();
-                self.underlying_io = underlying_io;
+                self.underlying_io = Some(underlying_io);
             }
             Poll::Ready(Err(err)) => {
                 error!("Connection attempt #{} failed: {:?}", attempt_num, err);
@@ -305,7 +311,11 @@ where
         match &mut self.status {
             Status::Connected => {
                 let pre_len = buf.filled().len();
-                let poll = AsyncRead::poll_read(Pin::new(&mut self.underlying_io), cx, buf);
+                let poll = AsyncRead::poll_read(
+                    Pin::new(&mut self.underlying_io.as_mut().unwrap()),
+                    cx,
+                    buf,
+                );
                 let post_len = buf.filled().len();
                 let bytes_read = post_len - pre_len;
                 if self.is_read_disconnect_detected(&poll, bytes_read) {
@@ -336,7 +346,11 @@ where
     ) -> Poll<io::Result<usize>> {
         match &mut self.status {
             Status::Connected => {
-                let poll = AsyncWrite::poll_write(Pin::new(&mut self.underlying_io), cx, buf);
+                let poll = AsyncWrite::poll_write(
+                    Pin::new(&mut self.underlying_io.as_mut().unwrap()),
+                    cx,
+                    buf,
+                );
 
                 if self.is_write_disconnect_detected(&poll) {
                     self.on_disconnect(cx);
@@ -356,7 +370,8 @@ where
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match &mut self.status {
             Status::Connected => {
-                let poll = AsyncWrite::poll_flush(Pin::new(&mut self.underlying_io), cx);
+                let poll =
+                    AsyncWrite::poll_flush(Pin::new(&mut self.underlying_io.as_mut().unwrap()), cx);
 
                 if self.is_write_disconnect_detected(&poll) {
                     self.on_disconnect(cx);
@@ -376,7 +391,10 @@ where
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match &mut self.status {
             Status::Connected => {
-                let poll = AsyncWrite::poll_shutdown(Pin::new(&mut self.underlying_io), cx);
+                let poll = AsyncWrite::poll_shutdown(
+                    Pin::new(&mut self.underlying_io.as_mut().unwrap()),
+                    cx,
+                );
                 if poll.is_ready() {
                     // if completed, we are disconnected whether error or not
                     self.on_disconnect(cx);
@@ -396,8 +414,11 @@ where
     ) -> Poll<io::Result<usize>> {
         match &mut self.status {
             Status::Connected => {
-                let poll =
-                    AsyncWrite::poll_write_vectored(Pin::new(&mut self.underlying_io), cx, bufs);
+                let poll = AsyncWrite::poll_write_vectored(
+                    Pin::new(&mut self.underlying_io.as_mut().unwrap()),
+                    cx,
+                    bufs,
+                );
 
                 if self.is_write_disconnect_detected(&poll) {
                     self.on_disconnect(cx);
@@ -415,6 +436,10 @@ where
     }
 
     fn is_write_vectored(&self) -> bool {
-        self.underlying_io.is_write_vectored()
+        if let Some(underlying_io) = &self.underlying_io {
+            underlying_io.is_write_vectored()
+        } else {
+            false
+        }
     }
 }

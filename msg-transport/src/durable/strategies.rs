@@ -27,6 +27,7 @@ pub struct ExpBackoffStrategy {
     seed: Option<u64>,
 }
 
+#[allow(unused)]
 impl ExpBackoffStrategy {
     pub fn new(min: Duration, factor: f64, jitter: f64) -> Self {
         Self {

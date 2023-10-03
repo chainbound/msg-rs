@@ -85,48 +85,54 @@ impl<T: ClientTransport> ReqSocket<T> {
     }
 
     /// Connects to the target with the default options.
-    pub async fn connect(&mut self, target: &str) -> Result<(), ReqError> {
+    pub async fn connect(&mut self, endpoint: &str) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: parse target string to get transport protocol, for now just assume TCP
 
         // TODO: exponential backoff, should be handled in the `Durable` versions of our transports
-        let mut stream = if self.options.retry_on_initial_failure {
-            let mut attempts = 0;
-            loop {
-                match self.transport.connect(target).await {
-                    Ok(stream) => break stream,
-                    Err(e) => {
-                        attempts += 1;
-                        tracing::debug!(
-                            "Failed to connect to target, retrying: {} (attempt {})",
-                            e,
-                            attempts
-                        );
+        // let mut stream = if self.options.retry_on_initial_failure {
+        //     let mut attempts = 0;
+        //     loop {
+        //         match self.transport.connect(endpoint).await {
+        //             Ok(stream) => break stream,
+        //             Err(e) => {
+        //                 attempts += 1;
+        //                 tracing::debug!(
+        //                     "Failed to connect to target, retrying: {} (attempt {})",
+        //                     e,
+        //                     attempts
+        //                 );
 
-                        if let Some(max_attempts) = self.options.retry_attempts {
-                            if attempts >= max_attempts {
-                                return Err(ReqError::Transport(Box::new(e)));
-                            }
-                        }
+        //                 if let Some(max_attempts) = self.options.retry_attempts {
+        //                     if attempts >= max_attempts {
+        //                         return Err(ReqError::Transport(Box::new(e)));
+        //                     }
+        //                 }
 
-                        tokio::time::sleep(self.options.backoff_duration).await;
-                    }
-                }
-            }
-        } else {
-            self.transport
-                .connect(target)
-                .await
-                .map_err(|e| ReqError::Transport(Box::new(e)))?
-        };
+        //                 tokio::time::sleep(self.options.backoff_duration).await;
+        //             }
+        //         }
+        //     }
+        // } else {
+        //     self.transport
+        //         .connect(endpoint)
+        //         .await
+        //         .map_err(|e| ReqError::Transport(Box::new(e)))?
+        // };
 
-        tracing::debug!("Connected to {}", target);
+        // TODO: return error
+        let endpoint = endpoint.parse().unwrap();
 
-        if let Some(ref id) = self.options.client_id {
-            stream = self.authenticate(id.clone(), stream).await?;
-        }
+        // TODO: handle error
+        let stream = self.transport.connect(endpoint).await.unwrap();
+
+        tracing::debug!("Connected to {}", endpoint);
+
+        // if let Some(ref id) = self.options.client_id {
+        //     stream = self.authenticate(id.clone(), stream).await?;
+        // }
 
         // Create the socket backend
         let driver = ReqDriver {

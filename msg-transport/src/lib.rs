@@ -65,12 +65,8 @@ impl ClientTransport for Tcp {
     type Error = std::io::Error;
 
     async fn connect(&self, addr: SocketAddr) -> Result<Self::Io, Self::Error> {
-        let stream = Self::Io::connect_with_options(
-            addr,
-            ReconnectOptions::new().with_exit_if_first_connect_fails(false),
-        )
-        .await?;
-        stream.set_nodelay(self.options.set_nodelay)?;
+        let stream =
+            Self::Io::connect_with_options(addr, ReconnectOptions::new().with_block(false)).await?;
         Ok(stream)
     }
 }
