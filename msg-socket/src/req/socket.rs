@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::req::stats::SocketStats;
+use crate::{req::stats::SocketStats, SocketState};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 
@@ -21,8 +21,8 @@ pub struct ReqSocket<T: ClientTransport> {
     transport: T,
     /// Options for the socket. These are shared with the backend task.
     options: Arc<ReqOptions>,
-    /// Socket statistics. These are shared with the backend task.
-    stats: Arc<SocketStats>,
+    /// Socket state. This is shared with the backend task.
+    state: Arc<SocketState>,
 }
 
 impl<T: ClientTransport> ReqSocket<T> {
@@ -35,12 +35,12 @@ impl<T: ClientTransport> ReqSocket<T> {
             to_driver: None,
             transport,
             options: Arc::new(options),
-            stats: Arc::new(SocketStats::default()),
+            state: Arc::new(SocketState::default()),
         }
     }
 
     pub fn stats(&self) -> &SocketStats {
-        &self.stats
+        &self.state.stats
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
@@ -138,7 +138,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
             pending_requests: FxHashMap::default(),
-            stats: Arc::clone(&self.stats),
+            state: Arc::clone(&self.state),
         };
 
         // Spawn the backend task

@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use parking_lot::RwLock;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -11,6 +12,8 @@ mod stats;
 // pub(crate) use backend::*;
 use driver::*;
 pub use socket::*;
+
+use self::stats::SocketStats;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -61,6 +64,35 @@ impl Default for ReqOptions {
             backoff_duration: Duration::from_millis(200),
             retry_attempts: None,
             set_nodelay: true,
+        }
+    }
+}
+
+/// The request socket state, shared between the backend task and the socket.
+#[derive(Debug)]
+pub(crate) struct SocketState {
+    pub(crate) stats: SocketStats,
+    pub(crate) connection_state: RwLock<ConnectionState>,
+}
+
+/// Current connection state of the socket.
+#[derive(Debug)]
+pub(crate) enum ConnectionState {
+    /// The socket is connected to the server.
+    Connected,
+    /// The socket is disconnected, and the backend task is trying to reconnect
+    /// for the `n`th time.
+    Disconnected(usize),
+    /// The socket has exhausted the number of reconnection attempts or encountered
+    /// a fatal error.
+    Fatal(ReqError),
+}
+
+impl Default for SocketState {
+    fn default() -> Self {
+        Self {
+            stats: SocketStats::default(),
+            connection_state: RwLock::new(ConnectionState::Disconnected(0)),
         }
     }
 }
