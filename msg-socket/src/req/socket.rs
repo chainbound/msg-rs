@@ -13,6 +13,7 @@ use crate::req::stats::SocketStats;
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 
+#[derive(Debug, Clone)]
 pub struct ReqSocket<T: ClientTransport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,

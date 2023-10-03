@@ -35,6 +35,7 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct ReqOptions {
     pub client_id: Option<Bytes>,
     pub timeout: std::time::Duration,
