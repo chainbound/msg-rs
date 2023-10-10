@@ -563,6 +563,11 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicI32, Ordering},
+        Arc,
+    };
+
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -581,6 +586,9 @@ mod tests {
         let mut session = DurableSession::<TcpStream>::new(addr);
         session.blocking_connect().await.unwrap();
 
+        let last_rx = Arc::new(AtomicI32::new(0));
+
+        let cloned_rx = Arc::clone(&last_rx);
         tokio::spawn(
             async move {
                 let (mut socket, addr) = listener.accept().await.unwrap();
@@ -598,8 +606,6 @@ mod tests {
                     tracing::info!("Received {}", recv);
                 }
 
-                // tokio::time::sleep(Duration::from_secs(3)).await;
-
                 // let listener = TcpListener::bind(addr).await.unwrap();
                 let (mut socket, addr) = listener.accept().await.unwrap();
                 tracing::info!("Accepted connection from {}", addr);
@@ -608,26 +614,24 @@ mod tests {
                 let _ = socket.read(&mut buf).await.unwrap();
                 loop {
                     let recv = socket.read_i32().await.unwrap();
+                    cloned_rx.store(recv, Ordering::Relaxed);
                     tracing::info!("Received {}", recv);
                 }
             }
             .instrument(tracing::info_span!("server")),
         );
 
-        tokio::spawn(
-            async move {
-                let mut i = 0;
-                loop {
-                    session.write_i32(i).await.unwrap();
-                    tracing::info!("Sent {}", i);
-                    i += 1;
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-            .instrument(tracing::info_span!("client")),
-        );
+        for i in 0..=10 {
+            session.write_i32(i).await.unwrap();
+            tracing::info!("Sent {}", i);
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
 
-        tokio::time::sleep(Duration::from_secs(100)).await;
+        assert_eq!(
+            last_rx.load(Ordering::Relaxed),
+            10,
+            "Last received value should be 10"
+        );
     }
 
     #[tokio::test]
