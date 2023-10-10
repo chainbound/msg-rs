@@ -25,7 +25,7 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     #[allow(unused)]
     pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
-    pub(crate) state: Arc<SocketState>,
+    pub(crate) socket_state: Arc<SocketState>,
     /// ID counter for outgoing requests.
     pub(crate) id_counter: u32,
     /// Commands from the socket.
@@ -59,8 +59,8 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             let _ = pending.sender.send(Ok(msg.into_payload()));
 
             // Update stats
-            self.state.stats.update_rtt(rtt);
-            self.state.stats.increment_rx(size);
+            self.socket_state.stats.update_rtt(rtt);
+            self.socket_state.stats.increment_rx(size);
         }
     }
 }
@@ -82,7 +82,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                     continue;
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    tracing::error!("Failed to read message from socket: {:?}", e);
+                    if let reqrep::Error::Io(e) = e {
+                        if e.kind() == std::io::ErrorKind::Other {
+                            tracing::error!("Other error: {:?}", e);
+                            return Poll::Ready(());
+                        }
+                    }
                     continue;
                 }
                 Poll::Ready(None) => {
@@ -100,7 +105,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                     tracing::debug!("Sending msg {}", msg.id());
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.state.stats.increment_tx(size);
+                            this.socket_state.stats.increment_tx(size);
                             // We might be able to send more queued messages
                             continue;
                         }

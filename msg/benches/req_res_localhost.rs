@@ -5,9 +5,9 @@ use rand::Rng;
 use msg_socket::{RepSocket, ReqSocket};
 use msg_transport::Tcp;
 
-static N_REQS: usize = 100000;
-static PAR_FACTOR: usize = 64;
-static REPEAT_TIMES: usize = 10;
+const N_REQS: usize = 100000;
+const PAR_FACTOR: usize = 64;
+const REPEAT_TIMES: usize = 10;
 
 /// Benchmark the throughput of a single request/response socket pair over localhost
 fn main() {
@@ -53,9 +53,10 @@ fn main() {
     let mut results = Vec::with_capacity(REPEAT_TIMES);
     for _ in 0..REPEAT_TIMES {
         rt.block_on(async {
+            let vec = msg_vec.clone();
             let start = std::time::Instant::now();
 
-            tokio_stream::iter(msg_vec.clone())
+            tokio_stream::iter(vec)
                 .map(|msg| req.request(msg))
                 .buffer_unordered(PAR_FACTOR)
                 .for_each(|_| async {})

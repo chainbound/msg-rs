@@ -249,6 +249,9 @@ impl<T: ServerTransport> Future for RepBackend<T> {
                             tracing::debug!("Auth received: {:?}", auth);
 
                             let auth::Message::Auth(id) = auth else {
+                                conn.send(auth::Message::Reject).await?;
+                                conn.flush().await?;
+                                conn.close().await?;
                                 return Err(RepError::Auth("Invalid auth message".to_string()));
                             };
 
@@ -455,6 +458,7 @@ mod tests {
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
+                tracing::info!("{:?}", _id);
                 true
             }
         }
@@ -497,7 +501,6 @@ mod tests {
         let start = std::time::Instant::now();
         for msg in msg_vec {
             let _res = req.request(msg).await.unwrap();
-            // println!("Response: {:?} {:?}", _res, req_start.elapsed());
         }
         let elapsed = start.elapsed();
         tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
@@ -509,7 +512,7 @@ mod tests {
         let mut rep = RepSocket::new_with_options(
             Tcp::new(),
             RepOptions {
-                set_nodelay: false,
+                set_nodelay: true,
                 ..Default::default()
             },
         );
@@ -518,7 +521,7 @@ mod tests {
         let mut req = ReqSocket::new_with_options(
             Tcp::new(),
             ReqOptions {
-                set_nodelay: false,
+                set_nodelay: true,
                 ..Default::default()
             },
         );
