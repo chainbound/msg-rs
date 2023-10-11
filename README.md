@@ -20,14 +20,20 @@ It was built because we needed a Rust-native messaging library like those above.
 
 - [ ] Multiple socket types
   - [x] Request/Reply
-  - [ ] Channel
   - [ ] Publish/Subscribe
+  - [ ] Channel
   - [ ] Push/Pull
   - [ ] Survey/Respond
 - [ ] Stats (RTT, throughput, packet drops etc.)
-- [ ] Durable transports (built-in retries and reconnections)
+ - [x] Request/Reply basic stats
 - [ ] Queuing
-- [ ] Pluggable transport layer (TCP, UDP, QUIC etc.)
+- [ ] Pluggable transport layer
+  - [x] TCP
+  - [ ] TLS
+  - [ ] IPC
+  - [ ] UDP
+  - [ ] Inproc
+- [x] Durable IO abstraction (built-in retries and reconnections)
 - [ ] Simulation modes with [Turmoil](https://github.com/tokio-rs/turmoil)
 
 ## Socket Types
@@ -65,6 +71,8 @@ async fn main() {
     println!("Response: {:?}", res);
 }
 ```
+## MSRV
+The minimum supported Rust version is 1.70.
 
 ## Contributions & Bug Reports
 
