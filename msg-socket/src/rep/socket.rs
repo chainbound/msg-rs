@@ -1,12 +1,10 @@
+use futures::Stream;
 use std::{
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-
-use futures::Stream;
-use msg_transport::ServerTransport;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamMap;
 
@@ -15,6 +13,7 @@ use crate::{
     rep::{SocketState, SocketStats},
     Authenticator, RepError, RepOptions, Request,
 };
+use msg_transport::ServerTransport;
 
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
 pub struct RepSocket<T: ServerTransport> {
