@@ -18,9 +18,6 @@ pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send>>;
 /// A layer can be applied to pre-process a newly established IO object. If you need
 /// multiple layers, use a single top-level layer that contains and calls the other layers.
 pub trait Layer<Io: AsyncRead + AsyncWrite>: 'static {
-    /// The type of the IO object that is processed.
-    // type Io: AsyncRead + AsyncWrite;
-
     /// The processing method. This method is called with the IO object that
     /// should be processed, and returns a future that resolves to a processing error
     /// or the processed IO object.
