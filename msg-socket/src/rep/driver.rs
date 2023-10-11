@@ -89,7 +89,8 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 pending_requests: JoinSet::new(),
                                 conn: Framed::new(auth.stream, reqrep::Codec::new()),
                                 addr: auth.addr,
-                                egress_queue: VecDeque::new(),
+                                // TODO: pre-allocate according to some options
+                                egress_queue: VecDeque::with_capacity(64),
                                 state: Arc::clone(&this.state),
                             }),
                         );
