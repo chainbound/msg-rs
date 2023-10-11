@@ -249,6 +249,9 @@ impl<T: ServerTransport> Future for RepBackend<T> {
                             tracing::debug!("Auth received: {:?}", auth);
 
                             let auth::Message::Auth(id) = auth else {
+                                conn.send(auth::Message::Reject).await?;
+                                conn.flush().await?;
+                                conn.close().await?;
                                 return Err(RepError::Auth("Invalid auth message".to_string()));
                             };
 
@@ -376,6 +379,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use msg_transport::Tcp;
     use rand::Rng;
 
@@ -422,11 +427,38 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_req_rep_durable() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Initialize the request socket (client side) with a transport
+        let mut req = ReqSocket::new(Tcp::new());
+        // Try to connect even through the server isn't up yet
+        req.connect("0.0.0.0:4444").await.unwrap();
+
+        // Wait a moment to start the server
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut rep = RepSocket::new(Tcp::new());
+        rep.bind("0.0.0.0:4444").await.unwrap();
+
+        tokio::spawn(async move {
+            // Receive the request and respond with "world"
+            // RepSocket implements `Stream`
+            let req = rep.next().await.unwrap();
+            println!("Message: {:?}", req.msg());
+
+            req.respond(Bytes::from("world")).unwrap();
+        });
+
+        let _ = req.request(Bytes::from("hello")).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep_auth() {
         struct Auth;
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
+                tracing::info!("{:?}", _id);
                 true
             }
         }
@@ -469,7 +501,6 @@ mod tests {
         let start = std::time::Instant::now();
         for msg in msg_vec {
             let _res = req.request(msg).await.unwrap();
-            // println!("Response: {:?} {:?}", _res, req_start.elapsed());
         }
         let elapsed = start.elapsed();
         tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
@@ -481,7 +512,7 @@ mod tests {
         let mut rep = RepSocket::new_with_options(
             Tcp::new(),
             RepOptions {
-                set_nodelay: false,
+                set_nodelay: true,
                 ..Default::default()
             },
         );
@@ -490,7 +521,7 @@ mod tests {
         let mut req = ReqSocket::new_with_options(
             Tcp::new(),
             ReqOptions {
-                set_nodelay: false,
+                set_nodelay: true,
                 ..Default::default()
             },
         );

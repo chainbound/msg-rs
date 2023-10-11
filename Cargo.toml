@@ -34,3 +34,14 @@ rustc-hash = "1"
 [profile.dev]
 opt-level = 1
 overflow-checks = false
+
+[profile.maxperf]
+inherits = "release"
+debug = false
+lto = true
+codegen-units = 1
+opt-level = 3
+
+[profile.debug-maxperf]
+inherits = "maxperf"
+debug = true

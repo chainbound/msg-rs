@@ -1,3 +1,7 @@
+use bytes::Bytes;
+use durable::{DurableSession, Layer, PendingIo};
+use futures::{SinkExt, StreamExt};
+use msg_wire::auth;
 use std::{
     net::SocketAddr,
     task::{Context, Poll},
@@ -6,15 +10,20 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpSocket, TcpStream},
 };
+use tokio_util::codec::Framed;
 
-mod durable;
+pub mod durable;
 
 #[async_trait::async_trait]
 pub trait ClientTransport {
     type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    async fn connect(&self, addr: &str) -> Result<Self::Io, Self::Error>;
+    async fn connect_with_auth(
+        &self,
+        addr: SocketAddr,
+        auth: Option<Bytes>,
+    ) -> Result<Self::Io, Self::Error>;
 }
 
 #[async_trait::async_trait]
@@ -34,9 +43,36 @@ pub trait ServerTransport: Unpin + Send + Sync + 'static {
     ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>>;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TcpOptions {
     pub set_nodelay: bool,
+}
+
+impl Default for TcpOptions {
+    fn default() -> Self {
+        Self { set_nodelay: true }
+    }
+}
+
+pub struct TcpConnectOptions {
+    pub set_nodelay: bool,
+    pub auth: Option<Bytes>,
+}
+
+impl Default for TcpConnectOptions {
+    fn default() -> Self {
+        Self {
+            set_nodelay: true,
+            auth: None,
+        }
+    }
+}
+
+impl TcpConnectOptions {
+    pub fn with_auth(mut self, auth: Bytes) -> Self {
+        self.auth = Some(auth);
+        self
+    }
 }
 
 #[derive(Debug, Default)]
@@ -58,15 +94,67 @@ impl Tcp {
     }
 }
 
+pub struct AuthLayer {
+    id: Bytes,
+}
+
+impl Layer for AuthLayer {
+    type Io = TcpStream;
+
+    fn process(&mut self, io: Self::Io) -> PendingIo<Self::Io> {
+        let id = self.id.clone();
+        Box::pin(async move {
+            let mut conn = Framed::new(io, auth::Codec::new_client());
+
+            tracing::debug!("Sending auth message: {:?}", id);
+            // Send the authentication message
+            conn.send(auth::Message::Auth(id)).await?;
+            conn.flush().await?;
+
+            tracing::debug!("Waiting for ACK from server...");
+
+            // Wait for the response
+            let ack = conn
+                .next()
+                .await
+                .ok_or(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "Connection closed",
+                ))?
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+            if matches!(ack, auth::Message::Ack) {
+                Ok(conn.into_inner())
+            } else {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Invalid ACK",
+                ))
+            }
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl ClientTransport for Tcp {
-    type Io = TcpStream;
+    type Io = DurableSession<TcpStream>;
     type Error = std::io::Error;
 
-    async fn connect(&self, addr: &str) -> Result<Self::Io, Self::Error> {
-        let stream = Self::Io::connect(addr).await?;
-        stream.set_nodelay(self.options.set_nodelay)?;
-        Ok(stream)
+    async fn connect_with_auth(
+        &self,
+        addr: SocketAddr,
+        auth: Option<Bytes>,
+    ) -> Result<Self::Io, Self::Error> {
+        let mut session = if let Some(ref id) = auth {
+            let layer = AuthLayer { id: id.clone() };
+
+            Self::Io::new(addr).with_layer(layer)
+        } else {
+            Self::Io::new(addr)
+        };
+
+        session.connect().await;
+        Ok(session)
     }
 }
 

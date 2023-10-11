@@ -12,6 +12,8 @@ mod stats;
 use driver::*;
 pub use socket::*;
 
+use self::stats::SocketStats;
+
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
@@ -35,6 +37,7 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone)]
 pub struct ReqOptions {
     pub client_id: Option<Bytes>,
     pub timeout: std::time::Duration,
@@ -62,4 +65,10 @@ impl Default for ReqOptions {
             set_nodelay: true,
         }
     }
+}
+
+/// The request socket state, shared between the backend task and the socket.
+#[derive(Debug, Default)]
+pub(crate) struct SocketState {
+    pub(crate) stats: SocketStats,
 }

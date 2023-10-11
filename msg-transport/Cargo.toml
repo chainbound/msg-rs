@@ -11,7 +11,15 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+msg-wire.workspace = true
+
 async-trait.workspace = true
+bytes.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tracing-subscriber = "0.3"

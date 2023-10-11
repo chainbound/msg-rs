@@ -1,18 +1,17 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use bytes::Bytes;
-use futures::SinkExt;
 use msg_transport::ClientTransport;
-use msg_wire::{auth, reqrep};
+use msg_wire::reqrep;
 use rustc_hash::FxHashMap;
 use tokio::sync::{mpsc, oneshot};
-use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::req::stats::SocketStats;
+use crate::{req::stats::SocketStats, SocketState};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 
+#[derive(Debug, Clone)]
 pub struct ReqSocket<T: ClientTransport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
@@ -20,8 +19,8 @@ pub struct ReqSocket<T: ClientTransport> {
     transport: T,
     /// Options for the socket. These are shared with the backend task.
     options: Arc<ReqOptions>,
-    /// Socket statistics. These are shared with the backend task.
-    stats: Arc<SocketStats>,
+    /// Socket state. This is shared with the backend task.
+    state: Arc<SocketState>,
 }
 
 impl<T: ClientTransport> ReqSocket<T> {
@@ -34,12 +33,12 @@ impl<T: ClientTransport> ReqSocket<T> {
             to_driver: None,
             transport,
             options: Arc::new(options),
-            stats: Arc::new(SocketStats::default()),
+            state: Arc::new(SocketState::default()),
         }
     }
 
     pub fn stats(&self) -> &SocketStats {
-        &self.stats
+        &self.state.stats
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
@@ -58,74 +57,21 @@ impl<T: ClientTransport> ReqSocket<T> {
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
-    /// Authenticates the client to the server.
-    async fn authenticate(&self, id: Bytes, stream: T::Io) -> Result<T::Io, ReqError> {
-        let mut conn = Framed::new(stream, auth::Codec::new_client());
-
-        tracing::debug!("Sending auth message: {:?}", id);
-        // Send the authentication message
-        let auth_msg = auth::Message::Auth(id);
-        conn.send(auth_msg).await?;
-        conn.flush().await?;
-
-        tracing::debug!("Waiting for ACK");
-        // Wait for the response
-        let ack = conn
-            .next()
-            .await
-            .ok_or(ReqError::SocketClosed)?
-            .map_err(|e| ReqError::Auth(e.to_string()))?;
-
-        if matches!(ack, auth::Message::Ack) {
-            Ok(conn.into_inner())
-        } else {
-            Err(ReqError::Auth("Invalid ACK".to_string()))
-        }
-    }
-
     /// Connects to the target with the default options.
-    pub async fn connect(&mut self, target: &str) -> Result<(), ReqError> {
+    pub async fn connect(&mut self, endpoint: &str) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        // TODO: parse target string to get transport protocol, for now just assume TCP
+        // TODO: return error
+        let endpoint = endpoint.parse().unwrap();
 
-        // TODO: exponential backoff, should be handled in the `Durable` versions of our transports
-        let mut stream = if self.options.retry_on_initial_failure {
-            let mut attempts = 0;
-            loop {
-                match self.transport.connect(target).await {
-                    Ok(stream) => break stream,
-                    Err(e) => {
-                        attempts += 1;
-                        tracing::debug!(
-                            "Failed to connect to target, retrying: {} (attempt {})",
-                            e,
-                            attempts
-                        );
+        tracing::debug!("Connected to {}", endpoint);
 
-                        if let Some(max_attempts) = self.options.retry_attempts {
-                            if attempts >= max_attempts {
-                                return Err(ReqError::Transport(Box::new(e)));
-                            }
-                        }
-
-                        tokio::time::sleep(self.options.backoff_duration).await;
-                    }
-                }
-            }
-        } else {
-            self.transport
-                .connect(target)
-                .await
-                .map_err(|e| ReqError::Transport(Box::new(e)))?
-        };
-
-        tracing::debug!("Connected to {}", target);
-
-        if let Some(ref id) = self.options.client_id {
-            stream = self.authenticate(id.clone(), stream).await?;
-        }
+        let stream = self
+            .transport
+            .connect_with_auth(endpoint, self.options.client_id.clone())
+            .await
+            .map_err(|e| ReqError::Transport(Box::new(e)))?;
 
         // Create the socket backend
         let driver = ReqDriver {
@@ -137,7 +83,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
             pending_requests: FxHashMap::default(),
-            stats: Arc::clone(&self.stats),
+            socket_state: Arc::clone(&self.state),
         };
 
         // Spawn the backend task

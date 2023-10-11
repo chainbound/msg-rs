@@ -13,7 +13,9 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use super::{stats::SocketStats, Command, ReqError, ReqOptions};
+use crate::SocketState;
+
+use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
 
 /// The request socket driver. Endless future that drives
@@ -22,8 +24,8 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     /// Options shared with the socket.
     #[allow(unused)]
     pub(crate) options: Arc<ReqOptions>,
-    /// Statistics shared with the socket.
-    pub(crate) stats: Arc<SocketStats>,
+    /// State shared with the socket.
+    pub(crate) socket_state: Arc<SocketState>,
     /// ID counter for outgoing requests.
     pub(crate) id_counter: u32,
     /// Commands from the socket.
@@ -55,8 +57,10 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             let rtt = pending.start.elapsed().as_micros() as usize;
             let size = msg.size();
             let _ = pending.sender.send(Ok(msg.into_payload()));
-            self.stats.update_rtt(rtt);
-            self.stats.increment_rx(size);
+
+            // Update stats
+            self.socket_state.stats.update_rtt(rtt);
+            self.socket_state.stats.increment_rx(size);
         }
     }
 }
@@ -78,7 +82,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                     continue;
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    tracing::error!("Failed to read message from socket: {:?}", e);
+                    if let reqrep::Error::Io(e) = e {
+                        if e.kind() == std::io::ErrorKind::Other {
+                            tracing::error!("Other error: {:?}", e);
+                            return Poll::Ready(());
+                        }
+                    }
                     continue;
                 }
                 Poll::Ready(None) => {
@@ -96,7 +105,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                     tracing::debug!("Sending msg {}", msg.id());
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.stats.increment_tx(size);
+                            this.socket_state.stats.increment_tx(size);
                             // We might be able to send more queued messages
                             continue;
                         }

@@ -283,9 +283,14 @@ name = "msg-transport"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "futures",
+ "msg-wire",
+ "rand",
  "tokio",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
