@@ -17,14 +17,11 @@ pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send>>;
 
 /// A layer can be applied to pre-process a newly established IO object. If you need
 /// multiple layers, use a single top-level layer that contains and calls the other layers.
-pub trait Layer: 'static {
-    /// The type of the IO object that is processed.
-    type Io: AsyncRead + AsyncWrite;
-
+pub trait Layer<Io: AsyncRead + AsyncWrite>: 'static {
     /// The processing method. This method is called with the IO object that
     /// should be processed, and returns a future that resolves to a processing error
     /// or the processed IO object.
-    fn process(&mut self, io: Self::Io) -> PendingIo<Self::Io>;
+    fn process(&mut self, io: Io) -> PendingIo<Io>;
 }
 
 struct ReconnectStatus<Io> {
@@ -126,7 +123,7 @@ where
 
     /// Adds a layer to the session. The layer will be applied to all established or re-established
     /// sessions.
-    pub fn with_layer(mut self, layer: impl Layer<Io = Io> + Send) -> Self {
+    pub fn with_layer(mut self, layer: impl Layer<Io> + Send) -> Self {
         self.layer_stack = Some(Box::new(layer));
         self
     }
@@ -218,7 +215,7 @@ pub struct DurableSession<Io: UnderlyingIo> {
     endpoint: SocketAddr,
     /// Optional layer stack. If this is `None`, newly connected (or reconnected) sessions will
     /// be passed through without processing.
-    layer_stack: Option<Box<dyn Layer<Io = Io> + Send>>,
+    layer_stack: Option<Box<dyn Layer<Io> + Send>>,
 }
 
 impl<Io> AsyncRead for DurableSession<Io>
@@ -638,10 +635,8 @@ mod tests {
     async fn session_with_layer() {
         struct TestLayer;
 
-        impl Layer for TestLayer {
-            type Io = TcpStream;
-
-            fn process(&mut self, io: Self::Io) -> PendingIo<Self::Io> {
+        impl Layer<TcpStream> for TestLayer {
+            fn process(&mut self, io: TcpStream) -> PendingIo<TcpStream> {
                 Box::pin(async move {
                     let mut io = io;
                     io.write_i32(10).await.unwrap();
