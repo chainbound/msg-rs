@@ -164,10 +164,8 @@ mod tests {
         rep.bind("127.0.0.1:0").await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::new_with_options(
-            Tcp::new(),
-            ReqOptions::default().with_id(Bytes::from("REQ")),
-        );
+        let mut req = ReqSocket::new(Tcp::new())
+            .with_options(ReqOptions::default().with_id(Bytes::from("REQ")));
 
         req.connect(&rep.local_addr().unwrap().to_string())
             .await
@@ -205,22 +203,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_batch_req_rep() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::new_with_options(
-            Tcp::new(),
-            RepOptions {
-                set_nodelay: true,
-                ..Default::default()
-            },
-        );
+        let mut rep = RepSocket::new(Tcp::new());
         rep.bind("127.0.0.1:0").await.unwrap();
 
-        let mut req = ReqSocket::new_with_options(
-            Tcp::new(),
-            ReqOptions {
-                set_nodelay: true,
-                ..Default::default()
-            },
-        );
+        let mut req = ReqSocket::new(Tcp::new());
         req.connect(&rep.local_addr().unwrap().to_string())
             .await
             .unwrap();

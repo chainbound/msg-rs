@@ -25,16 +25,17 @@ pub struct ReqSocket<T: ClientTransport> {
 
 impl<T: ClientTransport> ReqSocket<T> {
     pub fn new(transport: T) -> Self {
-        Self::new_with_options(transport, ReqOptions::default())
-    }
-
-    pub fn new_with_options(transport: T, options: ReqOptions) -> Self {
         Self {
             to_driver: None,
             transport,
-            options: Arc::new(options),
+            options: Arc::new(ReqOptions::default()),
             state: Arc::new(SocketState::default()),
         }
+    }
+
+    pub fn with_options(mut self, options: ReqOptions) -> Self {
+        self.options = Arc::new(options);
+        self
     }
 
     pub fn stats(&self) -> &SocketStats {
