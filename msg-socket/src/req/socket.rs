@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
-use crate::{req::stats::SocketStats, SocketState};
+use crate::{req::stats::SocketStats, req::SocketState};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 

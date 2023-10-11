@@ -13,7 +13,7 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::SocketState;
+use crate::req::SocketState;
 
 use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
