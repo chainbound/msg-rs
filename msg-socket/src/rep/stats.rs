@@ -49,4 +49,14 @@ impl SocketStats {
     pub fn bytes_rx(&self) -> usize {
         self.bytes_rx.load(Ordering::Relaxed)
     }
+
+    #[inline]
+    pub fn active_clients(&self) -> usize {
+        self.active_clients.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub fn failed_requests(&self) -> usize {
+        self.failed_requests.load(Ordering::Relaxed)
+    }
 }
