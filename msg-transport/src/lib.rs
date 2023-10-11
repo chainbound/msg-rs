@@ -98,10 +98,8 @@ pub struct AuthLayer {
     id: Bytes,
 }
 
-impl Layer for AuthLayer {
-    type Io = TcpStream;
-
-    fn process(&mut self, io: Self::Io) -> PendingIo<Self::Io> {
+impl Layer<TcpStream> for AuthLayer {
+    fn process(&mut self, io: TcpStream) -> PendingIo<TcpStream> {
         let id = self.id.clone();
         Box::pin(async move {
             let mut conn = Framed::new(io, auth::Codec::new_client());
