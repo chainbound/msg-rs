@@ -8,7 +8,6 @@ use msg_wire::reqrep;
 mod driver;
 mod socket;
 mod stats;
-// pub(crate) use backend::*;
 use driver::*;
 pub use socket::*;
 

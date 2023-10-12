@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::{Future, SinkExt, Stream, StreamExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, SinkExt, Stream, StreamExt};
 use std::{
     collections::VecDeque,
     net::SocketAddr,
@@ -15,12 +15,12 @@ use tokio::{
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 
-use crate::{rep::SocketState, Authenticator, RepError, Request};
+use crate::{rep::SocketState, AuthResult, Authenticator, RepError, Request};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, reqrep};
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
-    pending_requests: JoinSet<Option<(u32, Bytes)>>,
+    pending_requests: FuturesUnordered<PendingRequest>,
     conn: Framed<T, reqrep::Codec>,
     addr: SocketAddr,
     egress_queue: VecDeque<reqrep::Message>,
@@ -42,12 +42,6 @@ pub(crate) struct RepDriver<T: ServerTransport> {
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
     /// A joinset of authentication tasks.
     pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io>, RepError>>,
-}
-
-pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite> {
-    id: Bytes,
-    addr: SocketAddr,
-    stream: S,
 }
 
 impl<T: ServerTransport> Future for RepDriver<T> {
@@ -86,7 +80,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                         this.peer_states.insert(
                             auth.addr,
                             StreamNotifyClose::new(PeerState {
-                                pending_requests: JoinSet::new(),
+                                pending_requests: FuturesUnordered::new(),
                                 conn: Framed::new(auth.stream, reqrep::Codec::new()),
                                 addr: auth.addr,
                                 // TODO: pre-allocate according to some options
@@ -153,7 +147,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                         this.peer_states.insert(
                             addr,
                             StreamNotifyClose::new(PeerState {
-                                pending_requests: JoinSet::new(),
+                                pending_requests: FuturesUnordered::new(),
                                 conn: Framed::new(stream, reqrep::Codec::new()),
                                 addr,
                                 // TODO: pre-allocate according to some options
@@ -212,21 +206,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             }
 
             // Then we check for completed requests, and push them onto the egress queue.
-            match this.pending_requests.poll_join_next(cx) {
-                Poll::Ready(Some(Ok(Some((id, payload))))) => {
+            match this.pending_requests.poll_next_unpin(cx) {
+                Poll::Ready(Some(Some((id, payload)))) => {
                     let msg = reqrep::Message::new(id, payload);
                     this.egress_queue.push_back(msg);
 
                     continue;
                 }
-                Poll::Ready(Some(Ok(None))) => {
+                Poll::Ready(Some(None)) => {
                     tracing::error!("Failed to respond to request");
-                    this.state.stats.increment_failed_requests();
-
-                    continue;
-                }
-                Poll::Ready(Some(Err(e))) => {
-                    tracing::error!("Error receiving response: {:?}", e);
                     this.state.stats.increment_failed_requests();
 
                     continue;
@@ -243,9 +231,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
                     let (tx, rx) = oneshot::channel();
 
-                    // Spawn a task to listen for the response. On success, return message ID and response.
-                    this.pending_requests
-                        .spawn(async move { rx.await.ok().map(|res| (msg_id, res)) });
+                    // Add the pending request to the list
+                    this.pending_requests.push(PendingRequest {
+                        msg_id,
+                        response: rx,
+                    });
 
                     let request = Request {
                         source: this.addr,
@@ -263,6 +253,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             }
 
             return Poll::Pending;
+        }
+    }
+}
+
+struct PendingRequest {
+    msg_id: u32,
+    response: oneshot::Receiver<Bytes>,
+}
+
+impl Future for PendingRequest {
+    type Output = Option<(u32, Bytes)>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.response.poll_unpin(cx) {
+            Poll::Ready(Ok(response)) => Poll::Ready(Some((self.msg_id, response))),
+            Poll::Ready(Err(_)) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }
