@@ -13,13 +13,6 @@ pub enum Error {
     WireId(u8),
 }
 
-pub enum Frame {
-    Sub { topic_size: u16, topic: Bytes },
-    Unsub { topic_size: u16, topic: Bytes },
-    Message(Message),
-    Ack(u32),
-}
-
 #[derive(Debug, Clone)]
 pub struct Message {
     header: Header,
