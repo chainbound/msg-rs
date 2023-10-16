@@ -90,6 +90,22 @@ impl SubMessage {
             payload,
         }
     }
+
+    pub fn source(&self) -> SocketAddr {
+        self.source
+    }
+
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
+    }
+
+    pub fn into_payload(self) -> Bytes {
+        self.payload
+    }
 }
 
 pub struct SubSocket<T: ClientTransport> {
