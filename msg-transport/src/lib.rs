@@ -19,6 +19,7 @@ pub trait ClientTransport {
     type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
+    // TODO: we can improve upon this interface
     async fn connect_with_auth(
         &self,
         addr: SocketAddr,
@@ -151,7 +152,7 @@ impl ClientTransport for Tcp {
             Self::Io::new(addr)
         };
 
-        session.connect().await;
+        session.blocking_connect().await?;
         Ok(session)
     }
 }

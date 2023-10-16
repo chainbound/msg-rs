@@ -1,9 +1,14 @@
+use std::net::SocketAddr;
+use tokio::io::{AsyncRead, AsyncWrite};
+
 mod rep;
 mod req;
+mod sub;
 
 use bytes::Bytes;
 pub use rep::*;
 pub use req::*;
+pub use sub::*;
 
 pub struct RequestId(u32);
 
@@ -23,4 +28,10 @@ impl RequestId {
 
 pub trait Authenticator: Send + Sync + Unpin + 'static {
     fn authenticate(&self, id: &Bytes) -> bool;
+}
+
+pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite> {
+    id: Bytes,
+    addr: SocketAddr,
+    stream: S,
 }

@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -40,10 +40,22 @@ impl Message {
         }
     }
 
-    /// Creates a new subscription toggle message for the given topic.
+    /// Creates a new subscribe message for the given topic. The topic is prefixed with
+    /// `MSG.SUB.`.
     #[inline]
-    pub fn new_sub_toggle(topic: Bytes) -> Self {
-        Self::new(0, topic, Bytes::new())
+    pub fn new_sub(topic: Bytes) -> Self {
+        let mut prefix = BytesMut::from("MSG.SUB.");
+        prefix.put(topic);
+        Self::new(0, prefix.freeze(), Bytes::new())
+    }
+
+    /// Creates a new unsubscribe message for the given topic. The topic is prefixed with
+    /// `MSG.UNSUB.`.
+    #[inline]
+    pub fn new_unsub(topic: Bytes) -> Self {
+        let mut prefix = BytesMut::from("MSG.UNSUB.");
+        prefix.put(topic);
+        Self::new(0, prefix.freeze(), Bytes::new())
     }
 
     #[inline]
@@ -69,6 +81,16 @@ impl Message {
     #[inline]
     pub fn into_payload(self) -> Bytes {
         self.payload
+    }
+
+    #[inline]
+    pub fn into_parts(self) -> (Bytes, Bytes) {
+        (self.header.topic, self.payload)
+    }
+
+    #[inline]
+    pub fn topic(&self) -> &Bytes {
+        &self.header.topic
     }
 }
 
@@ -151,8 +173,7 @@ impl Decoder for Codec {
                         return Ok(None);
                     }
 
-                    // Only advance when we know we have enough bytes
-                    cursor += topic_size as usize + 8;
+                    // Advance to the start of the topic bytes
                     src.advance(cursor);
 
                     let topic = src.split_to(topic_size as usize).freeze();
