@@ -44,18 +44,15 @@ pub trait ServerTransport: Unpin + Send + Sync + 'static {
     ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TcpOptions {
-    pub set_nodelay: bool,
     pub blocking_connect: bool,
 }
 
-impl Default for TcpOptions {
-    fn default() -> Self {
-        Self {
-            set_nodelay: true,
-            blocking_connect: false,
-        }
+impl TcpOptions {
+    pub fn with_blocking_connect(mut self, blocking_connect: bool) -> Self {
+        self.blocking_connect = blocking_connect;
+        self
     }
 }
 
@@ -172,7 +169,7 @@ impl ServerTransport for Tcp {
 
     async fn bind(&mut self, addr: &str) -> Result<(), Self::Error> {
         let socket = TcpSocket::new_v4()?;
-        socket.set_nodelay(self.options.set_nodelay)?;
+        socket.set_nodelay(true)?;
         socket.bind(addr.parse().unwrap())?;
 
         let listener = socket.listen(128)?;
