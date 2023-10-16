@@ -47,11 +47,15 @@ pub trait ServerTransport: Unpin + Send + Sync + 'static {
 #[derive(Debug)]
 pub struct TcpOptions {
     pub set_nodelay: bool,
+    pub blocking_connect: bool,
 }
 
 impl Default for TcpOptions {
     fn default() -> Self {
-        Self { set_nodelay: true }
+        Self {
+            set_nodelay: true,
+            blocking_connect: false,
+        }
     }
 }
 
@@ -152,7 +156,11 @@ impl ClientTransport for Tcp {
             Self::Io::new(addr)
         };
 
-        session.blocking_connect().await?;
+        if self.options.blocking_connect {
+            session.blocking_connect().await?;
+        } else {
+            session.connect().await;
+        }
         Ok(session)
     }
 }
