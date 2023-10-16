@@ -50,8 +50,8 @@ pub struct TcpOptions {
 }
 
 impl TcpOptions {
-    pub fn with_blocking_connect(mut self, blocking_connect: bool) -> Self {
-        self.blocking_connect = blocking_connect;
+    pub fn with_blocking_connect(mut self) -> Self {
+        self.blocking_connect = true;
         self
     }
 }
