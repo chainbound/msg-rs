@@ -143,7 +143,8 @@ where
     pub async fn blocking_connect(&mut self) -> Result<(), io::Error> {
         let io = Io::establish(self.endpoint).await?;
         if let Some(layer) = &mut self.layer_stack {
-            self.state = SessionState::Processing(layer.process(io));
+            let io = layer.process(io).await?;
+            self.state = SessionState::Connected(io);
         } else {
             self.state = SessionState::Connected(io);
         }
