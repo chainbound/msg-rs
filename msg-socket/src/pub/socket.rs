@@ -12,7 +12,7 @@ use msg_transport::ServerTransport;
 pub struct PubSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.
     options: Arc<PubOptions>,
-    /// The reply socket state, shared with the driver.
+    // The reply socket state, shared with the driver.
     // state: Arc<SocketState>,
     // to_driver: Option<mpsc::Sender<Command>>,
     /// The broadcast channel to all active [`SubscriberSession`](super::driver::SubscriberSession)s.
@@ -26,7 +26,7 @@ pub struct PubSocket<T: ServerTransport> {
 }
 
 impl<T: ServerTransport> PubSocket<T> {
-    /// Creates a new reply socket with the default [`RepOptions`].
+    /// Creates a new reply socket with the default [`PubOptions`].
     pub fn new(transport: T) -> Self {
         Self {
             transport: Some(transport),
