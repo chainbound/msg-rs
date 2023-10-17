@@ -12,7 +12,7 @@ use stats::SocketStats;
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
-pub enum RepError {
+pub enum PubError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
@@ -65,10 +65,10 @@ impl Request {
     }
 
     /// Responds to the request.
-    pub fn respond(self, response: Bytes) -> Result<(), RepError> {
+    pub fn respond(self, response: Bytes) -> Result<(), PubError> {
         self.response
             .send(response)
-            .map_err(|_| RepError::SocketClosed)
+            .map_err(|_| PubError::SocketClosed)
     }
 }
 

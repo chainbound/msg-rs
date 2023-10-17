@@ -1,11 +1,14 @@
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+#[path = "pub/mod.rs"]
+mod pubs;
 mod rep;
 mod req;
 mod sub;
 
 use bytes::Bytes;
+pub use pubs::{PubError, PubOptions, PubSocket};
 pub use rep::*;
 pub use req::*;
 pub use sub::*;

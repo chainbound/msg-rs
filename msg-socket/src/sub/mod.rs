@@ -72,7 +72,7 @@ impl Default for SubOptions {
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
 #[derive(Debug, Clone)]
-pub struct SubMessage {
+pub struct PubMessage {
     /// The source address of the publisher. We need this because
     /// a subscriber can connect to multiple publishers.
     source: SocketAddr,
@@ -82,7 +82,7 @@ pub struct SubMessage {
     payload: Bytes,
 }
 
-impl SubMessage {
+impl PubMessage {
     pub fn new(source: SocketAddr, topic: String, payload: Bytes) -> Self {
         Self {
             source,
@@ -112,7 +112,7 @@ pub struct SubSocket<T: ClientTransport> {
     /// Command channel to the socket driver.
     to_driver: mpsc::Sender<Command>,
     /// Receiver channel from the socket driver.
-    from_driver: mpsc::Receiver<SubMessage>,
+    from_driver: mpsc::Receiver<PubMessage>,
     /// Options for the socket. These are shared with the backend task.
     options: Arc<SubOptions>,
     /// The pending driver.
@@ -218,7 +218,7 @@ impl<T: ClientTransport> Drop for SubSocket<T> {
 }
 
 impl<T: ClientTransport + Unpin> Stream for SubSocket<T> {
-    type Item = SubMessage;
+    type Item = PubMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.from_driver.poll_recv(cx)

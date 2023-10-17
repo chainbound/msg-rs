@@ -15,7 +15,7 @@ use tokio::{
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 
-use crate::{rep::SocketState, AuthResult, Authenticator, RepError, Request};
+use crate::{rep::SocketState, AuthResult, Authenticator, PubError, Request};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, reqrep};
 
@@ -41,11 +41,11 @@ pub(crate) struct RepDriver<T: ServerTransport> {
     /// Optional connection authenticator.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io>, RepError>>,
+    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
 }
 
 impl<T: ServerTransport> Future for RepDriver<T> {
-    type Output = Result<(), RepError>;
+    type Output = Result<(), PubError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -112,8 +112,8 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                             let auth = conn
                                 .next()
                                 .await
-                                .ok_or(RepError::SocketClosed)?
-                                .map_err(|e| RepError::Auth(e.to_string()))?;
+                                .ok_or(PubError::SocketClosed)?
+                                .map_err(|e| PubError::Auth(e.to_string()))?;
 
                             tracing::debug!("Auth received: {:?}", auth);
 
@@ -121,7 +121,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 conn.send(auth::Message::Reject).await?;
                                 conn.flush().await?;
                                 conn.close().await?;
-                                return Err(RepError::Auth("Invalid auth message".to_string()));
+                                return Err(PubError::Auth("Invalid auth message".to_string()));
                             };
 
                             // If authentication fails, send a reject message and close the connection
@@ -129,7 +129,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 conn.send(auth::Message::Reject).await?;
                                 conn.flush().await?;
                                 conn.close().await?;
-                                return Err(RepError::Auth("Authentication failed".to_string()));
+                                return Err(PubError::Auth("Authentication failed".to_string()));
                             }
 
                             // Send ack
@@ -176,7 +176,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
-    type Item = Result<Request, RepError>;
+    type Item = Result<Request, PubError>;
 
     /// Advances the state of the peer.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

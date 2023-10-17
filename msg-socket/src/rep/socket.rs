@@ -11,7 +11,7 @@ use tokio_stream::StreamMap;
 use crate::{
     rep::{driver::RepDriver, DEFAULT_BUFFER_SIZE},
     rep::{SocketState, SocketStats},
-    Authenticator, RepError, RepOptions, Request,
+    Authenticator, PubError, RepOptions, Request,
 };
 use msg_transport::ServerTransport;
 
@@ -57,7 +57,7 @@ impl<T: ServerTransport> RepSocket<T> {
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind(&mut self, addr: &str) -> Result<(), RepError> {
+    pub async fn bind(&mut self, addr: &str) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // Take the transport here, so we can move it into the backend task
@@ -66,11 +66,11 @@ impl<T: ServerTransport> RepSocket<T> {
         transport
             .bind(addr)
             .await
-            .map_err(|e| RepError::Transport(Box::new(e)))?;
+            .map_err(|e| PubError::Transport(Box::new(e)))?;
 
         let local_addr = transport
             .local_addr()
-            .map_err(|e| RepError::Transport(Box::new(e)))?;
+            .map_err(|e| PubError::Transport(Box::new(e)))?;
 
         tracing::debug!("Listening on {}", local_addr);
 

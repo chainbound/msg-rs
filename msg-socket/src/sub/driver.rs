@@ -13,7 +13,7 @@ use tokio_util::codec::Framed;
 use tracing::{debug, error};
 
 use super::stream::TopicMessage;
-use super::{stream::PublisherStream, Command, SubMessage, SubOptions};
+use super::{stream::PublisherStream, Command, PubMessage, SubOptions};
 use msg_transport::ClientTransport;
 use msg_wire::pubsub;
 
@@ -27,7 +27,7 @@ pub(crate) struct SubDriver<T: ClientTransport> {
     /// Commands from the socket.
     pub(super) from_socket: mpsc::Receiver<Command>,
     /// Messages to the socket.
-    pub(super) to_socket: mpsc::Sender<SubMessage>,
+    pub(super) to_socket: mpsc::Sender<PubMessage>,
     /// A joinset of authentication tasks.
     pub(super) connection_tasks: JoinSet<ConnectionResult<T::Io, T::Error>>,
     /// The set of subscribed topics.
@@ -50,7 +50,7 @@ where
             if let Poll::Ready(Some((addr, result))) = this.publishers.poll_next_unpin(cx) {
                 match result {
                     Ok(msg) => {
-                        this.on_message(SubMessage::new(addr, msg.topic, msg.payload));
+                        this.on_message(PubMessage::new(addr, msg.topic, msg.payload));
                     }
                     Err(e) => {
                         error!(source = %addr, "Error receiving message from publisher: {:?}", e);
@@ -126,7 +126,7 @@ where
         }
     }
 
-    fn on_message(&self, msg: SubMessage) {
+    fn on_message(&self, msg: PubMessage) {
         debug!(source = %msg.source, "New message: {:?}", msg);
         // TODO: queuing
         if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
