@@ -7,8 +7,7 @@ use rand::Rng;
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Tcp, TcpOptions};
 
-const N_REQS: usize = 10_000;
-const REPEAT_TIMES: usize = 10;
+const N_REQS: usize = 100_000;
 const MSG_SIZE: usize = 512;
 
 /// Benchmark the throughput of a single request/response socket pair over localhost
@@ -23,8 +22,10 @@ fn main() {
     divan::main();
 }
 
-#[divan::bench_group(sample_count = REPEAT_TIMES as u32)]
+#[divan::bench_group(sample_count = 16)]
 mod pubsub {
+    use divan::counter::{BytesCount, ItemsCount};
+
     use super::*;
 
     #[divan::bench]
@@ -66,18 +67,6 @@ mod pubsub {
             },
         );
 
-        // Prepare the messages to send
-        let mut rng = rand::thread_rng();
-        let msg_vec: Vec<Bytes> = (0..N_REQS)
-            .map(|_| {
-                let mut vec = vec![0u8; MSG_SIZE];
-                rng.fill(&mut vec[..]);
-                Bytes::from(vec)
-            })
-            .collect();
-
-        // let mut results = Vec::with_capacity(REPEAT_TIMES);
-
         // Set up the socket connections
         rt.block_on(async {
             pub_socket.bind("127.0.0.1:0").await.unwrap();
@@ -89,49 +78,63 @@ mod pubsub {
             sub.subscribe("HELLO".to_string()).await.unwrap();
         });
 
-        std::thread::sleep(Duration::from_millis(50));
-        tracing::info!("Starting benchmark");
+        // Prepare the messages to send
 
-        bencher.bench_local(|| {
-            let msg = msg_vec.clone();
-            rt.block_on(async {
-                let send = async {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-
-                    let start = Instant::now();
-                    for msg in msg {
-                        pub_socket.publish("HELLO".to_string(), msg).await.unwrap();
-                    }
-
-                    start
-                };
-
-                let recv = async {
-                    let mut rx = 0;
-                    while let Some(_msg) = sub.next().await {
-                        rx += 1;
-                        if rx + 1 == N_REQS {
-                            break;
+        bencher
+            .counter(ItemsCount::new(N_REQS as u64))
+            .counter(BytesCount::new((N_REQS * MSG_SIZE) as u64))
+            .with_inputs(|| -> Vec<Bytes> {
+                let mut rng = rand::thread_rng();
+                (0..N_REQS)
+                    .map(|_| {
+                        let mut vec = vec![0u8; MSG_SIZE];
+                        rng.fill(&mut vec[..]);
+                        Bytes::from(vec)
+                    })
+                    .collect()
+            })
+            .bench_local_values(|msg_vec: Vec<Bytes>| {
+                rt.block_on(async {
+                    let send = async {
+                        let start = Instant::now();
+                        tokio::time::sleep(Duration::from_micros(1)).await;
+                        for msg in msg_vec {
+                            pub_socket.publish("HELLO".to_string(), msg).await.unwrap();
                         }
 
-                        // tracing::info!("Received: {:?}", msg)
-                    }
+                        start
+                    };
 
-                    Instant::now()
-                };
+                    let recv = async {
+                        let mut rx = 0;
+                        while let Some(_msg) = sub.next().await {
+                            rx += 1;
+                            if rx + 1 == N_REQS {
+                                break;
+                            }
 
-                let (send_start, recv_end) = tokio::join!(send, recv);
+                            // tracing::info!("Received: {:?}", msg)
+                        }
 
-                let elapsed = recv_end.duration_since(send_start);
-                let avg_throughput = N_REQS as f64 / elapsed.as_secs_f64();
-                let mbps = avg_throughput * MSG_SIZE as f64 / 1_000_000.0;
-                tracing::info!(
-                    "Throughput: {:.0} msgs/s {:.0} MB/s, Avg time: {:.2} ms",
-                    avg_throughput,
-                    mbps,
-                    elapsed.as_millis()
-                );
-            })
-        });
+                        Instant::now()
+                    };
+
+                    let (send_start, recv_end) = tokio::join!(send, recv);
+
+                    let elapsed = recv_end.duration_since(send_start);
+                    let avg_throughput = N_REQS as f64 / elapsed.as_secs_f64();
+                    let mbps = avg_throughput * MSG_SIZE as f64 / 1_000_000.0;
+                    tracing::debug!(
+                        "Throughput: {:.0} msgs/s {:.0} MB/s, Avg time: {:.2} ms",
+                        avg_throughput,
+                        mbps,
+                        elapsed.as_millis()
+                    );
+                })
+            });
+
+        // let mut results = Vec::with_capacity(REPEAT_TIMES);
+
+        std::thread::sleep(Duration::from_millis(50));
     }
 }

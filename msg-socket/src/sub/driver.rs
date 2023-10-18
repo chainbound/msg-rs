@@ -123,7 +123,8 @@ where
                 });
             }
             Command::Shutdown => {
-                tracing::warn!("shutting down");
+                // TODO: graceful shutdown?
+                tracing::debug!("shutting down");
             }
         }
     }
