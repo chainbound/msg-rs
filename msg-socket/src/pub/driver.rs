@@ -1,24 +1,19 @@
 use futures::{Future, SinkExt, StreamExt};
 use std::{
-    borrow::Cow,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::broadcast,
-    task::JoinSet,
-};
-use tokio_stream::wrappers::BroadcastStream;
+use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error};
 
+use super::{
+    session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
+};
 use crate::{AuthResult, Authenticator};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, pubsub};
-
-use super::{trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState};
 
 pub(crate) struct PubDriver<T: ServerTransport> {
     /// Session ID counter.
@@ -43,192 +38,6 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
 
-pub(super) struct SubscriberSession<Io> {
-    /// The sequence number of this session.
-    seq: u32,
-    /// The ID of this session.
-    session_id: u32,
-    /// Messages from the socket.
-    from_socket_bcast: BroadcastStream<PubMessage>,
-    /// Messages queued to be sent on the connection
-    pending_egress: Option<pubsub::Message>,
-    /// Session request sender.
-    // to_driver: mpsc::Sender<SessionRequest>,
-    state: Arc<SocketState>,
-    /// The framed connection.
-    conn: Framed<Io, pubsub::Codec>,
-    /// The topic filter (a prefix trie that works with strings)
-    topic_filter: PrefixTrie,
-    flush_interval: Option<tokio::time::Interval>,
-}
-
-impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
-    #[inline]
-    fn on_outgoing(&mut self, msg: PubMessage) {
-        // Check if the message matches the topic filter
-        if self.topic_filter.contains(msg.topic()) {
-            trace!(
-                topic = msg.topic(),
-                "Message matches topic filter, adding to egress queue"
-            );
-
-            // Generate the wire message and increment the sequence number
-            self.pending_egress = Some(msg.into_wire(self.seq));
-            self.seq = self.seq.wrapping_add(1);
-        }
-    }
-
-    #[inline]
-    fn on_incoming(&mut self, msg: pubsub::Message) {
-        // The only incoming messages we should have are control messages.
-        match msg_to_control(&msg) {
-            ControlMsg::Subscribe(topic) => {
-                debug!("Subscribing to topic {:?}", topic);
-                self.topic_filter.insert(&topic)
-            }
-            ControlMsg::Unsubscribe(topic) => {
-                debug!("Unsubscribing from topic {:?}", topic);
-                self.topic_filter.remove(&topic)
-            }
-            ControlMsg::Close => todo!(),
-        }
-    }
-}
-
-impl<Io> Drop for SubscriberSession<Io> {
-    fn drop(&mut self) {
-        self.state.stats.decrement_active_clients();
-    }
-}
-
-enum ControlMsg<'a> {
-    /// Subscribe to a topic.
-    Subscribe(Cow<'a, str>),
-    /// Unsubscribe from a topic.
-    Unsubscribe(Cow<'a, str>),
-    /// Close the session.
-    Close,
-}
-
-/// Converts the message to a control message. If the message is not a control message,
-/// the session is closed.
-#[inline]
-fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
-    if msg.payload_size() == 0 {
-        if msg.topic().starts_with(b"MSG.SUB.") {
-            let topic = msg.topic().strip_prefix(b"MSG.SUB.").unwrap();
-            ControlMsg::Subscribe(String::from_utf8_lossy(topic))
-        } else if msg.topic().starts_with(b"MSG.UNSUB.") {
-            let topic = msg.topic().strip_prefix(b"MSG.UNSUB.").unwrap();
-            ControlMsg::Unsubscribe(String::from_utf8_lossy(topic))
-        } else {
-            ControlMsg::Close
-        }
-    } else {
-        tracing::warn!(
-            "Unkown control message topic, closing session: {:?}",
-            msg.topic()
-        );
-        ControlMsg::Close
-    }
-}
-
-impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        loop {
-            // TODO: this might add a lot of overhead from syscalls
-            // let _ = this.conn.poll_flush_unpin(cx);
-            // if this.conn.
-            // tracing::info!("{}", this.conn.backpressure_boundary());
-            if let Some(interval) = this.flush_interval.as_mut() {
-                if interval.poll_tick(cx).is_ready() {
-                    let _ = this.conn.poll_flush_unpin(cx);
-                }
-            } else {
-                let _ = this.conn.poll_flush_unpin(cx);
-            }
-
-            // Then, try to drain the egress queue.
-            if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.pending_egress.take() {
-                    tracing::debug!("Sending message: {:?}", msg);
-                    let msg_len = msg.size();
-
-                    match this.conn.start_send_unpin(msg) {
-                        Ok(_) => {
-                            this.state.stats.increment_tx(msg_len);
-                            // We might be able to send more queued messages
-                            continue;
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to send message to socket: {:?}", e);
-                            let _ = this.conn.poll_close_unpin(cx);
-                            // End this stream as we can't send any more messages
-                            return Poll::Ready(());
-                        }
-                    }
-                }
-            } else {
-                return Poll::Pending;
-            }
-
-            // Poll outgoing messages
-            if let Poll::Ready(item) = this.from_socket_bcast.poll_next_unpin(cx) {
-                match item {
-                    Some(Ok(msg)) => {
-                        this.on_outgoing(msg);
-                        continue;
-                    }
-                    Some(Err(e)) => {
-                        warn!(
-                            session_id = this.session_id,
-                            "Receiver lagging behind: {:?}", e
-                        );
-                        continue;
-                    }
-                    None => {
-                        debug!("Socket closed, shutting down session {}", this.session_id);
-                        let _ = this.conn.poll_close_unpin(cx);
-                        return Poll::Ready(());
-                    }
-                }
-            }
-
-            // Handle incoming messages from the socket
-            if let Poll::Ready(item) = this.conn.poll_next_unpin(cx) {
-                match item {
-                    Some(Ok(msg)) => {
-                        debug!("Incoming message: {:?}", msg);
-                        this.on_incoming(msg);
-                        continue;
-                    }
-                    Some(Err(e)) => {
-                        error!(
-                            session_id = this.session_id,
-                            "Error reading from socket: {:?}", e
-                        );
-                        let _ = this.conn.poll_close_unpin(cx);
-                        return Poll::Ready(());
-                    }
-                    None => {
-                        warn!(
-                            "Connection closed, shutting down session {}",
-                            this.session_id
-                        );
-                        return Poll::Ready(());
-                    }
-                }
-            }
-
-            return Poll::Pending;
-        }
-    }
-}
-
 impl<T: ServerTransport> Future for PubDriver<T> {
     type Output = Result<(), PubError>;
 
@@ -240,7 +49,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        tracing::debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
+                        debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
                         // this.state.stats.increment_active_clients();
 
                         // Default backpressury boundary of 8192 bytes, should we add config option?
@@ -263,7 +72,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                         this.id_counter = this.id_counter.wrapping_add(1);
                     }
                     Err(e) => {
-                        tracing::error!("Error authenticating client: {:?}", e);
+                        error!("Error authenticating client: {:?}", e);
                     }
                 }
 
@@ -276,11 +85,11 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                     // If authentication is enabled, start the authentication process
                     if let Some(ref auth) = this.auth {
                         let authenticator = Arc::clone(auth);
-                        tracing::debug!("New connection from {}, authenticating", addr);
+                        debug!("New connection from {}, authenticating", addr);
                         this.auth_tasks.spawn(async move {
                             let mut conn = Framed::new(stream, auth::Codec::new_server());
 
-                            tracing::debug!("Waiting for auth");
+                            debug!("Waiting for auth");
                             // Wait for the response
                             let auth = conn
                                 .next()
@@ -288,7 +97,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                                 .ok_or(PubError::SocketClosed)?
                                 .map_err(|e| PubError::Auth(e.to_string()))?;
 
-                            tracing::debug!("Auth received: {:?}", auth);
+                            debug!("Auth received: {:?}", auth);
 
                             let auth::Message::Auth(id) = auth else {
                                 conn.send(auth::Message::Reject).await?;
@@ -333,14 +142,14 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                         this.state.stats.increment_active_clients();
                         this.id_counter = this.id_counter.wrapping_add(1);
 
-                        tracing::debug!("New connection from {}", addr);
+                        debug!("New connection from {}", addr);
                     }
 
                     continue;
                 }
                 Poll::Ready(Err(e)) => {
                     // Errors here are usually about `WouldBlock`
-                    tracing::error!("Error accepting connection: {:?}", e);
+                    error!("Error accepting connection: {:?}", e);
 
                     continue;
                 }

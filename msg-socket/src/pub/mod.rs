@@ -3,6 +3,7 @@ use msg_wire::pubsub;
 use thiserror::Error;
 
 mod driver;
+mod session;
 mod socket;
 mod stats;
 mod trie;
@@ -48,24 +49,6 @@ impl Default for PubOptions {
     }
 }
 
-/// TODO: Add more options.
-// pub struct TopicOptions {
-//     max_subscribers: Option<usize>,
-//     /// If true, the publisher will track the last sequence number for each subscriber.
-//     track_subscribers: bool,
-//     queue_size: usize,
-// }
-
-// impl Default for TopicOptions {
-//     fn default() -> Self {
-//         Self {
-//             max_subscribers: None,
-//             track_subscribers: false,
-//             queue_size: 1024,
-//         }
-//     }
-// }
-
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
 #[derive(Debug, Clone)]
@@ -108,20 +91,6 @@ impl PubMessage {
 pub(crate) struct SocketState {
     pub(crate) stats: SocketStats,
 }
-
-// pub(crate) enum Command {
-//     Publish {
-//         topic: String,
-//         message: Bytes,
-//     },
-//     RegisterTopic {
-//         /// The topic to register.
-//         topic: String,
-//         /// The options for the topic.
-//         options: TopicOptions,
-//     },
-//     Shutdown,
-// }
 
 #[cfg(test)]
 mod tests {
