@@ -122,7 +122,9 @@ where
                     Ok((endpoint, io))
                 });
             }
-            Command::Shutdown => todo!(),
+            Command::Shutdown => {
+                tracing::warn!("shutting down");
+            }
         }
     }
 

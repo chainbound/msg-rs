@@ -9,8 +9,6 @@ mod trie;
 pub use socket::*;
 // use stats::SocketStats;
 
-const DEFAULT_BUFFER_SIZE: usize = 1024;
-
 #[derive(Debug, Error)]
 pub enum PubError {
     #[error("IO error: {0:?}")]
@@ -31,9 +29,23 @@ pub enum PubError {
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PubOptions {
     pub max_connections: Option<usize>,
+    pub session_buffer_size: usize,
+    /// The interval at which each session should be flushed. If this is `None`,
+    /// the session will be flushed on every publish, which can add a lot of overhead.
+    pub flush_interval: Option<std::time::Duration>,
+}
+
+impl Default for PubOptions {
+    fn default() -> Self {
+        Self {
+            max_connections: None,
+            session_buffer_size: 1024,
+            flush_interval: Some(std::time::Duration::from_micros(100)),
+        }
+    }
 }
 
 /// TODO: Add more options.

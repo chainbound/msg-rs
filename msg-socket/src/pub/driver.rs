@@ -1,7 +1,6 @@
 use futures::{Future, SinkExt, StreamExt};
 use std::{
     borrow::Cow,
-    collections::VecDeque,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -19,13 +18,15 @@ use crate::{AuthResult, Authenticator};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, pubsub};
 
-use super::{trie::PrefixTrie, PubError, PubMessage};
+use super::{trie::PrefixTrie, PubError, PubMessage, PubOptions};
 
 pub(crate) struct PubDriver<T: ServerTransport> {
     /// Session ID counter.
     pub(super) id_counter: u32,
     /// The server transport used to accept incoming connections.
     pub(super) transport: T,
+    /// The publisher options (shared with the socket)
+    pub(super) options: Arc<PubOptions>,
     /// The reply socket state, shared with the socket front-end.
     // pub(crate) state: Arc<SocketState>,
     /// Receiver from the socket front-end.
@@ -50,13 +51,14 @@ pub(super) struct SubscriberSession<Io> {
     /// Messages from the socket.
     from_socket_bcast: BroadcastStream<PubMessage>,
     /// Messages queued to be sent on the connection
-    egress_queue: VecDeque<pubsub::Message>,
+    pending_egress: Option<pubsub::Message>,
     /// Session request sender.
     // to_driver: mpsc::Sender<SessionRequest>,
     /// The framed connection.
     conn: Framed<Io, pubsub::Codec>,
     /// The topic filter (a prefix trie that works with strings)
     topic_filter: PrefixTrie,
+    flush_interval: Option<tokio::time::Interval>,
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
@@ -70,7 +72,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
             );
 
             // Generate the wire message and increment the sequence number
-            self.egress_queue.push_back(msg.into_wire(self.seq));
+            self.pending_egress = Some(msg.into_wire(self.seq));
             self.seq = self.seq.wrapping_add(1);
         }
     }
@@ -132,11 +134,21 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
         loop {
             // TODO: this might add a lot of overhead from syscalls
-            let _ = this.conn.poll_flush_unpin(cx);
+            // let _ = this.conn.poll_flush_unpin(cx);
+            // if this.conn.
+            // tracing::info!("{}", this.conn.backpressure_boundary());
+            if let Some(interval) = this.flush_interval.as_mut() {
+                if interval.poll_tick(cx).is_ready() {
+                    let _ = this.conn.poll_flush_unpin(cx);
+                }
+            } else {
+                let _ = this.conn.poll_flush_unpin(cx);
+            }
 
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.egress_queue.pop_front() {
+                if let Some(msg) = this.pending_egress.take() {
+                    tracing::debug!("Sending message: {:?}", msg);
                     let _msg_len = msg.size();
 
                     match this.conn.start_send_unpin(msg) {
@@ -147,11 +159,14 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                         }
                         Err(e) => {
                             tracing::error!("Failed to send message to socket: {:?}", e);
+                            let _ = this.conn.poll_close_unpin(cx);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(());
                         }
                     }
                 }
+            } else {
+                return Poll::Pending;
             }
 
             // Poll outgoing messages
@@ -170,6 +185,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                     }
                     None => {
                         debug!("Socket closed, shutting down session {}", this.session_id);
+                        let _ = this.conn.poll_close_unpin(cx);
                         return Poll::Ready(());
                     }
                 }
@@ -188,6 +204,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                             session_id = this.session_id,
                             "Error reading from socket: {:?}", e
                         );
+                        let _ = this.conn.poll_close_unpin(cx);
                         return Poll::Ready(());
                     }
                     None => {
@@ -212,18 +229,6 @@ impl<T: ServerTransport> Future for PubDriver<T> {
         let this = self.get_mut();
 
         loop {
-            // match this.from_socket.poll_recv(cx) {
-            //     Poll::Ready(Some(cmd)) => {
-            //         this.on_command(cmd);
-            //         continue;
-            //     }
-            //     Poll::Ready(None) => {
-            //         debug!("Socket closed");
-            //         return Poll::Ready(Ok(()));
-            //     }
-            //     Poll::Pending => {}
-            // }
-
             if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
                 match auth {
                     Ok(auth) => {
@@ -231,13 +236,18 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                         tracing::debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
                         // this.state.stats.increment_active_clients();
 
+                        // Default backpressury boundary of 8192 bytes, should we add config option?
+                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
+
                         let session = SubscriberSession {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            egress_queue: VecDeque::with_capacity(128),
-                            conn: Framed::new(auth.stream, pubsub::Codec::new()),
+                            // egress_queue: VecDeque::with_capacity(128),
+                            pending_egress: None,
+                            conn: framed,
                             topic_filter: PrefixTrie::new(),
+                            flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 
                         tokio::spawn(session);
@@ -303,9 +313,11 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            egress_queue: VecDeque::with_capacity(128),
+                            // egress_queue: VecDeque::with_capacity(128),
+                            pending_egress: None,
                             conn: Framed::new(stream, pubsub::Codec::new()),
                             topic_filter: PrefixTrie::new(),
+                            flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 
                         tokio::spawn(session);

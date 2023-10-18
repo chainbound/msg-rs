@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::broadcast, task::JoinSet};
 use tracing::debug;
 
-use super::{driver::PubDriver, PubError, PubMessage, PubOptions, DEFAULT_BUFFER_SIZE};
+use super::{driver::PubDriver, PubError, PubMessage, PubOptions};
 use crate::Authenticator;
 use msg_transport::ServerTransport;
 
@@ -28,21 +28,20 @@ pub struct PubSocket<T: ServerTransport> {
 impl<T: ServerTransport> PubSocket<T> {
     /// Creates a new reply socket with the default [`PubOptions`].
     pub fn new(transport: T) -> Self {
+        Self::with_options(transport, PubOptions::default())
+    }
+
+    /// Creates a new publisher socket with the given transport and options.
+    pub fn with_options(transport: T, options: PubOptions) -> Self {
         Self {
             transport: Some(transport),
             local_addr: None,
             // to_driver: None,
             to_sessions_bcast: None,
-            options: Arc::new(PubOptions::default()),
+            options: Arc::new(options),
             // state: Arc::new(SocketState::default()),
             auth: None,
         }
-    }
-
-    /// Sets the options for this socket.
-    pub fn with_options(mut self, options: PubOptions) -> Self {
-        self.options = Arc::new(options);
-        self
     }
 
     /// Sets the connection authenticator for this socket.
@@ -57,7 +56,8 @@ impl<T: ServerTransport> PubSocket<T> {
         let mut transport = self.transport.take().unwrap();
 
         // let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-        let (to_sessions_bcast, from_socket_bcast) = broadcast::channel(DEFAULT_BUFFER_SIZE);
+        let (to_sessions_bcast, from_socket_bcast) =
+            broadcast::channel(self.options.session_buffer_size);
 
         transport
             .bind(addr)
@@ -73,6 +73,7 @@ impl<T: ServerTransport> PubSocket<T> {
         let backend = PubDriver {
             id_counter: 0,
             transport,
+            options: Arc::clone(&self.options),
             // state: Arc::clone(&self.state),
             // from_socket,
             auth: self.auth.take(),

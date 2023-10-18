@@ -51,6 +51,7 @@ enum Command {
 pub struct SubOptions {
     pub client_id: Option<Bytes>,
     pub timeout: std::time::Duration,
+    pub ingress_buffer_size: usize,
 }
 
 impl SubOptions {
@@ -63,6 +64,7 @@ impl SubOptions {
 impl Default for SubOptions {
     fn default() -> Self {
         Self {
+            ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             client_id: None,
             timeout: std::time::Duration::from_secs(5),
         }
@@ -114,6 +116,7 @@ pub struct SubSocket<T: ClientTransport> {
     /// Receiver channel from the socket driver.
     from_driver: mpsc::Receiver<PubMessage>,
     /// Options for the socket. These are shared with the backend task.
+    #[allow(unused)]
     options: Arc<SubOptions>,
     /// The pending driver.
     driver: Option<SubDriver<T>>,
@@ -127,10 +130,14 @@ where
     T: ClientTransport + Send + Sync + 'static,
 {
     pub fn new(transport: T) -> Self {
-        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-        let (to_socket, from_driver) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        Self::with_options(transport, SubOptions::default())
+    }
 
-        let options = Arc::new(SubOptions::default());
+    pub fn with_options(transport: T, options: SubOptions) -> Self {
+        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let (to_socket, from_driver) = mpsc::channel(options.ingress_buffer_size);
+
+        let options = Arc::new(options);
 
         let driver = SubDriver {
             options: Arc::clone(&options),
@@ -149,16 +156,6 @@ where
             options,
             _marker: std::marker::PhantomData,
         }
-    }
-
-    pub fn with_options(mut self, options: SubOptions) -> Self {
-        self.options = Arc::new(options);
-        if let Some(driver) = self.driver.as_mut() {
-            driver.options = Arc::clone(&self.options);
-        } else {
-            panic!("Incorrect driver state");
-        }
-        self
     }
 
     /// Asynchronously connects to the endpoint.
