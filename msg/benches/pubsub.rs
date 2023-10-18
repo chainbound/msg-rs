@@ -28,19 +28,19 @@ mod pubsub {
 
     use super::*;
 
-    #[divan::bench]
-    fn pubsub_single_thread(bencher: divan::Bencher) {
-        // create a multi-threaded tokio runtime
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+    // #[divan::bench()]
+    // fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
+    //     // create a multi-threaded tokio runtime
+    //     let rt = tokio::runtime::Builder::new_current_thread()
+    //         .enable_all()
+    //         .build()
+    //         .unwrap();
 
-        pubsub_with_runtime(bencher, rt);
-    }
+    //     pubsub_with_runtime(bencher, rt);
+    // }
 
     #[divan::bench]
-    fn pubsub_multi_thread(bencher: divan::Bencher) {
+    fn pubsub_multi_thread_tcp(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -97,7 +97,7 @@ mod pubsub {
                 rt.block_on(async {
                     let send = async {
                         let start = Instant::now();
-                        tokio::time::sleep(Duration::from_micros(1)).await;
+                        // tokio::time::sleep(Duration::from_micros(5)).await;
                         for msg in msg_vec {
                             pub_socket.publish("HELLO".to_string(), msg).await.unwrap();
                         }
