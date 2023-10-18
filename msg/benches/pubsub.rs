@@ -1,8 +1,7 @@
-use std::time::{Duration, Instant};
-
 use bytes::Bytes;
 use futures::StreamExt;
 use rand::Rng;
+use std::time::Instant;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Tcp, TcpOptions};
@@ -10,7 +9,7 @@ use msg_transport::{Tcp, TcpOptions};
 const N_REQS: usize = 100_000;
 const MSG_SIZE: usize = 512;
 
-/// Benchmark the throughput of a single request/response socket pair over localhost
+/// Runs various benchmarks for the `PubSocket` and `SubSocket`.
 fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
@@ -78,8 +77,6 @@ mod pubsub {
             sub.subscribe("HELLO".to_string()).await.unwrap();
         });
 
-        // Prepare the messages to send
-
         bencher
             .counter(ItemsCount::new(N_REQS as u64))
             .counter(BytesCount::new((N_REQS * MSG_SIZE) as u64))
@@ -112,8 +109,6 @@ mod pubsub {
                             if rx + 1 == N_REQS {
                                 break;
                             }
-
-                            // tracing::info!("Received: {:?}", msg)
                         }
 
                         Instant::now()
@@ -132,9 +127,5 @@ mod pubsub {
                     );
                 })
             });
-
-        // let mut results = Vec::with_capacity(REPEAT_TIMES);
-
-        std::thread::sleep(Duration::from_millis(50));
     }
 }
