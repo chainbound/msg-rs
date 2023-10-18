@@ -120,7 +120,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
+            .publish("HELLO".to_string(), "WORLD".into())
             .await
             .unwrap();
 
