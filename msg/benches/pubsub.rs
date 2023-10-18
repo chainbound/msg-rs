@@ -23,20 +23,22 @@ fn main() {
 
 #[divan::bench_group(sample_count = 16)]
 mod pubsub {
+    use std::time::Duration;
+
     use divan::counter::{BytesCount, ItemsCount};
 
     use super::*;
 
-    // #[divan::bench()]
-    // fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
-    //     // create a multi-threaded tokio runtime
-    //     let rt = tokio::runtime::Builder::new_current_thread()
-    //         .enable_all()
-    //         .build()
-    //         .unwrap();
+    #[divan::bench()]
+    fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
+        // create a multi-threaded tokio runtime
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
 
-    //     pubsub_with_runtime(bencher, rt);
-    // }
+        pubsub_with_runtime(bencher, rt);
+    }
 
     #[divan::bench]
     fn pubsub_multi_thread_tcp(bencher: divan::Bencher) {
@@ -75,6 +77,9 @@ mod pubsub {
                 .unwrap();
 
             sub.subscribe("HELLO".to_string()).await.unwrap();
+
+            // Give some time for the background connection process to run
+            tokio::time::sleep(Duration::from_millis(10)).await;
         });
 
         bencher
