@@ -1,12 +1,15 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Tcp, TcpOptions};
+use tokio::time::timeout;
+use tracing::Instrument;
 
 #[tokio::main]
 async fn main() {
+    let _ = tracing_subscriber::fmt::try_init();
     // Configure the publisher socket with options
     let mut pub_socket = PubSocket::with_options(
         Tcp::new(),
@@ -50,32 +53,50 @@ async fn main() {
     sub2.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");
 
-    // PROBLEM: I think the problem here stems from the fact that downstream we have a future
-    // that is not sync. Probably the connection / auth future. This works without the call
-    // to `unsubscribe`, but fails with it. The problem stems from sub socket containing a reference to
-    // the transport, which is not sync.
-    tokio::spawn(async move {
-        loop {
-            let recv = sub1.next().await.unwrap();
-            if bytes_to_string(recv.into_payload()).contains("10") {
-                tracing::info!("Received message 10, unsubscribing...");
-                sub1.unsubscribe("HELLO_TOPIC".to_string()).await.unwrap();
+    let t1 = tokio::spawn(
+        async move {
+            loop {
+                // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription was succesful,
+                // we should time out after the 10th message.
+                let Ok(Some(recv)) = timeout(Duration::from_millis(2000), sub1.next()).await else {
+                    tracing::warn!("Timeout waiting for message, stopping sub1");
+                    break;
+                };
+
+                let string = bytes_to_string(recv.clone().into_payload());
+                tracing::info!("Received message: {}", string);
+                if string.contains("10") {
+                    tracing::warn!("Received message 10, unsubscribing...");
+                    sub1.unsubscribe("HELLO_TOPIC".to_string()).await.unwrap();
+                }
             }
         }
-    });
+        .instrument(tracing::info_span!("sub1")),
+    );
 
-    tokio::spawn(async move {
-        loop {
-            let recv = sub2.next().await.unwrap();
+    let t2 = tokio::spawn(
+        async move {
+            loop {
+                let Ok(Some(recv)) = timeout(Duration::from_millis(1000), sub2.next()).await else {
+                    tracing::warn!("Timeout waiting for message, stopping sub1");
+                    break;
+                };
+                let string = bytes_to_string(recv.clone().into_payload());
+                tracing::info!("Received message: {}", string);
+            }
         }
-    });
+        .instrument(tracing::info_span!("sub2")),
+    );
 
-    for i in 0..1000 {
+    for i in 0..20 {
+        tokio::time::sleep(Duration::from_millis(300)).await;
         pub_socket
             .publish("HELLO_TOPIC".to_string(), format!("Message {i}").into())
             .await
             .unwrap();
     }
+
+    let _ = tokio::join!(t1, t2);
 }
 
 fn bytes_to_string(b: Bytes) -> String {
