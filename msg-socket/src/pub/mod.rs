@@ -129,4 +129,42 @@ mod tests {
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
+
+    #[tokio::test]
+    async fn pubsub_many() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut pub_socket = PubSocket::new(Tcp::new());
+        let mut sub1 = SubSocket::new(Tcp::new_with_options(
+            TcpOptions::default().with_blocking_connect(),
+        ));
+
+        let mut sub2 = SubSocket::new(Tcp::new_with_options(
+            TcpOptions::default().with_blocking_connect(),
+        ));
+
+        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        let addr = pub_socket.local_addr().unwrap();
+
+        sub1.connect(&addr.to_string()).await.unwrap();
+        sub2.connect(&addr.to_string()).await.unwrap();
+        sub1.subscribe("HELLO".to_string()).await.unwrap();
+        sub2.subscribe("HELLO".to_string()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        pub_socket
+            .publish("HELLO".to_string(), Bytes::from("WORLD"))
+            .await
+            .unwrap();
+
+        let msg = sub1.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!("WORLD", msg.payload());
+
+        let msg = sub2.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!("WORLD", msg.payload());
+    }
 }
