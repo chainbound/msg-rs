@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::broadcast, task::JoinSet};
 use tracing::debug;
 
-use super::{driver::PubDriver, PubError, PubMessage, PubOptions};
+use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
 use msg_transport::ServerTransport;
 
@@ -12,9 +12,8 @@ use msg_transport::ServerTransport;
 pub struct PubSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.
     options: Arc<PubOptions>,
-    // The reply socket state, shared with the driver.
-    // state: Arc<SocketState>,
-    // to_driver: Option<mpsc::Sender<Command>>,
+    /// The reply socket state, shared with the driver.
+    state: Arc<SocketState>,
     /// The broadcast channel to all active [`SubscriberSession`](super::driver::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
     /// The optional transport. This is taken when the socket is bound.
@@ -39,7 +38,7 @@ impl<T: ServerTransport> PubSocket<T> {
             // to_driver: None,
             to_sessions_bcast: None,
             options: Arc::new(options),
-            // state: Arc::new(SocketState::default()),
+            state: Arc::new(SocketState::default()),
             auth: None,
         }
     }
@@ -74,12 +73,10 @@ impl<T: ServerTransport> PubSocket<T> {
             id_counter: 0,
             transport,
             options: Arc::clone(&self.options),
-            // state: Arc::clone(&self.state),
-            // from_socket,
+            state: Arc::clone(&self.state),
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
             from_socket_bcast,
-            // from_sessions: Default::default(),
         };
 
         tokio::spawn(backend);
@@ -108,41 +105,12 @@ impl<T: ServerTransport> PubSocket<T> {
         Ok(())
     }
 
-    /// Registers the given topic with the options. If the topic already exists, this is a no-op.
-    // pub async fn register_topic(
-    //     &mut self,
-    //     topic: String,
-    //     options: TopicOptions,
-    // ) -> Result<(), PubError> {
-    //     self.send_command(Command::RegisterTopic {
-    //         topic: topic.clone(),
-    //         options,
-    //     })
-    //     .await?;
-
-    //     Ok(())
-    // }
-
-    // pub fn stats(&self) -> &SocketStats {
-    //     &self.state.stats
-    // }
+    pub fn stats(&self) -> &SocketStats {
+        &self.state.stats
+    }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.
     pub fn local_addr(&self) -> Option<SocketAddr> {
         self.local_addr
     }
-
-    // / Sends a command to the driver, returning [`PubError::SocketClosed`] if the
-    // / driver has been dropped / hasn't been spawned yet.
-    // #[inline]
-    // async fn send_command(&self, command: Command) -> Result<(), PubError> {
-    //     self.to_driver
-    //         .as_ref()
-    //         .ok_or(PubError::SocketClosed)?
-    //         .send(command)
-    //         .await
-    //         .map_err(|_| PubError::SocketClosed)?;
-
-    //     Ok(())
-    // }
 }

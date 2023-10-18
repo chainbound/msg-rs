@@ -18,7 +18,7 @@ use crate::{AuthResult, Authenticator};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, pubsub};
 
-use super::{trie::PrefixTrie, PubError, PubMessage, PubOptions};
+use super::{trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState};
 
 pub(crate) struct PubDriver<T: ServerTransport> {
     /// Session ID counter.
@@ -27,8 +27,8 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     pub(super) transport: T,
     /// The publisher options (shared with the socket)
     pub(super) options: Arc<PubOptions>,
-    /// The reply socket state, shared with the socket front-end.
-    // pub(crate) state: Arc<SocketState>,
+    /// The publisher socket state, shared with the socket front-end.
+    pub(crate) state: Arc<SocketState>,
     /// Receiver from the socket front-end.
     // pub(super) from_socket: mpsc::Receiver<Command>,
     /// Optional connection authenticator.
@@ -54,6 +54,7 @@ pub(super) struct SubscriberSession<Io> {
     pending_egress: Option<pubsub::Message>,
     /// Session request sender.
     // to_driver: mpsc::Sender<SessionRequest>,
+    state: Arc<SocketState>,
     /// The framed connection.
     conn: Framed<Io, pubsub::Codec>,
     /// The topic filter (a prefix trie that works with strings)
@@ -91,6 +92,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
             }
             ControlMsg::Close => todo!(),
         }
+    }
+}
+
+impl<Io> Drop for SubscriberSession<Io> {
+    fn drop(&mut self) {
+        self.state.stats.decrement_active_clients();
     }
 }
 
@@ -149,11 +156,11 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.pending_egress.take() {
                     tracing::debug!("Sending message: {:?}", msg);
-                    let _msg_len = msg.size();
+                    let msg_len = msg.size();
 
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            // this.state.stats.increment_tx(msg_len);
+                            this.state.stats.increment_tx(msg_len);
                             // We might be able to send more queued messages
                             continue;
                         }
@@ -243,7 +250,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            // egress_queue: VecDeque::with_capacity(128),
+                            state: Arc::clone(&this.state),
                             pending_egress: None,
                             conn: framed,
                             topic_filter: PrefixTrie::new(),
@@ -252,6 +259,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
 
                         tokio::spawn(session);
 
+                        this.state.stats.increment_active_clients();
                         this.id_counter = this.id_counter.wrapping_add(1);
                     }
                     Err(e) => {
@@ -313,7 +321,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            // egress_queue: VecDeque::with_capacity(128),
+                            state: Arc::clone(&this.state),
                             pending_egress: None,
                             conn: Framed::new(stream, pubsub::Codec::new()),
                             topic_filter: PrefixTrie::new(),
@@ -322,6 +330,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
 
                         tokio::spawn(session);
 
+                        this.state.stats.increment_active_clients();
                         this.id_counter = this.id_counter.wrapping_add(1);
 
                         tracing::debug!("New connection from {}", addr);

@@ -4,10 +4,10 @@ use thiserror::Error;
 
 mod driver;
 mod socket;
-// mod stats;
+mod stats;
 mod trie;
 pub use socket::*;
-// use stats::SocketStats;
+use stats::SocketStats;
 
 #[derive(Debug, Error)]
 pub enum PubError {
@@ -103,11 +103,11 @@ impl PubMessage {
     }
 }
 
-// /// The request socket state, shared between the backend task and the socket.
-// #[derive(Debug, Default)]
-// pub(crate) struct SocketState {
-//     pub(crate) stats: SocketStats,
-// }
+/// The publisher socket state, shared between the backend task and the socket.
+#[derive(Debug, Default)]
+pub(crate) struct SocketState {
+    pub(crate) stats: SocketStats,
+}
 
 // pub(crate) enum Command {
 //     Publish {
