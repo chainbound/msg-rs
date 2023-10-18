@@ -23,8 +23,10 @@ async fn main() {
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::new(Tcp::new())
-        .with_options(ReqOptions::default().with_id(Bytes::from("client1")));
+    let mut req = ReqSocket::with_options(
+        Tcp::new(),
+        ReqOptions::default().with_id(Bytes::from("client1")),
+    );
 
     req.connect("0.0.0.0:4444").await.unwrap();
 

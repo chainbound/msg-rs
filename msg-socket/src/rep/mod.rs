@@ -164,8 +164,10 @@ mod tests {
         rep.bind("127.0.0.1:0").await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::new(Tcp::new())
-            .with_options(ReqOptions::default().with_id(Bytes::from("REQ")));
+        let mut req = ReqSocket::with_options(
+            Tcp::new(),
+            ReqOptions::default().with_id(Bytes::from("REQ")),
+        );
 
         req.connect(&rep.local_addr().unwrap().to_string())
             .await

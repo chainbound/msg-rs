@@ -34,20 +34,19 @@ pub struct RepSocket<T: ServerTransport> {
 impl<T: ServerTransport> RepSocket<T> {
     /// Creates a new reply socket with the default [`RepOptions`].
     pub fn new(transport: T) -> Self {
+        Self::with_options(transport, RepOptions::default())
+    }
+
+    /// Sets the options for this socket.
+    pub fn with_options(transport: T, options: RepOptions) -> Self {
         Self {
             from_driver: None,
             transport: Some(transport),
             local_addr: None,
-            options: Arc::new(RepOptions::default()),
+            options: Arc::new(options),
             state: Arc::new(SocketState::default()),
             auth: None,
         }
-    }
-
-    /// Sets the options for this socket.
-    pub fn with_options(mut self, options: RepOptions) -> Self {
-        self.options = Arc::new(options);
-        self
     }
 
     /// Sets the connection authenticator for this socket.
