@@ -189,11 +189,11 @@ impl Decoder for Codec {
                     self.state = State::Payload(Some(header));
                 }
                 State::Payload(ref mut header) => {
-                    let header = header.take().unwrap();
-
-                    if src.len() < header.size as usize {
+                    if src.len() < header.as_ref().unwrap().size as usize {
                         return Ok(None);
                     }
+
+                    let header = header.take().unwrap();
 
                     let payload = src.split_to(header.size as usize);
                     let message = Message {
