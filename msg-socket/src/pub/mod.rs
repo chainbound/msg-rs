@@ -167,4 +167,31 @@ mod tests {
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
+
+    #[tokio::test]
+    async fn pubsub_durable() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut pub_socket = PubSocket::new(Tcp::new());
+        // Don't enable blocking connect
+        let mut sub_socket = SubSocket::new(Tcp::new_with_options(TcpOptions::default()));
+
+        // Try to connect and subscribe before the publisher is up
+        sub_socket.connect("0.0.0.0:6662").await.unwrap();
+        sub_socket.subscribe("HELLO".to_string()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        pub_socket.bind("0.0.0.0:6662").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        pub_socket
+            .publish("HELLO".to_string(), Bytes::from("WORLD"))
+            .await
+            .unwrap();
+
+        let msg = sub_socket.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!("WORLD", msg.payload());
+    }
 }
