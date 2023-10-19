@@ -125,16 +125,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep_durable() {
         let _ = tracing_subscriber::fmt::try_init();
+        let random_port = rand::random::<u16>() + 10000;
+        let addr = format!("0.0.0.0:{}", random_port);
 
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::new());
         // Try to connect even through the server isn't up yet
-        req.connect("0.0.0.0:4445").await.unwrap();
+        req.connect(&addr).await.unwrap();
 
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_secs(1)).await;
         let mut rep = RepSocket::new(Tcp::new());
-        rep.bind("0.0.0.0:4445").await.unwrap();
+        rep.bind(&addr).await.unwrap();
 
         tokio::spawn(async move {
             // Receive the request and respond with "world"
