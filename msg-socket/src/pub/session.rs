@@ -60,7 +60,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
                 debug!("Unsubscribing from topic {:?}", topic);
                 self.topic_filter.remove(&topic)
             }
-            ControlMsg::Close => todo!(),
+            ControlMsg::Close => {
+                debug!(
+                    "Closing session after receiving close message {}",
+                    self.session_id
+                );
+            }
         }
     }
 }
