@@ -2,7 +2,7 @@
 members = ["msg", "msg-socket", "msg-wire", "msg-transport"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 rust-version = "1.70"                               # Remember to update .clippy.toml and README.md
 license = "MIT OR Apache-2.0"
