@@ -1,7 +1,7 @@
 [package]
 name = "msg"
-description = "A flexible and lightweight messaging library for distributed systems"
 
+description.workspace = true
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
