@@ -112,7 +112,7 @@ where
                 }
             }
             Command::Connect { endpoint } => {
-                let id = self.options.client_id.clone();
+                let id = self.options.auth_token.clone();
                 let transport = Arc::clone(&self.transport);
 
                 // NOTE: don't know if this is gonna work

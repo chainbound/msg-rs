@@ -49,14 +49,14 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
-    pub client_id: Option<Bytes>,
+    pub auth_token: Option<Bytes>,
     pub timeout: std::time::Duration,
     pub ingress_buffer_size: usize,
 }
 
 impl SubOptions {
     pub fn with_id(mut self, client_id: Bytes) -> Self {
-        self.client_id = Some(client_id);
+        self.auth_token = Some(client_id);
         self
     }
 }
@@ -65,7 +65,7 @@ impl Default for SubOptions {
     fn default() -> Self {
         Self {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
-            client_id: None,
+            auth_token: None,
             timeout: std::time::Duration::from_secs(5),
         }
     }

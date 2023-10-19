@@ -69,7 +69,7 @@ impl<T: ClientTransport> ReqSocket<T> {
 
         let stream = self
             .transport
-            .connect_with_auth(endpoint, self.options.client_id.clone())
+            .connect_with_auth(endpoint, self.options.auth_token.clone())
             .await
             .map_err(|e| ReqError::Transport(Box::new(e)))?;
 

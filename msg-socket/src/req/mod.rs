@@ -38,7 +38,7 @@ pub enum Command {
 
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
-    pub client_id: Option<Bytes>,
+    pub auth_token: Option<Bytes>,
     pub timeout: std::time::Duration,
     pub retry_on_initial_failure: bool,
     pub backoff_duration: std::time::Duration,
@@ -47,8 +47,9 @@ pub struct ReqOptions {
 }
 
 impl ReqOptions {
-    pub fn with_id(mut self, client_id: Bytes) -> Self {
-        self.client_id = Some(client_id);
+    /// Sets the authentication token for the socket.
+    pub fn with_token(mut self, auth_token: Bytes) -> Self {
+        self.auth_token = Some(auth_token);
         self
     }
 }
@@ -56,7 +57,7 @@ impl ReqOptions {
 impl Default for ReqOptions {
     fn default() -> Self {
         Self {
-            client_id: None,
+            auth_token: None,
             timeout: std::time::Duration::from_secs(5),
             retry_on_initial_failure: true,
             backoff_duration: Duration::from_millis(200),
