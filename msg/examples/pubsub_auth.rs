@@ -4,8 +4,24 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
+use msg_socket::{Authenticator, PubOptions, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Tcp, TcpOptions};
+
+#[derive(Default)]
+struct Auth;
+
+impl Authenticator for Auth {
+    fn authenticate(&self, id: &Bytes) -> bool {
+        tracing::info!("Auth request from: {:?}", id);
+        if id.as_ref() == b"client1" {
+            tracing::info!("Client authenticated: {:?}", id);
+            true
+        } else {
+            tracing::warn!("Unknown client: {:?}", id);
+            false
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -18,13 +34,17 @@ async fn main() {
             flush_interval: Some(Duration::from_micros(100)),
             max_connections: None,
         },
-    );
+    )
+    // Enable the authenticator
+    .with_auth(Auth::default());
 
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
         SubOptions {
+            // Set the client ID for authentication
+            auth_token: Some(Bytes::from("client1")),
             ingress_buffer_size: 1024,
             ..Default::default()
         },
@@ -33,6 +53,8 @@ async fn main() {
     let mut sub2 = SubSocket::with_options(
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
         SubOptions {
+            // Set the client ID for authentication. This client ID will be rejected.
+            auth_token: Some(Bytes::from("client2")),
             ingress_buffer_size: 1024,
             ..Default::default()
         },
