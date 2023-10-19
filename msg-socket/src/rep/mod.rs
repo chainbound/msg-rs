@@ -12,7 +12,7 @@ use stats::SocketStats;
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
-pub enum RepError {
+pub enum PubError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
@@ -65,10 +65,10 @@ impl Request {
     }
 
     /// Responds to the request.
-    pub fn respond(self, response: Bytes) -> Result<(), RepError> {
+    pub fn respond(self, response: Bytes) -> Result<(), PubError> {
         self.response
             .send(response)
-            .map_err(|_| RepError::SocketClosed)
+            .map_err(|_| PubError::SocketClosed)
     }
 }
 
@@ -125,16 +125,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep_durable() {
         let _ = tracing_subscriber::fmt::try_init();
+        let random_port = rand::random::<u16>() + 10000;
+        let addr = format!("0.0.0.0:{}", random_port);
 
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::new());
         // Try to connect even through the server isn't up yet
-        req.connect("0.0.0.0:4444").await.unwrap();
+        req.connect(&addr).await.unwrap();
 
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_secs(1)).await;
         let mut rep = RepSocket::new(Tcp::new());
-        rep.bind("0.0.0.0:4444").await.unwrap();
+        rep.bind(&addr).await.unwrap();
 
         tokio::spawn(async move {
             // Receive the request and respond with "world"
@@ -164,8 +166,10 @@ mod tests {
         rep.bind("127.0.0.1:0").await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::new(Tcp::new())
-            .with_options(ReqOptions::default().with_id(Bytes::from("REQ")));
+        let mut req = ReqSocket::with_options(
+            Tcp::new(),
+            ReqOptions::default().with_token(Bytes::from("REQ")),
+        );
 
         req.connect(&rep.local_addr().unwrap().to_string())
             .await

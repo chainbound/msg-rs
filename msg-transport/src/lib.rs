@@ -19,6 +19,7 @@ pub trait ClientTransport {
     type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
     type Error: std::error::Error + Send + Sync + 'static;
 
+    // TODO: we can improve upon this interface
     async fn connect_with_auth(
         &self,
         addr: SocketAddr,
@@ -43,14 +44,15 @@ pub trait ServerTransport: Unpin + Send + Sync + 'static {
     ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TcpOptions {
-    pub set_nodelay: bool,
+    pub blocking_connect: bool,
 }
 
-impl Default for TcpOptions {
-    fn default() -> Self {
-        Self { set_nodelay: true }
+impl TcpOptions {
+    pub fn with_blocking_connect(mut self) -> Self {
+        self.blocking_connect = true;
+        self
     }
 }
 
@@ -151,7 +153,11 @@ impl ClientTransport for Tcp {
             Self::Io::new(addr)
         };
 
-        session.connect().await;
+        if self.options.blocking_connect {
+            session.blocking_connect().await?;
+        } else {
+            session.connect().await;
+        }
         Ok(session)
     }
 }
@@ -163,7 +169,7 @@ impl ServerTransport for Tcp {
 
     async fn bind(&mut self, addr: &str) -> Result<(), Self::Error> {
         let socket = TcpSocket::new_v4()?;
-        socket.set_nodelay(self.options.set_nodelay)?;
+        socket.set_nodelay(true)?;
         socket.bind(addr.parse().unwrap())?;
 
         let listener = socket.listen(128)?;

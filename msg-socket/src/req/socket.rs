@@ -25,17 +25,16 @@ pub struct ReqSocket<T: ClientTransport> {
 
 impl<T: ClientTransport> ReqSocket<T> {
     pub fn new(transport: T) -> Self {
+        Self::with_options(transport, ReqOptions::default())
+    }
+
+    pub fn with_options(transport: T, options: ReqOptions) -> Self {
         Self {
             to_driver: None,
             transport,
-            options: Arc::new(ReqOptions::default()),
+            options: Arc::new(options),
             state: Arc::new(SocketState::default()),
         }
-    }
-
-    pub fn with_options(mut self, options: ReqOptions) -> Self {
-        self.options = Arc::new(options);
-        self
     }
 
     pub fn stats(&self) -> &SocketStats {
@@ -70,7 +69,7 @@ impl<T: ClientTransport> ReqSocket<T> {
 
         let stream = self
             .transport
-            .connect_with_auth(endpoint, self.options.client_id.clone())
+            .connect_with_auth(endpoint, self.options.auth_token.clone())
             .await
             .map_err(|e| ReqError::Transport(Box::new(e)))?;
 

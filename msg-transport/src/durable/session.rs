@@ -13,11 +13,11 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send>>;
+pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send + Sync>>;
 
 /// A layer can be applied to pre-process a newly established IO object. If you need
 /// multiple layers, use a single top-level layer that contains and calls the other layers.
-pub trait Layer<Io: AsyncRead + AsyncWrite>: 'static {
+pub trait Layer<Io: AsyncRead + AsyncWrite>: Send + Sync + 'static {
     /// The processing method. This method is called with the IO object that
     /// should be processed, and returns a future that resolves to a processing error
     /// or the processed IO object.
@@ -97,7 +97,7 @@ pub trait UnderlyingIo: Sized + Unpin {
 }
 
 impl UnderlyingIo for TcpStream {
-    fn establish(addr: SocketAddr) -> Pin<Box<dyn Future<Output = io::Result<Self>> + Send>> {
+    fn establish(addr: SocketAddr) -> PendingIo<TcpStream> {
         Box::pin(async move {
             let stream = TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
@@ -143,7 +143,8 @@ where
     pub async fn blocking_connect(&mut self) -> Result<(), io::Error> {
         let io = Io::establish(self.endpoint).await?;
         if let Some(layer) = &mut self.layer_stack {
-            self.state = SessionState::Processing(layer.process(io));
+            let io = layer.process(io).await?;
+            self.state = SessionState::Connected(io);
         } else {
             self.state = SessionState::Connected(io);
         }

@@ -3,7 +3,7 @@ use futures::StreamExt;
 use rand::Rng;
 
 use msg_socket::{RepSocket, ReqSocket};
-use msg_transport::Tcp;
+use msg_transport::{Tcp, TcpOptions};
 
 const N_REQS: usize = 100000;
 const PAR_FACTOR: usize = 64;
@@ -14,13 +14,15 @@ fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // create a multi-threaded tokio runtime
-    let rt = tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
 
     let mut rep = RepSocket::new(Tcp::new());
-    let mut req = ReqSocket::new(Tcp::new());
+    let mut req = ReqSocket::new(Tcp::new_with_options(
+        TcpOptions::default().with_blocking_connect(),
+    ));
 
     // setup the socket connections
     rt.block_on(async {
