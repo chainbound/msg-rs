@@ -129,12 +129,12 @@ mod tests {
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::new());
         // Try to connect even through the server isn't up yet
-        req.connect("0.0.0.0:4444").await.unwrap();
+        req.connect("0.0.0.0:4445").await.unwrap();
 
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_secs(1)).await;
         let mut rep = RepSocket::new(Tcp::new());
-        rep.bind("0.0.0.0:4444").await.unwrap();
+        rep.bind("0.0.0.0:4445").await.unwrap();
 
         tokio::spawn(async move {
             // Receive the request and respond with "world"
