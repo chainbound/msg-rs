@@ -62,9 +62,6 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
         if this.flush && this.conn.poll_flush_unpin(cx).is_ready() {
             tracing::trace!("Flushed connection");
             this.flush = false
-        } else {
-            // Make sure we're woken up again to retry the flush
-            cx.waker().wake_by_ref();
         }
 
         if let Some(result) = ready!(this.conn.poll_next_unpin(cx)) {
