@@ -31,7 +31,7 @@ mod pubsub {
 
     #[divan::bench()]
     fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
-        // create a multi-threaded tokio runtime
+        // create a current-threaded tokio runtime
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
