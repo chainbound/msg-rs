@@ -96,18 +96,22 @@ impl PubMessage {
         }
     }
 
+    #[inline]
     pub fn source(&self) -> SocketAddr {
         self.source
     }
 
+    #[inline]
     pub fn topic(&self) -> &str {
         &self.topic
     }
 
+    #[inline]
     pub fn payload(&self) -> &Bytes {
         &self.payload
     }
 
+    #[inline]
     pub fn into_payload(self) -> Bytes {
         self.payload
     }
