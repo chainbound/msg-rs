@@ -45,6 +45,8 @@ enum Command {
     Unsubscribe { topic: String },
     /// Connect to a publisher socket.
     Connect { endpoint: SocketAddr },
+    /// Disconnect from a publisher socket.
+    Disconnect { endpoint: SocketAddr },
     /// Shut down the driver.
     Shutdown,
 }
@@ -181,6 +183,26 @@ where
         let endpoint: SocketAddr = endpoint.parse().unwrap();
 
         self.try_send_command(Command::Connect { endpoint })?;
+
+        Ok(())
+    }
+
+    /// Asynchronously disconnects from the endpoint.
+    pub async fn disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
+        self.ensure_active_driver();
+        let endpoint: SocketAddr = endpoint.parse().unwrap();
+
+        self.send_command(Command::Disconnect { endpoint }).await?;
+
+        Ok(())
+    }
+
+    /// Immediately send a disconnect command to the driver.
+    pub fn try_disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
+        self.ensure_active_driver();
+        let endpoint: SocketAddr = endpoint.parse().unwrap();
+
+        self.try_send_command(Command::Disconnect { endpoint })?;
 
         Ok(())
     }
