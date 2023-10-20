@@ -31,6 +31,8 @@ pub enum SubError {
     Wire(#[from] pubsub::Error),
     #[error("Socket closed")]
     SocketClosed,
+    #[error("Command channel full")]
+    ChannelFull,
     #[error("Transport error: {0:?}")]
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
@@ -55,8 +57,9 @@ pub struct SubOptions {
 }
 
 impl SubOptions {
-    pub fn with_id(mut self, client_id: Bytes) -> Self {
-        self.auth_token = Some(client_id);
+    /// Sets the authentication token for the socket.
+    pub fn with_token(mut self, auth_token: Bytes) -> Self {
+        self.auth_token = Some(auth_token);
         self
     }
 }
@@ -168,6 +171,16 @@ where
         Ok(())
     }
 
+    /// Immediately send a connect command to the driver.
+    pub fn try_connect(&mut self, endpoint: &str) -> Result<(), SubError> {
+        self.ensure_active_driver();
+        let endpoint: SocketAddr = endpoint.parse().unwrap();
+
+        self.try_send_command(Command::Connect { endpoint })?;
+
+        Ok(())
+    }
+
     /// Subscribes to the given topic. This will subscribe to all connected publishers.
     /// If the topic does not exist on a publisher, this will not return any data.
     /// Any publishers that are connected after this call will also be subscribed to.
@@ -175,6 +188,15 @@ where
         self.ensure_active_driver();
         assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
         self.send_command(Command::Subscribe { topic }).await?;
+
+        Ok(())
+    }
+
+    /// Immediately send a subscribe command to the driver.
+    pub fn try_subscribe(&mut self, topic: String) -> Result<(), SubError> {
+        self.ensure_active_driver();
+        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+        self.try_send_command(Command::Subscribe { topic })?;
 
         Ok(())
     }
@@ -187,6 +209,14 @@ where
         Ok(())
     }
 
+    /// Immediately send an unsubscribe command to the driver.
+    pub fn try_unsubscribe(&mut self, topic: String) -> Result<(), SubError> {
+        self.ensure_active_driver();
+        self.try_send_command(Command::Unsubscribe { topic })?;
+
+        Ok(())
+    }
+
     /// Sends a command to the driver, returning [`SubError::SocketClosed`] if the
     /// driver has been dropped.
     async fn send_command(&self, command: Command) -> Result<(), SubError> {
@@ -195,6 +225,15 @@ where
             .await
             .map_err(|_| SubError::SocketClosed)?;
 
+        Ok(())
+    }
+
+    fn try_send_command(&self, command: Command) -> Result<(), SubError> {
+        use mpsc::error::TrySendError::*;
+        self.to_driver.try_send(command).map_err(|e| match e {
+            Full(_) => SubError::ChannelFull,
+            Closed(_) => SubError::SocketClosed,
+        })?;
         Ok(())
     }
 
