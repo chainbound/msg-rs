@@ -102,6 +102,25 @@ impl<T: ServerTransport> PubSocket<T> {
         {
             debug!("No active subscriber sessions");
         }
+
+        Ok(())
+    }
+
+    /// Publishes a message to the given topic. If the topic doesn't exist, this is a no-op.
+    pub fn try_publish(&self, topic: String, message: Bytes) -> Result<(), PubError> {
+        let msg = PubMessage::new(topic, message);
+
+        // Broadcast the message directly to all active sessions.
+        if self
+            .to_sessions_bcast
+            .as_ref()
+            .ok_or(PubError::SocketClosed)?
+            .send(msg)
+            .is_err()
+        {
+            debug!("No active subscriber sessions");
+        }
+
         Ok(())
     }
 
