@@ -122,6 +122,13 @@ where
                     Ok((endpoint, io))
                 });
             }
+            Command::Disconnect { endpoint } => {
+                if self.publishers.remove(&endpoint).is_some() {
+                    debug!(endpoint = %endpoint, "Disconnected from publisher");
+                } else {
+                    debug!(endpoint = %endpoint, "Not connected to publisher");
+                };
+            }
             Command::Shutdown => {
                 // TODO: graceful shutdown?
                 tracing::debug!("shutting down");
