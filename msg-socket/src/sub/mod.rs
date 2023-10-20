@@ -58,7 +58,7 @@ pub struct SubOptions {
 
 impl SubOptions {
     /// Sets the authentication token for the socket.
-    pub fn with_auth(mut self, auth_token: Bytes) -> Self {
+    pub fn with_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
         self
     }
