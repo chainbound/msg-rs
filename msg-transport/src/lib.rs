@@ -121,15 +121,12 @@ impl Layer<TcpStream> for AuthLayer {
                     std::io::ErrorKind::UnexpectedEof,
                     "Connection closed",
                 ))?
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
 
             if matches!(ack, auth::Message::Ack) {
                 Ok(conn.into_inner())
             } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Invalid ACK",
-                ))
+                Err(std::io::ErrorKind::PermissionDenied.into())
             }
         })
     }
