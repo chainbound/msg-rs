@@ -35,5 +35,9 @@ name = "req_res_localhost"
 harness = false
 
 [[bench]]
+name = "reqrep"
+harness = false
+
+[[bench]]
 name = "pubsub"
 harness = false
