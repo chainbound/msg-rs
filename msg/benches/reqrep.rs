@@ -5,7 +5,7 @@ use rand::Rng;
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::{Tcp, TcpOptions};
 
-const N_REQS: usize = 100_000;
+const N_REQS: usize = 50_000;
 const PAR_FACTOR: usize = 64;
 const MSG_SIZE: usize = 512;
 
