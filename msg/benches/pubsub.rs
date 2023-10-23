@@ -30,6 +30,7 @@ mod pubsub {
 
     use super::*;
 
+    /// Last run: 60.01 ms, 853.1 MB/s, 1.666 Mitem/s
     #[divan::bench()]
     fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
         // create a current-threaded tokio runtime
@@ -42,6 +43,8 @@ mod pubsub {
         pubsub_with_runtime(bencher, rt);
     }
 
+    /// Last run:
+    /// Median: 42.83ms, 1.195 GB/s, 2.334 Mitem/s
     #[divan::bench]
     fn pubsub_multi_thread_tcp(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
@@ -54,6 +57,8 @@ mod pubsub {
         pubsub_with_runtime(bencher, rt);
     }
 
+    /// Last run:
+    /// Median: 49.86 ms, 1.026 GB/s, 2.005 Mitem/s
     #[divan::bench]
     fn pubsub_2_subscribers(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
@@ -67,8 +72,8 @@ mod pubsub {
             Tcp::new(),
             PubOptions {
                 session_buffer_size: N_REQS,
-                flush_interval: Some(Duration::from_micros(50)),
-                backpressure_boundary: 64 * 1024,
+                flush_interval: Some(Duration::from_micros(100)),
+                backpressure_boundary: 1024 * 64,
                 ..Default::default()
             },
         );
@@ -174,8 +179,8 @@ mod pubsub {
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
-                flush_interval: Some(Duration::from_micros(50)),
-                backpressure_boundary: 512,
+                flush_interval: Some(Duration::from_micros(100)),
+                backpressure_boundary: 1024 * 64,
                 session_buffer_size: N_REQS,
                 ..Default::default()
             },
