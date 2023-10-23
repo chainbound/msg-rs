@@ -53,7 +53,8 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                         // this.state.stats.increment_active_clients();
 
                         // Default backpressury boundary of 8192 bytes, should we add config option?
-                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
 
                         let session = SubscriberSession {
                             seq: 0,

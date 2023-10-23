@@ -26,6 +26,7 @@ mod pubsub {
     use std::time::Duration;
 
     use divan::counter::{BytesCount, ItemsCount};
+    use tracing::Instrument;
 
     use super::*;
 
@@ -33,6 +34,7 @@ mod pubsub {
     fn pubsub_single_thread_tcp(bencher: divan::Bencher) {
         // create a current-threaded tokio runtime
         let rt = tokio::runtime::Builder::new_current_thread()
+            .worker_threads(4)
             .enable_all()
             .build()
             .unwrap();
@@ -44,6 +46,7 @@ mod pubsub {
     fn pubsub_multi_thread_tcp(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
         let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
             .enable_all()
             .build()
             .unwrap();
@@ -65,6 +68,7 @@ mod pubsub {
             PubOptions {
                 session_buffer_size: N_REQS,
                 flush_interval: Some(Duration::from_micros(50)),
+                backpressure_boundary: 64 * 1024,
                 ..Default::default()
             },
         );
@@ -170,7 +174,8 @@ mod pubsub {
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
-                flush_interval: Some(Duration::from_micros(20)),
+                flush_interval: Some(Duration::from_micros(50)),
+                backpressure_boundary: 512,
                 session_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -215,13 +220,13 @@ mod pubsub {
                 rt.block_on(async {
                     let send = async {
                         let start = Instant::now();
-                        // tokio::time::sleep(Duration::from_micros(5)).await;
                         for msg in msg_vec {
                             pub_socket.publish("HELLO".to_string(), msg).await.unwrap();
                         }
 
                         start
-                    };
+                    }
+                    .instrument(tracing::info_span!("publisher"));
 
                     let recv = async {
                         let mut rx = 0;
@@ -233,7 +238,8 @@ mod pubsub {
                         }
 
                         Instant::now()
-                    };
+                    }
+                    .instrument(tracing::info_span!("subscriber"));
 
                     let (send_start, recv_end) = tokio::join!(send, recv);
 

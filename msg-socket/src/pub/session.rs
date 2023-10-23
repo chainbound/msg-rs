@@ -133,6 +133,7 @@ fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
 impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
     type Output = ();
 
+    #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 

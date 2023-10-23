@@ -32,6 +32,7 @@ async fn main() {
         PubOptions {
             session_buffer_size: 1024,
             flush_interval: Some(Duration::from_micros(100)),
+            backpressure_boundary: 8192,
             max_connections: None,
         },
     )
