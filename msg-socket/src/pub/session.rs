@@ -29,6 +29,9 @@ pub(super) struct SubscriberSession<Io> {
     pub(super) conn: Framed<Io, pubsub::Codec>,
     /// The topic filter (a prefix trie that works with strings)
     pub(super) topic_filter: PrefixTrie,
+    /// Whether or not the connection should be flushed (i.e. data was written).
+    pub(super) should_flush: bool,
+    /// Interval for flushing the connection. This is secondary to `should_flush`.
     pub(super) flush_interval: Option<tokio::time::Interval>,
 }
 
@@ -66,6 +69,25 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
                     self.session_id
                 );
             }
+        }
+    }
+
+    #[inline]
+    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
+        if self.should_flush {
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.poll_tick(cx).is_ready()
+            } else {
+                true
+            }
+        } else {
+            // If we shouldn't flush, reset the interval so we don't get woken up
+            // every time the interval expires
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.reset()
+            }
+
+            false
         }
     }
 }
@@ -115,12 +137,13 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
         let this = self.get_mut();
 
         loop {
-            if let Some(interval) = this.flush_interval.as_mut() {
-                if interval.poll_tick(cx).is_ready() {
-                    let _ = this.conn.poll_flush_unpin(cx);
+            // First check if we should flush the connection. We only do this if we have written
+            // some data and the flush interval has elapsed. Only when we have succesfully flushed the data
+            // will we reset the `should_flush` flag.
+            if this.should_flush(cx) {
+                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
+                    this.should_flush = false;
                 }
-            } else {
-                let _ = this.conn.poll_flush_unpin(cx);
             }
 
             // Then, try to drain the egress queue.
@@ -132,6 +155,8 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
                             this.state.stats.increment_tx(msg_len);
+
+                            this.should_flush = true;
                             // We might be able to send more queued messages
                             continue;
                         }

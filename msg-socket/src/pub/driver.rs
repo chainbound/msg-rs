@@ -63,6 +63,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             pending_egress: None,
                             conn: framed,
                             topic_filter: PrefixTrie::new(),
+                            should_flush: false,
                             flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 
@@ -134,6 +135,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             pending_egress: None,
                             conn: Framed::new(stream, pubsub::Codec::new()),
                             topic_filter: PrefixTrie::new(),
+                            should_flush: false,
                             flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 

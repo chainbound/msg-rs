@@ -21,7 +21,7 @@ fn main() {
     divan::main();
 }
 
-#[divan::bench_group(sample_count = 16)]
+#[divan::bench_group(sample_count = 20)]
 mod pubsub {
     use std::time::Duration;
 
@@ -55,6 +55,7 @@ mod pubsub {
     fn pubsub_2_subscribers(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
         let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
             .enable_all()
             .build()
             .unwrap();
@@ -63,7 +64,7 @@ mod pubsub {
             Tcp::new(),
             PubOptions {
                 session_buffer_size: N_REQS,
-                flush_interval: Some(Duration::from_micros(100)),
+                flush_interval: Some(Duration::from_micros(200)),
                 ..Default::default()
             },
         );
