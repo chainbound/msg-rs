@@ -181,10 +181,18 @@ where
                 reconnect_status.current_attempt = Some(attempt);
             }
             SessionState::Processing(_) => {
-                error!("Session was disconnected from {}", self.endpoint);
+                error!(
+                    "Session was disconnected from {} during processing stage",
+                    self.endpoint
+                );
+                let attempt = Box::pin(async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Io::establish(endpoint).await
+                });
+
                 self.state = SessionState::Disconnected(ReconnectStatus {
                     attempts: 0,
-                    current_attempt: Some(Io::establish(self.endpoint)),
+                    current_attempt: Some(attempt),
                 });
             }
             SessionState::Terminated(_) => {

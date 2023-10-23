@@ -31,10 +31,6 @@ tracing.workspace = true
 rand.workspace = true
 
 [[bench]]
-name = "req_res_localhost"
-harness = false
-
-[[bench]]
 name = "reqrep"
 harness = false
 
