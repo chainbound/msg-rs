@@ -44,7 +44,7 @@ impl Default for PubOptions {
         Self {
             max_connections: None,
             session_buffer_size: 1024,
-            flush_interval: Some(std::time::Duration::from_micros(100)),
+            flush_interval: Some(std::time::Duration::from_micros(50)),
         }
     }
 }

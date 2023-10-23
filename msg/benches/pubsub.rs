@@ -64,7 +64,7 @@ mod pubsub {
             Tcp::new(),
             PubOptions {
                 session_buffer_size: N_REQS,
-                flush_interval: Some(Duration::from_micros(200)),
+                flush_interval: Some(Duration::from_micros(50)),
                 ..Default::default()
             },
         );
@@ -170,6 +170,7 @@ mod pubsub {
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
+                flush_interval: Some(Duration::from_micros(20)),
                 session_buffer_size: N_REQS,
                 ..Default::default()
             },
