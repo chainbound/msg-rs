@@ -50,10 +50,14 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                     Ok(auth) => {
                         // Run custom authenticator
                         debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
-                        // this.state.stats.increment_active_clients();
 
-                        // Default backpressury boundary of 8192 bytes, should we add config option?
-                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        let mut framed = Framed::with_capacity(
+                            auth.stream,
+                            pubsub::Codec::new(),
+                            this.options.backpressure_boundary,
+                        );
+
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
 
                         let session = SubscriberSession {
                             seq: 0,
@@ -63,6 +67,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             pending_egress: None,
                             conn: framed,
                             topic_filter: PrefixTrie::new(),
+                            should_flush: false,
                             flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 
@@ -125,15 +130,23 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             })
                         });
                     } else {
-                        // this.state.stats.increment_active_clients();
+                        let mut framed = Framed::with_capacity(
+                            stream,
+                            pubsub::Codec::new(),
+                            this.options.backpressure_boundary,
+                        );
+
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
+
                         let session = SubscriberSession {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
                             state: Arc::clone(&this.state),
                             pending_egress: None,
-                            conn: Framed::new(stream, pubsub::Codec::new()),
+                            conn: framed,
                             topic_filter: PrefixTrie::new(),
+                            should_flush: false,
                             flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };
 

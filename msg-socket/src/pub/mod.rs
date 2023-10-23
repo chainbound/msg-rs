@@ -37,6 +37,9 @@ pub struct PubOptions {
     /// The interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.
     pub flush_interval: Option<std::time::Duration>,
+    /// The maximum number of bytes that can be buffered in the session before being flushed.
+    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    pub backpressure_boundary: usize,
 }
 
 impl Default for PubOptions {
@@ -44,7 +47,8 @@ impl Default for PubOptions {
         Self {
             max_connections: None,
             session_buffer_size: 1024,
-            flush_interval: Some(std::time::Duration::from_micros(100)),
+            flush_interval: Some(std::time::Duration::from_micros(50)),
+            backpressure_boundary: 8192,
         }
     }
 }

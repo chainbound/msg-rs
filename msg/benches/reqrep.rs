@@ -30,6 +30,7 @@ mod reqrep {
 
     use super::*;
 
+    /// Last run: 314 ms, 81.51 MB/s, 159.2 Kitem/s
     #[divan::bench()]
     fn reqrep_single_thread_tcp(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
@@ -41,6 +42,7 @@ mod reqrep {
         reqrep_with_runtime(bencher, rt);
     }
 
+    /// Last run: 249.6 ms, 102.5 MB/s, 200.2 Kitem/s
     #[divan::bench()]
     fn reqrep_multi_thread_tcp(bencher: divan::Bencher) {
         // create a multi-threaded tokio runtime
@@ -52,6 +54,7 @@ mod reqrep {
         reqrep_with_runtime(bencher, rt);
     }
 
+    /// Last run: 475.2 ms, 53.86 MB/s, 105.2 Kitem/s
     #[divan::bench]
     fn reqrep_2_request(bencher: divan::Bencher) {
         let rt = tokio::runtime::Builder::new_multi_thread()
