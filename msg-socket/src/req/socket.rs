@@ -1,5 +1,5 @@
 use std::{collections::VecDeque, sync::Arc};
-
+use std::time::Instant;
 use bytes::Bytes;
 use msg_transport::ClientTransport;
 use msg_wire::reqrep;
@@ -43,6 +43,7 @@ impl<T: ClientTransport> ReqSocket<T> {
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
+        let expiration = Instant::now() + self.options.timeout;
 
         self.to_driver
             .as_ref()
@@ -50,6 +51,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             .send(Command::Send {
                 message,
                 response: response_tx,
+                expiration,
             })
             .await
             .map_err(|_| ReqError::SocketClosed)?;

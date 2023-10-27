@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -27,12 +27,15 @@ pub enum ReqError {
     SocketClosed,
     #[error("Transport error: {0:?}")]
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Request timed out")]
+    Timeout,
 }
 
 pub enum Command {
     Send {
         message: Bytes,
         response: oneshot::Sender<Result<Bytes, ReqError>>,
+        expiration: Instant,
     },
 }
 

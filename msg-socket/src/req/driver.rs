@@ -17,6 +17,7 @@ use crate::req::SocketState;
 
 use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
+use core::mem;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
@@ -97,6 +98,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                 Poll::Pending => {}
             }
 
+            // Check for request timeouts
+            let now = std::time::Instant::now();
+            this.pending_requests.retain(|_, request| {
+                if now.duration_since(request.start) > this.options.timeout {
+                let sender_clone = mem::replace(&mut request.sender, oneshot::channel().0);
+                let _ = sender_clone.send(Err(ReqError::Timeout));
+                false
+                } else {
+                    true
+                }
+            });
+
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 // Drain the egress queue
                 if let Some(msg) = this.egress_queue.pop_front() {
@@ -119,7 +132,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
 
             // Check for outgoing messages from the socket handle
             match this.from_socket.poll_recv(cx) {
-                Poll::Ready(Some(Command::Send { message, response })) => {
+                Poll::Ready(Some(Command::Send { message, response, .. })) => {
                     // Queue the message for sending
                     let start = std::time::Instant::now();
                     let msg = this.new_message(message);
