@@ -35,7 +35,6 @@ pub enum Command {
     Send {
         message: Bytes,
         response: oneshot::Sender<Result<Bytes, ReqError>>,
-        expiration: Instant,
     },
 }
 

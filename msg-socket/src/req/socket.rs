@@ -43,7 +43,6 @@ impl<T: ClientTransport> ReqSocket<T> {
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
-        let expiration = Instant::now() + self.options.timeout;
 
         self.to_driver
             .as_ref()
@@ -51,7 +50,6 @@ impl<T: ClientTransport> ReqSocket<T> {
             .send(Command::Send {
                 message,
                 response: response_tx,
-                expiration,
             })
             .await
             .map_err(|_| ReqError::SocketClosed)?;
@@ -86,6 +84,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             // If we do this, we'll never have to re-allocate.
             pending_requests: FxHashMap::default(),
             socket_state: Arc::clone(&self.state),
+            last_timeout_check: Instant::now(),
         };
 
         // Spawn the backend task

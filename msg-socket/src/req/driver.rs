@@ -17,7 +17,8 @@ use crate::req::SocketState;
 
 use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
-use core::mem;
+use std::time::{Instant, Duration};
+
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
@@ -37,10 +38,12 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
+    /// The time at which we last checked for timeouts.
+    pub(crate) last_timeout_check: Instant,
 }
 
 pub(crate) struct PendingRequest {
-    start: std::time::Instant,
+    start: Instant,
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
@@ -62,6 +65,24 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             // Update stats
             self.socket_state.stats.update_rtt(rtt);
             self.socket_state.stats.increment_rx(size);
+        }
+    }
+
+    fn check_timeouts(&mut self) {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_timeout_check) > Duration::from_secs(self.options.timeout.as_secs() / 10) {
+            let timed_out_keys: Vec<_> = self.pending_requests.iter()
+                .filter(|(_, request)| now.duration_since(request.start) > self.options.timeout)
+                .map(|(&key, _)| key)
+                .collect();
+    
+            for key in timed_out_keys {
+                if let Some(request) = self.pending_requests.remove(&key) {
+                    let _ = request.sender.send(Err(ReqError::Timeout));
+                }
+            }
+    
+            self.last_timeout_check = now;
         }
     }
 }
@@ -99,16 +120,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
             }
 
             // Check for request timeouts
-            let now = std::time::Instant::now();
-            this.pending_requests.retain(|_, request| {
-                if now.duration_since(request.start) > this.options.timeout {
-                let sender_clone = mem::replace(&mut request.sender, oneshot::channel().0);
-                let _ = sender_clone.send(Err(ReqError::Timeout));
-                false
-                } else {
-                    true
-                }
-            });
+            this.check_timeouts();
 
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 // Drain the egress queue
