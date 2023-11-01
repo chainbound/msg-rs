@@ -198,9 +198,8 @@ mod pubsub {
         rt.block_on(async {
             pub_socket.bind("127.0.0.1:0").await.unwrap();
 
-            sub.connect(&pub_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
+            let addr = pub_socket.local_addr().unwrap();
+            sub.connect(&addr.to_string()).await.unwrap();
 
             sub.subscribe("HELLO".to_string()).await.unwrap();
 
@@ -234,6 +233,7 @@ mod pubsub {
                     .instrument(tracing::info_span!("publisher"));
 
                     let recv = async {
+                        tokio::time::sleep(Duration::from_micros(5)).await;
                         let mut rx = 0;
                         while let Some(_msg) = sub.next().await {
                             rx += 1;

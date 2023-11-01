@@ -18,7 +18,7 @@ impl Authenticator for Auth {
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
-    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth::default());
+    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
