@@ -2,6 +2,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
 
+use msg_common::unix_micros;
+
 /// The ID of the pub/sub codec on the wire.
 const WIRE_ID: u8 = 0x03;
 
@@ -23,7 +25,7 @@ pub struct Message {
 impl Message {
     /// Creates a new message with the given sequence number, topic, and payload.
     /// If the payload is empty, the server will interpret this as a subscription toggle
-    /// for the given topic.
+    /// for the given topic. The timestamp is set to the current UNIX timestamp in microseconds.
     ///
     /// # Panics
     /// Panics if the topic is larger than 65535 bytes.
@@ -33,6 +35,7 @@ impl Message {
             header: Header {
                 topic_size: u16::try_from(topic.len()).expect("Topic too large, max 65535 bytes"),
                 topic,
+                timestamp: unix_micros(),
                 seq,
                 size: payload.len() as u32,
             },
@@ -100,6 +103,8 @@ pub struct Header {
     pub(crate) topic_size: u16,
     /// The actual topic.
     pub(crate) topic: Bytes,
+    /// The UNIX timestamp in microseconds.
+    pub(crate) timestamp: u64,
     /// The message sequence number.
     pub(crate) seq: u32,
     /// The size of the message. Max 4GiB.
@@ -110,7 +115,7 @@ impl Header {
     /// Returns the length of the header in bytes.
     #[inline]
     pub fn len(&self) -> usize {
-        10 + self.topic_size as usize
+        10 + 8 + self.topic_size as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -182,6 +187,7 @@ impl Decoder for Codec {
                     let header = Header {
                         topic_size,
                         topic,
+                        timestamp: src.get_u64(),
                         seq: src.get_u32(),
                         size: src.get_u32(),
                     };
@@ -219,6 +225,7 @@ impl Encoder<Message> for Codec {
         dst.put_u8(WIRE_ID);
         dst.put_u16(item.header.topic_size);
         dst.put(item.header.topic);
+        dst.put_u64(item.header.timestamp);
         dst.put_u32(item.header.seq);
         dst.put_u32(item.header.size);
         dst.put(item.payload);
