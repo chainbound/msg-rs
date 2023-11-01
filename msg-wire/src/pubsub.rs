@@ -72,6 +72,11 @@ impl Message {
     }
 
     #[inline]
+    pub fn timestamp(&self) -> u64 {
+        self.header.timestamp
+    }
+
+    #[inline]
     pub fn size(&self) -> usize {
         self.header.len() + self.payload_size() as usize
     }

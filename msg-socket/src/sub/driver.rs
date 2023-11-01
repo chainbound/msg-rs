@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::{Future, Stream, StreamExt};
+use msg_common::unix_micros;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -12,8 +13,11 @@ use tokio_stream::StreamMap;
 use tokio_util::codec::Framed;
 use tracing::{debug, error};
 
-use super::stream::TopicMessage;
-use super::{stream::PublisherStream, Command, PubMessage, SubOptions};
+use super::stats::SessionStats;
+use super::{
+    stream::{PublisherStream, TopicMessage},
+    Command, PubMessage, SocketState, SubOptions,
+};
 use msg_transport::ClientTransport;
 use msg_wire::pubsub;
 
@@ -34,6 +38,8 @@ pub(crate) struct SubDriver<T: ClientTransport> {
     pub(super) subscribed_topics: HashSet<String>,
     /// All active publisher sessions for this subscriber socket.
     pub(super) publishers: StreamMap<SocketAddr, PublisherSession<T::Io>>,
+    /// Socket state. This is shared with the backend task.
+    pub(super) state: Arc<SocketState>,
 }
 
 impl<T> Future for SubDriver<T>
@@ -125,6 +131,7 @@ where
             Command::Disconnect { endpoint } => {
                 if self.publishers.remove(&endpoint).is_some() {
                     debug!(endpoint = %endpoint, "Disconnected from publisher");
+                    self.state.stats.remove(&endpoint);
                 } else {
                     debug!(endpoint = %endpoint, "Not connected to publisher");
                 };
@@ -147,14 +154,20 @@ where
     fn on_connection(&mut self, addr: SocketAddr, io: T::Io) {
         // This should spawn a new task tied to this connection, and
         debug!("Connection to {} established, spawning session", addr);
-        let framed = Framed::new(io, pubsub::Codec::new());
+
+        let mut framed = Framed::new(io, pubsub::Codec::new());
+        framed.set_backpressure_boundary(self.options.read_buffer_size);
+
         let mut publisher_session = PublisherSession::new(addr, PublisherStream::new(framed));
+        // Get the shared session stats.
+        let session_stats = publisher_session.stats();
 
         for topic in self.subscribed_topics.iter() {
             publisher_session.subscribe(topic.clone());
         }
 
         self.publishers.insert(addr, publisher_session);
+        self.state.stats.insert(addr, session_stats);
     }
 }
 
@@ -167,6 +180,8 @@ pub(super) struct PublisherSession<Io> {
     egress: VecDeque<pubsub::Message>,
     /// The inner stream
     stream: PublisherStream<Io>,
+    /// The session stats
+    stats: Arc<SessionStats>,
 }
 
 impl<Io: AsyncRead + AsyncWrite + Send + Unpin> PublisherSession<Io> {
@@ -175,7 +190,13 @@ impl<Io: AsyncRead + AsyncWrite + Send + Unpin> PublisherSession<Io> {
             addr,
             stream,
             egress: VecDeque::with_capacity(4),
+            stats: Arc::new(SessionStats::default()),
         }
+    }
+
+    /// Returns a reference to the session stats.
+    fn stats(&self) -> Arc<SessionStats> {
+        Arc::clone(&self.stats)
     }
 
     /// Queues a subscribe message for this publisher.
@@ -204,6 +225,14 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherSession<Io> {
         loop {
             match this.stream.poll_next_unpin(cx) {
                 Poll::Ready(Some(result)) => {
+                    // Update session stats
+                    if let Ok(ref msg) = result {
+                        let now = unix_micros();
+
+                        this.stats.increment_rx(msg.payload.len());
+                        this.stats.update_latency(now - msg.timestamp);
+                    }
+
                     return Poll::Ready(Some(result));
                 }
                 Poll::Ready(None) => {

@@ -407,6 +407,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "msg-common",
  "msg-transport",
  "msg-wire",
  "parking_lot",
