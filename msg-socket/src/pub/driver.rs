@@ -24,16 +24,10 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     pub(super) options: Arc<PubOptions>,
     /// The publisher socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
-    /// Receiver from the socket front-end.
-    // pub(super) from_socket: mpsc::Receiver<Command>,
     /// Optional connection authenticator.
     pub(super) auth: Option<Arc<dyn Authenticator>>,
     /// A joinset of authentication tasks.
     pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
-    /// Stream map of session receivers, keyed by session ID. This is used to listen to
-    /// requests from the session like subscribe, unsubscribe, and to be notified when the
-    /// session is closed (`StreamNotifyClose`).
-    // pub(super) from_sessions: StreamMap<u32, StreamNotifyClose<ReceiverStream<SessionRequest>>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
