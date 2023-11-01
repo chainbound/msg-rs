@@ -189,6 +189,7 @@ mod pubsub {
         let mut sub = SubSocket::with_options(
             Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
             SubOptions {
+                read_buffer_size: 32768,
                 ingress_buffer_size: N_REQS,
                 ..Default::default()
             },
