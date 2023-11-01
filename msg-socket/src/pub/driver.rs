@@ -24,16 +24,10 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     pub(super) options: Arc<PubOptions>,
     /// The publisher socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
-    /// Receiver from the socket front-end.
-    // pub(super) from_socket: mpsc::Receiver<Command>,
     /// Optional connection authenticator.
     pub(super) auth: Option<Arc<dyn Authenticator>>,
     /// A joinset of authentication tasks.
     pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
-    /// Stream map of session receivers, keyed by session ID. This is used to listen to
-    /// requests from the session like subscribe, unsubscribe, and to be notified when the
-    /// session is closed (`StreamNotifyClose`).
-    // pub(super) from_sessions: StreamMap<u32, StreamNotifyClose<ReceiverStream<SessionRequest>>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
@@ -50,10 +44,10 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                     Ok(auth) => {
                         // Run custom authenticator
                         debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
-                        // this.state.stats.increment_active_clients();
 
                         // Default backpressury boundary of 8192 bytes, should we add config option?
-                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
 
                         let session = SubscriberSession {
                             seq: 0,
@@ -125,14 +119,16 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             })
                         });
                     } else {
-                        // this.state.stats.increment_active_clients();
+                        let mut framed = Framed::new(stream, pubsub::Codec::new());
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
+
                         let session = SubscriberSession {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
                             state: Arc::clone(&this.state),
                             pending_egress: None,
-                            conn: Framed::new(stream, pubsub::Codec::new()),
+                            conn: framed,
                             topic_filter: PrefixTrie::new(),
                             flush_interval: this.options.flush_interval.map(tokio::time::interval),
                         };

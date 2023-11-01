@@ -37,6 +37,9 @@ pub struct PubOptions {
     /// The interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.
     pub flush_interval: Option<std::time::Duration>,
+    /// The write buffer backpressure boundary in bytes. If the write buffer exceeds
+    /// this size, the buffer will be flushed.
+    pub backpressure_boundary: usize,
 }
 
 impl Default for PubOptions {
@@ -45,6 +48,7 @@ impl Default for PubOptions {
             max_connections: None,
             session_buffer_size: 1024,
             flush_interval: Some(std::time::Duration::from_micros(100)),
+            backpressure_boundary: 8192,
         }
     }
 }
