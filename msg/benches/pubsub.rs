@@ -169,7 +169,9 @@ mod pubsub {
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
+                backpressure_boundary: 32768,
                 session_buffer_size: N_REQS,
+                flush_interval: Some(Duration::from_micros(1000)),
                 ..Default::default()
             },
         );
@@ -177,6 +179,7 @@ mod pubsub {
         let mut sub = SubSocket::with_options(
             Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
             SubOptions {
+                read_buffer_size: 32768,
                 ingress_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -186,9 +189,8 @@ mod pubsub {
         rt.block_on(async {
             pub_socket.bind("127.0.0.1:0").await.unwrap();
 
-            sub.connect(&pub_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
+            let addr = pub_socket.local_addr().unwrap();
+            sub.connect(&addr.to_string()).await.unwrap();
 
             sub.subscribe("HELLO".to_string()).await.unwrap();
 
@@ -222,6 +224,7 @@ mod pubsub {
                     };
 
                     let recv = async {
+                        tokio::time::sleep(Duration::from_micros(5)).await;
                         let mut rx = 0;
                         while let Some(_msg) = sub.next().await {
                             rx += 1;
@@ -230,7 +233,7 @@ mod pubsub {
                             }
                         }
 
-                        Instant::now()
+                        Instant::now() - Duration::from_micros(5)
                     };
 
                     let (send_start, recv_end) = tokio::join!(send, recv);

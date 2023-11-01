@@ -14,6 +14,7 @@ async fn main() {
     let mut pub_socket = PubSocket::with_options(
         Tcp::new(),
         PubOptions {
+            backpressure_boundary: 8192,
             session_buffer_size: 1024,
             flush_interval: Some(Duration::from_micros(100)),
             max_connections: None,
