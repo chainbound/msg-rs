@@ -155,8 +155,7 @@ where
         // This should spawn a new task tied to this connection, and
         debug!("Connection to {} established, spawning session", addr);
 
-        let mut framed = Framed::new(io, pubsub::Codec::new());
-        framed.set_backpressure_boundary(self.options.read_buffer_size);
+        let framed = Framed::with_capacity(io, pubsub::Codec::new(), self.options.read_buffer_size);
 
         let mut publisher_session = PublisherSession::new(addr, PublisherStream::new(framed));
         // Get the shared session stats.

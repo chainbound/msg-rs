@@ -45,12 +45,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                         // Run custom authenticator
                         debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
 
-                        let mut framed = Framed::with_capacity(
-                            auth.stream,
-                            pubsub::Codec::new(),
-                            this.options.backpressure_boundary,
-                        );
-
+                        let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
 
                         let session = SubscriberSession {
@@ -124,12 +119,7 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                             })
                         });
                     } else {
-                        let mut framed = Framed::with_capacity(
-                            stream,
-                            pubsub::Codec::new(),
-                            this.options.backpressure_boundary,
-                        );
-
+                        let mut framed = Framed::new(stream, pubsub::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
 
                         let session = SubscriberSession {
