@@ -176,11 +176,13 @@ mod pubsub {
     }
 
     fn pubsub_with_runtime(bencher: divan::Bencher, rt: tokio::runtime::Runtime) {
+        let buffer_size = 1024 * 64;
+
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
                 flush_interval: Some(Duration::from_micros(100)),
-                backpressure_boundary: 1024 * 64,
+                backpressure_boundary: buffer_size,
                 session_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -189,7 +191,7 @@ mod pubsub {
         let mut sub = SubSocket::with_options(
             Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
             SubOptions {
-                read_buffer_size: 32768,
+                read_buffer_size: buffer_size,
                 ingress_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -234,7 +236,6 @@ mod pubsub {
                     .instrument(tracing::info_span!("publisher"));
 
                     let recv = async {
-                        tokio::time::sleep(Duration::from_micros(5)).await;
                         let mut rx = 0;
                         while let Some(_msg) = sub.next().await {
                             rx += 1;
