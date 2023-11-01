@@ -170,6 +170,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                 Poll::Pending => {}
             }
 
+            #[cfg(test)]
+            cx.waker().wake_by_ref();
+
             return Poll::Pending;
         }
     }
