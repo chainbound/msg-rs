@@ -11,6 +11,8 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+msg-common.workspace = true
+
 bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
