@@ -48,6 +48,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherStream<Io> {
 }
 
 pub(super) struct TopicMessage {
+    pub timestamp: u64,
     pub topic: String,
     pub payload: Bytes,
 }
@@ -66,10 +67,16 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
 
         if let Some(result) = ready!(this.conn.poll_next_unpin(cx)) {
             return Poll::Ready(Some(result.map(|msg| {
+                let timestamp = msg.timestamp();
                 let (topic, payload) = msg.into_parts();
+
                 // TODO: this will allocate. Can we just return the `Cow`?
                 let topic = String::from_utf8_lossy(&topic).to_string();
-                TopicMessage { topic, payload }
+                TopicMessage {
+                    timestamp,
+                    topic,
+                    payload,
+                }
             })));
         }
 
