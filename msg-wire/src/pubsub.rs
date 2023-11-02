@@ -178,8 +178,8 @@ impl Decoder for Codec {
 
                     cursor += 2;
 
-                    // We don't have enough bytes to read the topic and the rest of the data
-                    if src.len() < cursor + topic_size as usize + 8 {
+                    // We don't have enough bytes to read the topic and the rest of the data (timestamp u64, seq u32, size u32)
+                    if src.len() < cursor + topic_size as usize + 8 + 8 {
                         return Ok(None);
                     }
 
