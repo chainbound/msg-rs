@@ -147,7 +147,10 @@ where
         debug!(source = %msg.source, "New message: {:?}", msg);
         // TODO: queuing
         if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
-            error!(topic = msg.topic, "Slow subsriber socket, dropping message");
+            error!(
+                topic = msg.topic,
+                "Slow subscriber socket, dropping message"
+            );
         }
     }
 
