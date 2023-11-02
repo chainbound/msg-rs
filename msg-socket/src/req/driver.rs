@@ -17,7 +17,8 @@ use crate::req::SocketState;
 
 use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
-use std::time::{Instant, Duration};
+use std::time::Instant;
+use tokio::time::Interval;
 
 
 /// The request socket driver. Endless future that drives
@@ -38,8 +39,8 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
-    /// The time at which we last checked for timeouts.
-    pub(crate) last_timeout_check: Instant,
+    /// Interval for checking for request timeouts.
+    pub(crate) timeout_check_interval: Interval,
 }
 
 pub(crate) struct PendingRequest {
@@ -69,20 +70,22 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
     }
 
     fn check_timeouts(&mut self) {
-        let now = std::time::Instant::now();
-        if now.duration_since(self.last_timeout_check) > Duration::from_secs(self.options.timeout.as_secs() / 10) {
-            let timed_out_keys: Vec<_> = self.pending_requests.iter()
-                .filter(|(_, request)| now.duration_since(request.start) > self.options.timeout)
-                .map(|(&key, _)| key)
-                .collect();
-    
-            for key in timed_out_keys {
-                if let Some(request) = self.pending_requests.remove(&key) {
-                    let _ = request.sender.send(Err(ReqError::Timeout));
+        let now = Instant::now();
+        let timed_out_ids: Vec<u32> = self.pending_requests
+            .iter()
+            .filter_map(|(&id, request)| {
+                if now.duration_since(request.start) > self.options.timeout {
+                    Some(id)
+                } else {
+                    None
                 }
+            })
+            .collect();
+
+        for id in timed_out_ids {
+            if let Some(pending_request) = self.pending_requests.remove(&id) {
+                let _ = pending_request.sender.send(Err(ReqError::Timeout));
             }
-    
-            self.last_timeout_check = now;
         }
     }
 }
@@ -120,7 +123,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
             }
 
             // Check for request timeouts
-            this.check_timeouts();
+            while this.timeout_check_interval.poll_tick(cx).is_ready() {
+                this.check_timeouts();
+            }
 
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 // Drain the egress queue
@@ -169,9 +174,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                 }
                 Poll::Pending => {}
             }
-
-            #[cfg(test)]
-            cx.waker().wake_by_ref();
 
             return Poll::Pending;
         }

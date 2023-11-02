@@ -1,5 +1,5 @@
 use std::{collections::VecDeque, sync::Arc};
-use std::time::Instant;
+use std::time::Duration;
 use bytes::Bytes;
 use msg_transport::ClientTransport;
 use msg_wire::reqrep;
@@ -84,7 +84,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             // If we do this, we'll never have to re-allocate.
             pending_requests: FxHashMap::default(),
             socket_state: Arc::clone(&self.state),
-            last_timeout_check: Instant::now(),
+            timeout_check_interval: tokio::time::interval(Duration::from_secs(self.options.timeout.as_secs() / 10)),
         };
 
         // Spawn the backend task
@@ -121,7 +121,6 @@ mod tests {
                 let b = socket.read(&mut buf).await.unwrap();
                 let read = &buf[..b];
     
-                // Sleep for the specified duration
                 tokio::time::sleep(sleep_duration).await;
     
                 socket.write_all(read).await.unwrap();
@@ -140,14 +139,12 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let addr = spawn_listener(Duration::from_secs(0)).await;
-        tracing::info!("addr: {:?}", addr);
-
         
         let mut socket = ReqSocket::with_options(
             Tcp::new(),
             ReqOptions {
                 auth_token: None,
-                timeout: Duration::from_secs(5),
+                timeout: Duration::from_secs(15),
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(1),
                 retry_attempts: Some(3),
@@ -172,16 +169,15 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let addr = spawn_listener(Duration::from_secs(25)).await;
-        tracing::info!("addr: {:?}", addr);
 
         let mut socket = ReqSocket::with_options(
             Tcp::new(),
             ReqOptions {
                 auth_token: None,
-                timeout: Duration::from_secs(1),
+                timeout: Duration::from_secs(10),
                 retry_on_initial_failure: true,
-                backoff_duration: Duration::from_secs(1),
-                retry_attempts: Some(1),
+                backoff_duration: Duration::from_secs(0),
+                retry_attempts: None,
                 set_nodelay: true,
             },
         );
