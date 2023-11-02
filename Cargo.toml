@@ -1,5 +1,5 @@
 [workspace]
-members = ["msg", "msg-socket", "msg-wire", "msg-transport"]
+members = ["msg", "msg-socket", "msg-wire", "msg-transport", "msg-common"]
 
 [workspace.package]
 version = "0.1.0-alpha"
@@ -15,6 +15,7 @@ repository = "https://github.com/chainbound/msg-rs"
 msg-wire = { path = "./msg-wire" }
 msg-socket = { path = "./msg-socket" }
 msg-transport = { path = "./msg-transport" }
+msg-common = { path = "./msg-common" }
 
 # async
 async-trait = "0.1"

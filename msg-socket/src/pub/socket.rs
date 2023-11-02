@@ -32,6 +32,12 @@ impl<T: ServerTransport> PubSocket<T> {
 
     /// Creates a new publisher socket with the given transport and options.
     pub fn with_options(transport: T, options: PubOptions) -> Self {
+        assert_eq!(
+            options.backpressure_boundary % 2,
+            0,
+            "backpressure_boundary must be a multiple of 2"
+        );
+
         Self {
             transport: Some(transport),
             local_addr: None,

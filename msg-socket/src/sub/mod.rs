@@ -14,10 +14,12 @@ use tokio_stream::StreamMap;
 
 use msg_transport::ClientTransport;
 
-use self::driver::SubDriver;
-
 mod driver;
+mod stats;
 mod stream;
+
+use driver::SubDriver;
+use stats::SocketStats;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -56,6 +58,7 @@ pub struct SubOptions {
     pub auth_token: Option<Bytes>,
     pub timeout: std::time::Duration,
     pub ingress_buffer_size: usize,
+    pub read_buffer_size: usize,
 }
 
 impl SubOptions {
@@ -70,6 +73,7 @@ impl Default for SubOptions {
     fn default() -> Self {
         Self {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
+            read_buffer_size: 8192,
             auth_token: None,
             timeout: std::time::Duration::from_secs(5),
         }
@@ -129,8 +133,8 @@ pub struct SubSocket<T: ClientTransport> {
     options: Arc<SubOptions>,
     /// The pending driver.
     driver: Option<SubDriver<T>>,
-    // / Socket state. This is shared with the backend task.
-    // state: Arc<SocketState>,
+    /// Socket state. This is shared with the socket frontend.
+    state: Arc<SocketState>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -148,6 +152,8 @@ where
 
         let options = Arc::new(options);
 
+        let state = Arc::new(SocketState::default());
+
         let driver = SubDriver {
             options: Arc::clone(&options),
             transport: Arc::new(transport),
@@ -156,6 +162,7 @@ where
             connection_tasks: JoinSet::new(),
             publishers: StreamMap::with_capacity(24),
             subscribed_topics: HashSet::with_capacity(32),
+            state: Arc::clone(&state),
         };
 
         Self {
@@ -163,6 +170,7 @@ where
             from_driver,
             driver: Some(driver),
             options,
+            state,
             _marker: std::marker::PhantomData,
         }
     }
@@ -270,6 +278,10 @@ where
             tokio::spawn(driver);
         }
     }
+
+    pub fn stats(&self) -> &SocketStats {
+        &self.state.stats
+    }
 }
 
 impl<T: ClientTransport> Drop for SubSocket<T> {
@@ -287,11 +299,11 @@ impl<T: ClientTransport + Unpin> Stream for SubSocket<T> {
     }
 }
 
-// The request socket state, shared between the backend task and the socket.
-// #[derive(Debug, Default)]
-// pub(crate) struct SocketState {
-//     pub(crate) stats: SocketStats,
-// }
+/// The request socket state, shared between the backend task and the socket.
+#[derive(Debug, Default)]
+pub(crate) struct SocketState {
+    pub(crate) stats: SocketStats,
+}
 
 #[cfg(test)]
 mod tests {

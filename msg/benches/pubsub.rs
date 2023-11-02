@@ -176,11 +176,13 @@ mod pubsub {
     }
 
     fn pubsub_with_runtime(bencher: divan::Bencher, rt: tokio::runtime::Runtime) {
+        let buffer_size = 1024 * 64;
+
         let mut pub_socket = PubSocket::with_options(
             Tcp::new(),
             PubOptions {
                 flush_interval: Some(Duration::from_micros(100)),
-                backpressure_boundary: 1024 * 64,
+                backpressure_boundary: buffer_size,
                 session_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -189,6 +191,7 @@ mod pubsub {
         let mut sub = SubSocket::with_options(
             Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
             SubOptions {
+                read_buffer_size: buffer_size,
                 ingress_buffer_size: N_REQS,
                 ..Default::default()
             },
@@ -198,9 +201,8 @@ mod pubsub {
         rt.block_on(async {
             pub_socket.bind("127.0.0.1:0").await.unwrap();
 
-            sub.connect(&pub_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
+            let addr = pub_socket.local_addr().unwrap();
+            sub.connect(&addr.to_string()).await.unwrap();
 
             sub.subscribe("HELLO".to_string()).await.unwrap();
 
