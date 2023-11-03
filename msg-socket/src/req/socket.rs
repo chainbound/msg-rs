@@ -1,9 +1,9 @@
-use std::{collections::VecDeque, sync::Arc};
-use std::time::Duration;
 use bytes::Bytes;
 use msg_transport::ClientTransport;
 use msg_wire::reqrep;
 use rustc_hash::FxHashMap;
+use std::time::Duration;
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
@@ -84,7 +84,9 @@ impl<T: ClientTransport> ReqSocket<T> {
             // If we do this, we'll never have to re-allocate.
             pending_requests: FxHashMap::default(),
             socket_state: Arc::clone(&self.state),
-            timeout_check_interval: tokio::time::interval(Duration::from_secs(self.options.timeout.as_secs() / 10)),
+            timeout_check_interval: tokio::time::interval(Duration::from_millis(
+                self.options.timeout.as_millis() as u64 / 10,
+            )),
         };
 
         // Spawn the backend task
@@ -101,36 +103,36 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use msg_transport::Tcp;
-    use std::time::Duration;
-    use tokio::net::TcpListener;
     use std::net::SocketAddr;
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use tracing::Instrument;
 
     async fn spawn_listener(sleep_duration: Duration) -> SocketAddr {
         let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
-    
+
         let addr = listener.local_addr().unwrap();
-    
+
         tokio::spawn(
             async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 tracing::info!("Accepted connection");
-    
+
                 let mut buf = [0u8; 1024];
                 let b = socket.read(&mut buf).await.unwrap();
                 let read = &buf[..b];
-    
+
                 tokio::time::sleep(sleep_duration).await;
-    
+
                 socket.write_all(read).await.unwrap();
                 tracing::info!("Sent bytes: {:?}", read);
-    
+
                 socket.flush().await.unwrap();
             }
             .instrument(tracing::info_span!("listener")),
         );
-    
+
         addr
     }
 
@@ -139,12 +141,12 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let addr = spawn_listener(Duration::from_secs(0)).await;
-        
+
         let mut socket = ReqSocket::with_options(
             Tcp::new(),
             ReqOptions {
                 auth_token: None,
-                timeout: Duration::from_secs(15),
+                timeout: Duration::from_secs(1),
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(1),
                 retry_attempts: Some(3),
@@ -154,27 +156,34 @@ mod tests {
 
         let addr_str = addr.to_string();
         let connect_result = socket.connect(&addr_str).await;
-        assert!(connect_result.is_ok(), "Failed to connect: {:?}", connect_result.err());
+        assert!(
+            connect_result.is_ok(),
+            "Failed to connect: {:?}",
+            connect_result.err()
+        );
 
         let request = Bytes::from_static(b"test request");
         let response = socket.request(request.clone()).await;
 
         assert!(response.is_ok(), "Request failed: {:?}", response.err());
-        assert_eq!(response.unwrap(), request, "Response does not match request");
-
+        assert_eq!(
+            response.unwrap(),
+            request,
+            "Response does not match request"
+        );
     }
 
     #[tokio::test]
     async fn test_req_socket_timeout() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let addr = spawn_listener(Duration::from_secs(25)).await;
+        let addr = spawn_listener(Duration::from_secs(3)).await;
 
         let mut socket = ReqSocket::with_options(
             Tcp::new(),
             ReqOptions {
                 auth_token: None,
-                timeout: Duration::from_secs(10),
+                timeout: Duration::from_secs(1),
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(0),
                 retry_attempts: None,
@@ -184,11 +193,19 @@ mod tests {
 
         let addr_str = addr.to_string();
         let connect_result = socket.connect(&addr_str).await;
-        assert!(connect_result.is_ok(), "Failed to connect: {:?}", connect_result.err());
+        assert!(
+            connect_result.is_ok(),
+            "Failed to connect: {:?}",
+            connect_result.err()
+        );
 
         let request = Bytes::from_static(b"test request");
         let response = socket.request(request.clone()).await;
 
-        assert!(response.is_err(), "Request succeeded when it should have timed out: {:?}", response.ok());
+        assert!(
+            response.is_err(),
+            "Request succeeded when it should have timed out: {:?}",
+            response.ok()
+        );
     }
 }

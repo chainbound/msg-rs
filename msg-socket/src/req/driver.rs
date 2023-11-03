@@ -20,7 +20,6 @@ use msg_wire::reqrep;
 use std::time::Instant;
 use tokio::time::Interval;
 
-
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
 pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
@@ -71,7 +70,8 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
 
     fn check_timeouts(&mut self) {
         let now = Instant::now();
-        let timed_out_ids: Vec<u32> = self.pending_requests
+        let timed_out_ids: Vec<u32> = self
+            .pending_requests
             .iter()
             .filter_map(|(&id, request)| {
                 if now.duration_since(request.start) > self.options.timeout {
@@ -149,7 +149,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
 
             // Check for outgoing messages from the socket handle
             match this.from_socket.poll_recv(cx) {
-                Poll::Ready(Some(Command::Send { message, response, .. })) => {
+                Poll::Ready(Some(Command::Send { message, response })) => {
                     // Queue the message for sending
                     let start = std::time::Instant::now();
                     let msg = this.new_message(message);
