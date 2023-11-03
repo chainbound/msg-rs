@@ -27,6 +27,8 @@ pub enum ReqError {
     SocketClosed,
     #[error("Transport error: {0:?}")]
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Request timed out")]
+    Timeout,
 }
 
 pub enum Command {
