@@ -397,12 +397,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "msg-common"
+version = "0.1.0-alpha"
+
+[[package]]
 name = "msg-socket"
 version = "0.1.0-alpha"
 dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "msg-common",
  "msg-transport",
  "msg-wire",
  "parking_lot",
@@ -436,6 +441,7 @@ name = "msg-wire"
 version = "0.1.0-alpha"
 dependencies = [
  "bytes",
+ "msg-common",
  "thiserror",
  "tokio-util",
  "tracing",
