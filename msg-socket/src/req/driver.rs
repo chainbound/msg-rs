@@ -19,6 +19,7 @@ use super::{Command, ReqError, ReqOptions};
 use msg_wire::reqrep;
 use std::time::Instant;
 use tokio::time::Interval;
+use tokio::sync::Semaphore;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
@@ -38,6 +39,8 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
+    /// Semaphore to limit the amount of active outgoing requests.
+    pub(crate) semaphore: Arc<Semaphore>,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
 }
@@ -65,6 +68,9 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             // Update stats
             self.socket_state.stats.update_rtt(rtt);
             self.socket_state.stats.increment_rx(size);
+
+            // Release a permit back to the semaphore.
+            self.semaphore.add_permits(1);
         }
     }
 
