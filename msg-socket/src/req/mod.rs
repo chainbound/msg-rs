@@ -27,6 +27,8 @@ pub enum ReqError {
     SocketClosed,
     #[error("Transport error: {0:?}")]
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Invalid endpoint: {0}")]
+    InvalidEndpoint(String),
     #[error("Request timed out")]
     Timeout,
 }
@@ -46,6 +48,7 @@ pub struct ReqOptions {
     pub backoff_duration: std::time::Duration,
     pub retry_attempts: Option<usize>,
     pub set_nodelay: bool,
+    pub max_active_requests: usize,
 }
 
 impl ReqOptions {
@@ -65,6 +68,7 @@ impl Default for ReqOptions {
             backoff_duration: Duration::from_millis(200),
             retry_attempts: None,
             set_nodelay: true,
+            max_active_requests: 100,
         }
     }
 }
