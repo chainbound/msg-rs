@@ -35,7 +35,7 @@ impl<T: ClientTransport> ReqSocket<T> {
         Self {
             to_driver: None,
             transport,
-            options: Arc::new(options.clone()),
+            options: Arc::new(options),
             state: Arc::new(SocketState::default()),
             active_requests: Arc::new(AtomicUsize::new(0)),
         }
