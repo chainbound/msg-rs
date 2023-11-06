@@ -31,6 +31,9 @@ pub enum ReqError {
     InvalidEndpoint(String),
     #[error("Request timed out")]
     Timeout,
+    #[error("Too many requests")]
+    TooManyRequests,
+
 }
 
 pub enum Command {

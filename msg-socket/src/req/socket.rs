@@ -6,11 +6,11 @@ use std::time::Duration;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{req::stats::SocketStats, req::SocketState};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
-use tokio::sync::Semaphore;
 
 #[derive(Debug, Clone)]
 pub struct ReqSocket<T: ClientTransport> {
@@ -22,8 +22,8 @@ pub struct ReqSocket<T: ClientTransport> {
     options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
     state: Arc<SocketState>,
-    /// Semaphore to limit the amount of active outgoing requests.
-    semaphore: Arc<Semaphore>,
+    /// The currently active requests.
+    active_requests: Arc<AtomicUsize>,
 }
 
 impl<T: ClientTransport> ReqSocket<T> {
@@ -37,7 +37,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             transport,
             options: Arc::new(options.clone()),
             state: Arc::new(SocketState::default()),
-            semaphore: Arc::new(Semaphore::new(options.max_active_requests)),
+            active_requests: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -46,7 +46,11 @@ impl<T: ClientTransport> ReqSocket<T> {
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
-        let permit = self.semaphore.acquire().await;
+        if self.active_requests.load(Ordering::SeqCst) >= self.options.max_active_requests {
+            return Err(ReqError::TooManyRequests);
+        } 
+        self.active_requests.fetch_add(1, Ordering::SeqCst);
+
         let (response_tx, response_rx) = oneshot::channel();
 
         self.to_driver
@@ -59,13 +63,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 
-            let result = response_rx.await.map_err(|_| ReqError::SocketClosed)?;
-
-            // Explicitly drop the permit after the request is completed
-            drop(permit);
-            println!("Dropped permit");
-        
-            result
+            response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
     /// Connects to the target with the default options.
@@ -97,7 +95,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             timeout_check_interval: tokio::time::interval(Duration::from_millis(
                 self.options.timeout.as_millis() as u64 / 10,
             )),
-            semaphore: Arc::clone(&self.semaphore),
+            active_requests: Arc::clone(&self.active_requests),
         };
 
         // Spawn the backend task
@@ -166,7 +164,7 @@ mod tests {
                 backoff_duration: Duration::from_secs(1),
                 retry_attempts: Some(3),
                 set_nodelay: true,
-                max_active_requests: 100,
+                max_active_requests: 1,
             },
         );
 
@@ -227,7 +225,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_semaphore_happy_path() {
+    async fn test_req_socket_too_many_requests() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let addr = spawn_listener(Duration::from_secs(0)).await;
@@ -253,16 +251,19 @@ mod tests {
             "Failed to connect: {:?}",
             connect_result.err()
         );
-
         let request = Bytes::from_static(b"test request");
         let mut futures = Vec::new();
-        for _ in 0..=max_active_requests {
+        for _ in 0..max_active_requests {
             futures.push(socket.request(request.clone()));
         }
-
+    
+        futures.push(socket.request(request.clone()));
+    
         let results = futures::future::join_all(futures).await;
-
-        let num_successes = results.iter().filter(|res| res.is_ok()).count();
-        assert_eq!(num_successes, max_active_requests + 1);
-    }
+    
+        match results.last().expect("No results") {
+            Err(ReqError::TooManyRequests) => {}
+            _ => panic!("Expected TooManyRequests error, got {:?}", results.last()),
+        }
+    }      
 }
