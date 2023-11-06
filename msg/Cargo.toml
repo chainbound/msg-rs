@@ -29,6 +29,7 @@ divan = "0.1"
 futures.workspace = true
 tracing.workspace = true
 rand.workspace = true
+criterion.workspace = true
 
 [[bench]]
 name = "reqrep"
