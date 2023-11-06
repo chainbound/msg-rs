@@ -44,6 +44,8 @@ pub struct ReqOptions {
     pub timeout: std::time::Duration,
     pub retry_on_initial_failure: bool,
     pub backoff_duration: std::time::Duration,
+    /// The interval that the request connection should be flushed. Default this is `None`, and the connection is flushed after every send.
+    pub flush_interval: Option<std::time::Duration>,
     pub retry_attempts: Option<usize>,
     pub set_nodelay: bool,
 }
@@ -63,6 +65,7 @@ impl Default for ReqOptions {
             timeout: std::time::Duration::from_secs(5),
             retry_on_initial_failure: true,
             backoff_duration: Duration::from_millis(200),
+            flush_interval: None,
             retry_attempts: None,
             set_nodelay: true,
         }

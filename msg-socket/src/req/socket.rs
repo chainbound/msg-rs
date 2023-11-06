@@ -87,6 +87,8 @@ impl<T: ClientTransport> ReqSocket<T> {
             timeout_check_interval: tokio::time::interval(Duration::from_millis(
                 self.options.timeout.as_millis() as u64 / 10,
             )),
+            flush_interval: self.options.flush_interval.map(tokio::time::interval),
+            should_flush: false,
         };
 
         // Spawn the backend task
@@ -149,6 +151,7 @@ mod tests {
                 timeout: Duration::from_secs(1),
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(1),
+                flush_interval: None,
                 retry_attempts: Some(3),
                 set_nodelay: true,
             },
@@ -186,6 +189,7 @@ mod tests {
                 timeout: Duration::from_secs(1),
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(0),
+                flush_interval: None,
                 retry_attempts: None,
                 set_nodelay: true,
             },
