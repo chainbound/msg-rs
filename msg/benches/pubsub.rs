@@ -4,6 +4,7 @@ use criterion::{
     Throughput,
 };
 use futures::StreamExt;
+use pprof::criterion::{Output, PProfProfiler};
 use rand::Rng;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
@@ -19,7 +20,7 @@ const MSG_SIZE: usize = 512;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-struct PubsubBenchmark {
+struct PairBenchmark {
     rt: Runtime,
     publisher: PubSocket<Tcp>,
     subscriber: SubSocket<Tcp>,
@@ -28,7 +29,7 @@ struct PubsubBenchmark {
     msg_sizes: Vec<usize>,
 }
 
-impl PubsubBenchmark {
+impl PairBenchmark {
     fn init(&mut self) {
         // Set up the socket connections
         self.rt.block_on(async {
@@ -169,7 +170,7 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
         },
     );
 
-    let mut bench = PubsubBenchmark {
+    let mut bench = PairBenchmark {
         rt,
         publisher,
         subscriber,
@@ -224,7 +225,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
         },
     );
 
-    let mut bench = PubsubBenchmark {
+    let mut bench = PairBenchmark {
         rt,
         publisher,
         subscriber,
@@ -251,7 +252,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().warm_up_time(Duration::from_secs(1));
+    config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = pubsub_single_thread_tcp, pubsub_multi_thread_tcp
 }
 
