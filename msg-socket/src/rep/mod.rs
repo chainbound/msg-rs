@@ -28,7 +28,6 @@ pub enum PubError {
 pub struct RepOptions {
     pub set_nodelay: bool,
     pub max_connections: Option<usize>,
-    pub flush_interval: Option<std::time::Duration>,
 }
 
 impl Default for RepOptions {
@@ -36,7 +35,6 @@ impl Default for RepOptions {
         Self {
             set_nodelay: true,
             max_connections: None,
-            flush_interval: None,
         }
     }
 }
