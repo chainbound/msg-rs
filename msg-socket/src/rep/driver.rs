@@ -15,7 +15,7 @@ use tokio::{
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 
-use crate::{rep::SocketState, AuthResult, Authenticator, PubError, Request};
+use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
 use msg_transport::ServerTransport;
 use msg_wire::{auth, reqrep};
 
@@ -25,6 +25,8 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     addr: SocketAddr,
     egress_queue: VecDeque<reqrep::Message>,
     state: Arc<SocketState>,
+    flush_interval: Option<tokio::time::Interval>,
+    should_flush: bool,
 }
 
 pub(crate) struct RepDriver<T: ServerTransport> {
@@ -32,6 +34,8 @@ pub(crate) struct RepDriver<T: ServerTransport> {
     pub(crate) transport: T,
     /// The reply socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
+    /// Options shared with socket.
+    pub(crate) options: Arc<RepOptions>,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
     /// Note that when the [`PeerState`] stream ends, it will be silently removed
     /// from this map.
@@ -86,6 +90,11 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 // TODO: pre-allocate according to some options
                                 egress_queue: VecDeque::with_capacity(64),
                                 state: Arc::clone(&this.state),
+                                flush_interval: this
+                                    .options
+                                    .flush_interval
+                                    .map(tokio::time::interval),
+                                should_flush: false,
                             }),
                         );
                     }
@@ -153,6 +162,11 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 // TODO: pre-allocate according to some options
                                 egress_queue: VecDeque::with_capacity(64),
                                 state: Arc::clone(&this.state),
+                                flush_interval: this
+                                    .options
+                                    .flush_interval
+                                    .map(tokio::time::interval),
+                                should_flush: false,
                             }),
                         );
 
@@ -175,6 +189,27 @@ impl<T: ServerTransport> Future for RepDriver<T> {
     }
 }
 
+impl<T: AsyncRead + AsyncWrite> PeerState<T> {
+    #[inline]
+    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
+        if self.should_flush {
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.poll_tick(cx).is_ready()
+            } else {
+                true
+            }
+        } else {
+            // If we shouldn't flush, reset the interval so we don't get woken up
+            // every time the interval expires
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.reset()
+            }
+
+            false
+        }
+    }
+}
+
 impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
     type Item = Result<Request, PubError>;
 
@@ -184,7 +219,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
         loop {
             // Flush any messages on the outgoing buffer
-            let _ = this.conn.poll_flush_unpin(cx);
+            if this.should_flush(cx) {
+                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
+                    this.should_flush = false;
+                }
+            }
 
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
@@ -193,6 +232,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
                             this.state.stats.increment_tx(msg_len);
+
+                            this.should_flush = true;
                             // We might be able to send more queued messages
                             continue;
                         }

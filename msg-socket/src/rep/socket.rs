@@ -75,6 +75,7 @@ impl<T: ServerTransport> RepSocket<T> {
 
         let backend = RepDriver {
             transport,
+            options: Arc::clone(&self.options),
             state: Arc::clone(&self.state),
             peer_states: StreamMap::with_capacity(self.options.max_connections.unwrap_or(64)),
             to_socket,
