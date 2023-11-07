@@ -221,10 +221,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_req_socket_too_many_requests() {
+        use crate::RepSocket;
+        use tokio_stream::StreamExt;
+
         let _ = tracing_subscriber::fmt::try_init();
     
-        let addr = spawn_listener(Duration::from_secs(0)).await;
-    
+        let mut rep = RepSocket::new(Tcp::new());
+        rep.bind("0.0.0.0:0").await.unwrap();
+        
+        let addr = rep.local_addr().unwrap();
+        
+        tokio::spawn(async move {
+            while let Some(request) = rep.next().await {
+                request.respond(Bytes::from("test response")).unwrap();
+            }
+        });
+
         let max_pending_requests = 10;
         let mut socket = ReqSocket::with_options(
             Tcp::new(),
@@ -250,8 +262,8 @@ mod tests {
         let request = Bytes::from_static(b"test request");
         let mut futures = Vec::new();
     
-        // Sending an arbitrary large amount of requests
-        for _ in 0..20 {
+        // Sending one more request than max
+        for _ in 0..=max_pending_requests {
             let future = socket.request(request.clone());
             futures.push(future);
         }
