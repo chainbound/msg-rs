@@ -68,7 +68,7 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             self.socket_state.stats.update_rtt(rtt);
             self.socket_state.stats.increment_rx(size);
 
-            self.active_requests.fetch_sub(1, Ordering::SeqCst);
+            self.active_requests.fetch_sub(1, Ordering::Relaxed);
         }
     }
 
@@ -88,7 +88,7 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
 
         for id in timed_out_ids {
             if let Some(pending_request) = self.pending_requests.remove(&id) {
-                self.active_requests.fetch_sub(1, Ordering::SeqCst);
+                self.active_requests.fetch_sub(1, Ordering::Relaxed);
                 let _ = pending_request.sender.send(Err(ReqError::Timeout));
             }
         }
@@ -167,6 +167,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                             sender: response,
                         },
                     );
+
+                    this.active_requests.fetch_add(1, Ordering::Relaxed);
 
                     continue;
                 }

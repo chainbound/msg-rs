@@ -51,7 +51,7 @@ pub struct ReqOptions {
     pub backoff_duration: std::time::Duration,
     pub retry_attempts: Option<usize>,
     pub set_nodelay: bool,
-    pub max_active_requests: usize,
+    pub max_pending_requests: usize,
 }
 
 impl ReqOptions {
@@ -71,7 +71,7 @@ impl Default for ReqOptions {
             backoff_duration: Duration::from_millis(200),
             retry_attempts: None,
             set_nodelay: true,
-            max_active_requests: 100,
+            max_pending_requests: 100,
         }
     }
 }
