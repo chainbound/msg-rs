@@ -73,12 +73,15 @@ impl<T: ClientTransport> ReqSocket<T> {
             .await
             .map_err(|e| ReqError::Transport(Box::new(e)))?;
 
+        let mut framed = Framed::new(stream, reqrep::Codec::new());
+        framed.set_backpressure_boundary(self.options.backpressure_boundary);
+
         // Create the socket backend
         let driver = ReqDriver {
             options: Arc::clone(&self.options),
             id_counter: 0,
             from_socket,
-            conn: Framed::new(stream, reqrep::Codec::new()),
+            conn: framed,
             egress_queue: VecDeque::new(),
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.
@@ -152,6 +155,7 @@ mod tests {
                 retry_on_initial_failure: true,
                 backoff_duration: Duration::from_secs(1),
                 flush_interval: None,
+                backpressure_boundary: 8192,
                 retry_attempts: Some(3),
                 set_nodelay: true,
             },
@@ -188,7 +192,8 @@ mod tests {
                 auth_token: None,
                 timeout: Duration::from_secs(1),
                 retry_on_initial_failure: true,
-                backoff_duration: Duration::from_secs(0),
+                backoff_duration: Duration::from_millis(200),
+                backpressure_boundary: 8192,
                 flush_interval: None,
                 retry_attempts: None,
                 set_nodelay: true,
