@@ -54,53 +54,7 @@ impl PairBenchmark {
             group.throughput(Throughput::Bytes(*size as u64 * self.n_reqs as u64));
             group.bench_function(BenchmarkId::from_parameter(size), |b| {
                 let mut rng = rand::thread_rng();
-                let messages: Vec<_> = (0..N_REQS)
-                    .map(|_| {
-                        let mut vec = vec![0u8; MSG_SIZE];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect();
-
-                b.iter(|| {
-                    self.rt.block_on(async {
-                        let send = async {
-                            let start = Instant::now();
-                            for msg in &messages {
-                                self.publisher
-                                    .publish("HELLO".to_string(), msg.to_owned())
-                                    .await
-                                    .unwrap();
-                            }
-
-                            start
-                        };
-
-                        let recv = async {
-                            let mut rx = 0;
-                            while let Some(_msg) = self.subscriber.next().await {
-                                rx += 1;
-                                if rx + 1 == N_REQS {
-                                    break;
-                                }
-                            }
-                        };
-
-                        tokio::join!(send, recv);
-                    });
-                });
-            });
-        }
-
-        group.finish();
-    }
-
-    fn bench_message_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
-        for size in &self.msg_sizes {
-            group.throughput(Throughput::Elements(self.n_reqs as u64));
-            group.bench_function(BenchmarkId::from_parameter(size), |b| {
-                let mut rng = rand::thread_rng();
-                let messages: Vec<_> = (0..N_REQS)
+                let messages: Vec<_> = (0..self.n_reqs)
                     .map(|_| {
                         let mut vec = vec![0u8; *size];
                         rng.fill(&mut vec[..]);
@@ -126,7 +80,53 @@ impl PairBenchmark {
                             let mut rx = 0;
                             while let Some(_msg) = self.subscriber.next().await {
                                 rx += 1;
-                                if rx + 1 == N_REQS {
+                                if rx + 1 == self.n_reqs {
+                                    break;
+                                }
+                            }
+                        };
+
+                        tokio::join!(send, recv);
+                    });
+                });
+            });
+        }
+
+        group.finish();
+    }
+
+    fn bench_message_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
+        for size in &self.msg_sizes {
+            group.throughput(Throughput::Elements(self.n_reqs as u64));
+            group.bench_function(BenchmarkId::from_parameter(size), |b| {
+                let mut rng = rand::thread_rng();
+                let messages: Vec<_> = (0..self.n_reqs)
+                    .map(|_| {
+                        let mut vec = vec![0u8; *size];
+                        rng.fill(&mut vec[..]);
+                        Bytes::from(vec)
+                    })
+                    .collect();
+
+                b.iter(|| {
+                    self.rt.block_on(async {
+                        let send = async {
+                            let start = Instant::now();
+                            for msg in &messages {
+                                self.publisher
+                                    .publish("HELLO".to_string(), msg.to_owned())
+                                    .await
+                                    .unwrap();
+                            }
+
+                            start
+                        };
+
+                        let recv = async {
+                            let mut rx = 0;
+                            while let Some(_msg) = self.subscriber.next().await {
+                                rx += 1;
+                                if rx + 1 == self.n_reqs {
                                     break;
                                 }
                             }

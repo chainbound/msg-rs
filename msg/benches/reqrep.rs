@@ -1,213 +1,199 @@
+use std::time::Duration;
+
 use bytes::Bytes;
+use criterion::{
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion,
+    Throughput,
+};
 use futures::StreamExt;
+use pprof::criterion::Output;
 use rand::Rng;
 
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
-use msg_transport::{Tcp, TcpOptions};
+use msg_transport::Tcp;
+use tokio::runtime::Runtime;
 
-const N_REQS: usize = 50_000;
+const N_REQS: usize = 10_000;
 const PAR_FACTOR: usize = 64;
 const MSG_SIZE: usize = 512;
 
-/// Benchmark the throughput of request/response socket pairs over localhost
-fn main() {
+// Using jemalloc improves performance by ~10%
+#[cfg(all(not(windows), not(target_env = "musl")))]
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
+struct PairBenchmark {
+    rt: Runtime,
+    req: ReqSocket<Tcp>,
+    rep: Option<RepSocket<Tcp>>,
+
+    n_reqs: usize,
+    msg_sizes: Vec<usize>,
+}
+
+impl PairBenchmark {
+    fn init(&mut self) {
+        let mut rep = self.rep.take().unwrap();
+        // setup the socket connections
+        self.rt.block_on(async {
+            rep.bind("127.0.0.1:0").await.unwrap();
+
+            self.req
+                .connect(&rep.local_addr().unwrap().to_string())
+                .await
+                .unwrap();
+
+            tokio::spawn(async move {
+                rep.map(|req| async move {
+                    let msg = req.msg().clone();
+                    req.respond(msg).unwrap();
+                })
+                .buffer_unordered(PAR_FACTOR)
+                .for_each(|_| async {})
+                .await;
+            });
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        });
+    }
+
+    fn bench_request_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
+        for size in &self.msg_sizes {
+            group.throughput(Throughput::Bytes(*size as u64 * self.n_reqs as u64));
+            group.bench_function(BenchmarkId::from_parameter(size), |b| {
+                let mut rng = rand::thread_rng();
+                let requests: Vec<_> = (0..self.n_reqs)
+                    .map(|_| {
+                        let mut vec = vec![0u8; *size];
+                        rng.fill(&mut vec[..]);
+                        Bytes::from(vec)
+                    })
+                    .collect();
+
+                b.iter(|| {
+                    let requests = requests.clone();
+                    self.rt.block_on(async {
+                        tokio_stream::iter(requests)
+                            .map(|msg| self.req.request(msg))
+                            .buffer_unordered(PAR_FACTOR)
+                            .for_each(|_| async {})
+                            .await;
+                    });
+                });
+            });
+        }
+    }
+
+    fn bench_rps(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
+        for size in &self.msg_sizes {
+            group.throughput(Throughput::Elements(self.n_reqs as u64));
+            group.bench_function(BenchmarkId::from_parameter(size), |b| {
+                let mut rng = rand::thread_rng();
+                let requests: Vec<_> = (0..self.n_reqs)
+                    .map(|_| {
+                        let mut vec = vec![0u8; *size];
+                        rng.fill(&mut vec[..]);
+                        Bytes::from(vec)
+                    })
+                    .collect();
+
+                b.iter(|| {
+                    let requests = requests.clone();
+                    self.rt.block_on(async {
+                        tokio_stream::iter(requests)
+                            .map(|msg| self.req.request(msg))
+                            .buffer_unordered(PAR_FACTOR)
+                            .for_each(|_| async {})
+                            .await;
+                    });
+                });
+            });
+        }
+
+        group.finish();
+    }
+}
+
+fn reqrep_single_thread_tcp(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    // Using jemalloc improves performance by ~10%
-    #[cfg(all(not(windows), not(target_env = "musl")))]
-    #[global_allocator]
-    static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
 
-    divan::main();
+    let req = ReqSocket::with_options(
+        Tcp::new(),
+        ReqOptions {
+            // Add a flush interval to reduce the number of syscalls
+            flush_interval: Some(Duration::from_micros(50)),
+            ..Default::default()
+        },
+    );
+
+    let rep = RepSocket::new(Tcp::new());
+
+    let mut bench = PairBenchmark {
+        rt,
+        req,
+        rep: Some(rep),
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init();
+    let mut group = c.benchmark_group("reqrep_single_thread_tcp_bytes");
+    group.sample_size(10);
+    bench.bench_request_throughput(group);
+
+    let mut group = c.benchmark_group("reqrep_single_thread_tcp_rps");
+    group.sample_size(10);
+    bench.bench_rps(group);
 }
 
-#[divan::bench_group(sample_count = 16)]
-mod reqrep {
+fn reqrep_multi_thread_tcp(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
 
-    use std::time::{Duration, Instant};
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
 
-    use divan::counter::{BytesCount, ItemsCount};
+    let req = ReqSocket::with_options(
+        Tcp::new(),
+        ReqOptions {
+            // Add a flush interval to reduce the number of syscalls
+            flush_interval: Some(Duration::from_micros(50)),
+            ..Default::default()
+        },
+    );
 
-    use super::*;
+    let rep = RepSocket::new(Tcp::new());
 
-    /// Last run: 314 ms, 81.51 MB/s, 159.2 Kitem/s
-    #[divan::bench()]
-    fn reqrep_single_thread_tcp(bencher: divan::Bencher) {
-        // create a multi-threaded tokio runtime
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+    let mut bench = PairBenchmark {
+        rt,
+        req,
+        rep: Some(rep),
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
 
-        reqrep_with_runtime(bencher, rt);
-    }
+    bench.init();
+    let mut group = c.benchmark_group("reqrep_multi_thread_tcp_bytes");
+    group.sample_size(10);
+    bench.bench_request_throughput(group);
 
-    /// Last run: 249.6 ms, 102.5 MB/s, 200.2 Kitem/s
-    #[divan::bench()]
-    fn reqrep_multi_thread_tcp(bencher: divan::Bencher) {
-        // create a multi-threaded tokio runtime
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        reqrep_with_runtime(bencher, rt);
-    }
-
-    /// Last run: 475.2 ms, 53.86 MB/s, 105.2 Kitem/s
-    #[divan::bench]
-    fn reqrep_2_request(bencher: divan::Bencher) {
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        let mut rep_socket = RepSocket::new(Tcp::new());
-        let mut req1 = ReqSocket::with_options(
-            Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-            ReqOptions::default(),
-        );
-        let mut req2 = ReqSocket::with_options(
-            Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-            ReqOptions::default(),
-        );
-
-        // setup the socket connections
-        rt.block_on(async {
-            rep_socket.bind("127.0.0.1:0").await.unwrap();
-
-            req1.connect(&rep_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
-
-            req2.connect(&rep_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
-
-            tokio::spawn(async move {
-                // Receive the request and respond with "world"
-                // RepSocket implements `Stream`
-                rep_socket
-                    .map(|req| async move {
-                        req.respond(Bytes::from("hello")).unwrap();
-                    })
-                    .buffer_unordered(PAR_FACTOR)
-                    .for_each(|_| async {})
-                    .await;
-            });
-
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        });
-
-        bencher
-            .counter(ItemsCount::new(N_REQS as u64))
-            .counter(BytesCount::new((N_REQS * MSG_SIZE) as u64))
-            .with_inputs(|| -> Vec<Bytes> {
-                // Prepare the messages to send
-                let mut rng = rand::thread_rng();
-                (0..N_REQS)
-                    .map(|_| {
-                        let mut vec = vec![0u8; MSG_SIZE];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect()
-            })
-            .bench_local_values(|msg_vec: Vec<Bytes>| {
-                rt.block_on(async {
-                    let start = Instant::now();
-                    let send1 = tokio_stream::iter(msg_vec.clone())
-                        .map(|msg| req1.request(msg))
-                        .buffer_unordered(PAR_FACTOR)
-                        .for_each(|_| async {});
-
-                    let send2 = tokio_stream::iter(msg_vec)
-                        .map(|msg| req1.request(msg))
-                        .buffer_unordered(PAR_FACTOR)
-                        .for_each(|_| async {});
-
-                    tokio::join!(send1, send2);
-                    let elapsed = start.elapsed();
-                    let avg_throughput = N_REQS as f64 / elapsed.as_secs_f64();
-                    let mbps = avg_throughput * MSG_SIZE as f64 / 1_000_000.0;
-                    tracing::debug!(
-                        "Throughput: {:.0} msgs/s {:.0} MB/s, Avg time: {:.2} ms",
-                        avg_throughput,
-                        mbps,
-                        elapsed.as_millis()
-                    );
-                });
-            });
-    }
-
-    fn reqrep_with_runtime(bencher: divan::Bencher, rt: tokio::runtime::Runtime) {
-        let mut req_socket = ReqSocket::with_options(
-            Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-            ReqOptions {
-                // Add a flush interval to reduce the number of syscalls
-                flush_interval: Some(Duration::from_micros(50)),
-                ..Default::default()
-            },
-        );
-        let mut rep_socket = RepSocket::new(Tcp::new());
-
-        // setup the socket connections
-        rt.block_on(async {
-            rep_socket.bind("127.0.0.1:0").await.unwrap();
-
-            req_socket
-                .connect(&rep_socket.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
-
-            tokio::spawn(async move {
-                // Receive the request and respond with "world"
-                // RepSocket implements `Stream`
-                rep_socket
-                    .map(|req| async move {
-                        req.respond(Bytes::from("hello")).unwrap();
-                    })
-                    .buffer_unordered(PAR_FACTOR)
-                    .for_each(|_| async {})
-                    .await;
-            });
-
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        });
-
-        bencher
-            .counter(ItemsCount::new(N_REQS as u64))
-            .counter(BytesCount::new((N_REQS * MSG_SIZE) as u64))
-            .with_inputs(|| -> Vec<Bytes> {
-                // Prepare the messages to send
-                let mut rng = rand::thread_rng();
-                (0..N_REQS)
-                    .map(|_| {
-                        let mut vec = vec![0u8; MSG_SIZE];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect()
-            })
-            .bench_local_values(|msg_vec: Vec<Bytes>| {
-                rt.block_on(async {
-                    let start = Instant::now();
-                    tokio_stream::iter(msg_vec)
-                        .map(|msg| req_socket.request(msg))
-                        .buffer_unordered(PAR_FACTOR)
-                        .for_each(|_| async {})
-                        .await;
-
-                    let elapsed = start.elapsed();
-                    let avg_throughput = N_REQS as f64 / elapsed.as_secs_f64();
-                    let mbps = avg_throughput * MSG_SIZE as f64 / 1_000_000.0;
-                    tracing::debug!(
-                        "Throughput: {:.0} msgs/s {:.0} MB/s, Avg time: {:.2} ms",
-                        avg_throughput,
-                        mbps,
-                        elapsed.as_millis()
-                    );
-                });
-            });
-    }
+    let mut group = c.benchmark_group("reqrep_multi_thread_tcp_rps");
+    group.sample_size(10);
+    bench.bench_rps(group);
 }
+
+criterion_group! {
+    name = benches;
+    config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(pprof::criterion::PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp
+}
+
+// Runs various benchmarks for the `PubSocket` and `SubSocket`.
+criterion_main!(benches);
