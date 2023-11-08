@@ -75,6 +75,8 @@ impl PairBenchmark {
                 });
             });
         }
+
+        group.finish();
     }
 
     fn bench_rps(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
