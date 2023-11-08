@@ -40,6 +40,10 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
+    /// Interval for flushing the connection. This is secondary to `should_flush`.
+    pub(crate) flush_interval: Option<tokio::time::Interval>,
+    /// Whether or not the connection should be flushed
+    pub(crate) should_flush: bool,
 }
 
 pub(crate) struct PendingRequest {
@@ -88,6 +92,25 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             }
         }
     }
+
+    #[inline]
+    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
+        if self.should_flush {
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.poll_tick(cx).is_ready()
+            } else {
+                true
+            }
+        } else {
+            // If we shouldn't flush, reset the interval so we don't get woken up
+            // every time the interval expires
+            if let Some(interval) = self.flush_interval.as_mut() {
+                interval.reset()
+            }
+
+            false
+        }
+    }
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
@@ -97,7 +120,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
         let this = self.get_mut();
 
         loop {
-            let _ = this.conn.poll_flush_unpin(cx);
+            if this.should_flush(cx) {
+                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
+                    this.should_flush = false;
+                }
+            }
 
             // Check for incoming messages from the socket
             match this.conn.poll_next_unpin(cx) {
@@ -136,6 +163,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
                             this.socket_state.stats.increment_tx(size);
+
+                            this.should_flush = true;
                             // We might be able to send more queued messages
                             continue;
                         }
