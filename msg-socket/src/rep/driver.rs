@@ -25,6 +25,7 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     addr: SocketAddr,
     egress_queue: VecDeque<reqrep::Message>,
     state: Arc<SocketState>,
+    should_flush: bool,
 }
 
 pub(crate) struct RepDriver<T: ServerTransport> {
@@ -89,6 +90,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 // TODO: pre-allocate according to some options
                                 egress_queue: VecDeque::with_capacity(64),
                                 state: Arc::clone(&this.state),
+                                should_flush: false,
                             }),
                         );
                     }
@@ -156,6 +158,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 // TODO: pre-allocate according to some options
                                 egress_queue: VecDeque::with_capacity(64),
                                 state: Arc::clone(&this.state),
+                                should_flush: false,
                             }),
                         );
 
@@ -187,7 +190,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
 
         loop {
             // Flush any messages on the outgoing buffer
-            let _ = this.conn.poll_flush_unpin(cx);
+            if this.should_flush {
+                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
+                    this.should_flush = false;
+                }
+            }
 
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
@@ -196,6 +203,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
                             this.state.stats.increment_tx(msg_len);
+                            this.should_flush = true;
 
                             // We might be able to send more queued messages
                             continue;
