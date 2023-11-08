@@ -44,6 +44,12 @@ pub struct ReqOptions {
     pub timeout: std::time::Duration,
     pub retry_on_initial_failure: bool,
     pub backoff_duration: std::time::Duration,
+    /// The interval that the request connection should be flushed.
+    /// Default is `None`, and the connection is flushed after every send.
+    pub flush_interval: Option<std::time::Duration>,
+    /// The maximum number of bytes that can be buffered in the session before being flushed.
+    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    pub backpressure_boundary: usize,
     pub retry_attempts: Option<usize>,
     pub set_nodelay: bool,
 }
@@ -63,6 +69,8 @@ impl Default for ReqOptions {
             timeout: std::time::Duration::from_secs(5),
             retry_on_initial_failure: true,
             backoff_duration: Duration::from_millis(200),
+            flush_interval: None,
+            backpressure_boundary: 8192,
             retry_attempts: None,
             set_nodelay: true,
         }
