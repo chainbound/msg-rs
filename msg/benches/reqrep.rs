@@ -141,10 +141,13 @@ mod reqrep {
     }
 
     fn reqrep_with_runtime(bencher: divan::Bencher, rt: tokio::runtime::Runtime) {
-        //Note: Configure Tcp transport when #9 is merged.
         let mut req_socket = ReqSocket::with_options(
             Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-            ReqOptions::default(),
+            ReqOptions {
+                // Add a flush interval to reduce the number of syscalls
+                flush_interval: Some(Duration::from_micros(50)),
+                ..Default::default()
+            },
         );
         let mut rep_socket = RepSocket::new(Tcp::new());
 
