@@ -59,17 +59,10 @@ impl PairBenchmark {
 
     fn bench_request_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
         for size in &self.msg_sizes {
+            let requests = generate_requests(self.n_reqs, *size);
+
             group.throughput(Throughput::Bytes(*size as u64 * self.n_reqs as u64));
             group.bench_function(BenchmarkId::from_parameter(size), |b| {
-                let mut rng = rand::thread_rng();
-                let requests: Vec<_> = (0..self.n_reqs)
-                    .map(|_| {
-                        let mut vec = vec![0u8; *size];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect();
-
                 b.iter(|| {
                     let requests = requests.clone();
                     self.rt.block_on(async {
@@ -86,17 +79,10 @@ impl PairBenchmark {
 
     fn bench_rps(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
         for size in &self.msg_sizes {
+            let requests = generate_requests(self.n_reqs, *size);
+
             group.throughput(Throughput::Elements(self.n_reqs as u64));
             group.bench_function(BenchmarkId::from_parameter(size), |b| {
-                let mut rng = rand::thread_rng();
-                let requests: Vec<_> = (0..self.n_reqs)
-                    .map(|_| {
-                        let mut vec = vec![0u8; *size];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect();
-
                 b.iter(|| {
                     let requests = requests.clone();
                     self.rt.block_on(async {
@@ -112,6 +98,17 @@ impl PairBenchmark {
 
         group.finish();
     }
+}
+
+fn generate_requests(n_reqs: usize, msg_size: usize) -> Vec<Bytes> {
+    let mut rng = rand::thread_rng();
+    (0..n_reqs)
+        .map(|_| {
+            let mut vec = vec![0u8; msg_size];
+            rng.fill(&mut vec[..]);
+            Bytes::from(vec)
+        })
+        .collect()
 }
 
 fn reqrep_single_thread_tcp(c: &mut Criterion) {

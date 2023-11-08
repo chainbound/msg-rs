@@ -51,17 +51,10 @@ impl PairBenchmark {
 
     fn bench_bytes_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
         for size in &self.msg_sizes {
+            let messages = generate_messages(self.n_reqs, *size);
+
             group.throughput(Throughput::Bytes(*size as u64 * self.n_reqs as u64));
             group.bench_function(BenchmarkId::from_parameter(size), |b| {
-                let mut rng = rand::thread_rng();
-                let messages: Vec<_> = (0..self.n_reqs)
-                    .map(|_| {
-                        let mut vec = vec![0u8; *size];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect();
-
                 b.iter(|| {
                     self.rt.block_on(async {
                         let send = async {
@@ -97,17 +90,10 @@ impl PairBenchmark {
 
     fn bench_message_throughput(&mut self, mut group: BenchmarkGroup<'_, WallTime>) {
         for size in &self.msg_sizes {
+            let messages = generate_messages(self.n_reqs, *size);
+
             group.throughput(Throughput::Elements(self.n_reqs as u64));
             group.bench_function(BenchmarkId::from_parameter(size), |b| {
-                let mut rng = rand::thread_rng();
-                let messages: Vec<_> = (0..self.n_reqs)
-                    .map(|_| {
-                        let mut vec = vec![0u8; *size];
-                        rng.fill(&mut vec[..]);
-                        Bytes::from(vec)
-                    })
-                    .collect();
-
                 b.iter(|| {
                     self.rt.block_on(async {
                         let send = async {
@@ -140,6 +126,17 @@ impl PairBenchmark {
 
         group.finish();
     }
+}
+
+fn generate_messages(n_reqs: usize, msg_size: usize) -> Vec<Bytes> {
+    let mut rng = rand::thread_rng();
+    (0..n_reqs)
+        .map(|_| {
+            let mut vec = vec![0u8; msg_size];
+            rng.fill(&mut vec[..]);
+            Bytes::from(vec)
+        })
+        .collect()
 }
 
 fn pubsub_single_thread_tcp(c: &mut Criterion) {
