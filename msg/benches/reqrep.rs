@@ -194,5 +194,5 @@ criterion_group! {
     targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp
 }
 
-// Runs various benchmarks for the `PubSocket` and `SubSocket`.
+// Runs various benchmarks for the `ReqSocket` and `RepSocket`.
 criterion_main!(benches);
