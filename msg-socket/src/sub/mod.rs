@@ -55,10 +55,10 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
-    pub auth_token: Option<Bytes>,
-    pub timeout: std::time::Duration,
-    pub ingress_buffer_size: usize,
-    pub read_buffer_size: usize,
+    auth_token: Option<Bytes>,
+    timeout: std::time::Duration,
+    ingress_buffer_size: usize,
+    read_buffer_size: usize,
 }
 
 impl SubOptions {

@@ -32,14 +32,14 @@ pub enum PubError {
 
 #[derive(Debug)]
 pub struct PubOptions {
-    pub max_clients: Option<usize>,
-    pub session_buffer_size: usize,
+    max_clients: Option<usize>,
+    session_buffer_size: usize,
     /// The interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.
-    pub flush_interval: Option<std::time::Duration>,
+    flush_interval: Option<std::time::Duration>,
     /// The maximum number of bytes that can be buffered in the session before being flushed.
     /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub backpressure_boundary: usize,
+    backpressure_boundary: usize,
 }
 
 impl Default for PubOptions {

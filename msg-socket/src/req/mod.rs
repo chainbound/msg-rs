@@ -40,18 +40,18 @@ pub enum Command {
 
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
-    pub auth_token: Option<Bytes>,
-    pub timeout: std::time::Duration,
-    pub blocking_connect: bool,
-    pub backoff_duration: std::time::Duration,
+    auth_token: Option<Bytes>,
+    timeout: std::time::Duration,
+    blocking_connect: bool,
+    backoff_duration: std::time::Duration,
     /// The interval that the request connection should be flushed.
     /// Default is `None`, and the connection is flushed after every send.
-    pub flush_interval: Option<std::time::Duration>,
+    flush_interval: Option<std::time::Duration>,
     /// The maximum number of bytes that can be buffered in the session before being flushed.
     /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub backpressure_boundary: usize,
+    backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
-    pub retry_attempts: Option<usize>,
+    retry_attempts: Option<usize>,
 }
 
 impl ReqOptions {

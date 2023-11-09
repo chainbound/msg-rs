@@ -27,7 +27,7 @@ pub enum PubError {
 
 #[derive(Default)]
 pub struct RepOptions {
-    pub max_clients: Option<usize>,
+    max_clients: Option<usize>,
 }
 
 impl RepOptions {

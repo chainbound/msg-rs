@@ -13,30 +13,22 @@ async fn main() {
     // Configure the publisher socket with options
     let mut pub_socket = PubSocket::with_options(
         Tcp::new(),
-        PubOptions {
-            backpressure_boundary: 8192,
-            session_buffer_size: 1024,
-            flush_interval: Some(Duration::from_micros(100)),
-            max_clients: None,
-        },
+        PubOptions::default()
+            .backpressure_boundary(8192)
+            .session_buffer_size(1024)
+            .flush_interval(Duration::from_micros(100)),
     );
 
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            ingress_buffer_size: 1024,
-            ..Default::default()
-        },
+        SubOptions::default().ingress_buffer_size(1024),
     );
 
     let mut sub2 = SubSocket::with_options(
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            ingress_buffer_size: 1024,
-            ..Default::default()
-        },
+        SubOptions::default().ingress_buffer_size(1024),
     );
 
     tracing::info!("Setting up the sockets...");
