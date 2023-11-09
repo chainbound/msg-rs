@@ -45,6 +45,8 @@ impl<T: ClientTransport> ReqSocket<T> {
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
+        println!("Active requests: {}", self.active_requests.load(Ordering::Relaxed));
+
         if self.active_requests.load(Ordering::Relaxed) >= self.options.max_pending_requests {
             return Err(ReqError::TooManyRequests);
         } 
@@ -61,6 +63,8 @@ impl<T: ClientTransport> ReqSocket<T> {
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 
+            println!("Active requests after sending: {}", self.active_requests.load(Ordering::Relaxed));
+
             response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
@@ -68,6 +72,7 @@ impl<T: ClientTransport> ReqSocket<T> {
     pub async fn connect(&mut self, endpoint: &str) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let active_requests = self.active_requests.clone();
 
         let endpoint = endpoint.parse().map_err(|_| ReqError::InvalidEndpoint(endpoint.to_string()))?;
 
@@ -91,7 +96,7 @@ impl<T: ClientTransport> ReqSocket<T> {
             pending_requests,
             socket_state: Arc::clone(&self.state),
             timeout_check_interval: tokio::time::interval(self.options.timeout / 10),
-            active_requests: Arc::clone(&self.active_requests),
+            active_requests,
         };
 
         // Spawn the backend task
@@ -233,6 +238,7 @@ mod tests {
         
         tokio::spawn(async move {
             while let Some(request) = rep.next().await {
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 request.respond(Bytes::from("test response")).unwrap();
             }
         });
@@ -262,8 +268,9 @@ mod tests {
         let request = Bytes::from_static(b"test request");
         let mut futures = Vec::new();
     
-        // Sending one more request than max
-        for _ in 0..=max_pending_requests {
+        for i in 0..=max_pending_requests {
+            let delay: u64 = (i * 10).try_into().unwrap();
+            tokio::time::sleep(Duration::from_millis(delay)).await;
             let future = socket.request(request.clone());
             futures.push(future);
         }
@@ -271,7 +278,11 @@ mod tests {
         let results = futures::future::join_all(futures).await;
     
         for result in results {
-            assert!(result.is_ok(), "Request failed: {:?}", result.err());
+            if let Err(e) = result {
+                assert!(matches!(e, ReqError::TooManyRequests), "Unexpected error: {:?}", e);
+            } else {
+                panic!("Request succeeded when it should have failed");
+            }
         }
     } 
 }

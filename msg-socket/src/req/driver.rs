@@ -67,8 +67,11 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
             // Update stats
             self.socket_state.stats.update_rtt(rtt);
             self.socket_state.stats.increment_rx(size);
+            println!("on message before subtracting: {}", self.active_requests.load(Ordering::Relaxed));
 
             self.active_requests.fetch_sub(1, Ordering::Relaxed);
+            println!("on message after subtracting: {}", self.active_requests.load(Ordering::Relaxed));
+
         }
     }
 
@@ -88,7 +91,11 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
 
         for id in timed_out_ids {
             if let Some(pending_request) = self.pending_requests.remove(&id) {
+                println!("timeout before subtracting: {}", self.active_requests.load(Ordering::Relaxed));
+
                 self.active_requests.fetch_sub(1, Ordering::Relaxed);
+                println!("timeout after subtracting: {}", self.active_requests.load(Ordering::Relaxed));
+
                 let _ = pending_request.sender.send(Err(ReqError::Timeout));
             }
         }
@@ -154,7 +161,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
 
             // Check for outgoing messages from the socket handle
             match this.from_socket.poll_recv(cx) {
-                Poll::Ready(Some(Command::Send { message, response })) => {
+                Poll::Ready(Some(Command::Send { message, response })) => {                    
                     // Queue the message for sending
                     let start = std::time::Instant::now();
                     let msg = this.new_message(message);
@@ -168,7 +175,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
                         },
                     );
 
+                    println!("Active requests before adding: {}", this.active_requests.load(Ordering::Relaxed));
                     this.active_requests.fetch_add(1, Ordering::Relaxed);
+                    println!("Active requests after adding: {}", this.active_requests.load(Ordering::Relaxed));
 
                     continue;
                 }
