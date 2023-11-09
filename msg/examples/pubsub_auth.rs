@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg_socket::{Authenticator, PubOptions, PubSocket, SubOptions, SubSocket};
+use msg_socket::{Authenticator, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Tcp, TcpOptions};
 
 #[derive(Default)]
@@ -27,38 +27,22 @@ impl Authenticator for Auth {
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     // Configure the publisher socket with options
-    let mut pub_socket = PubSocket::with_options(
-        Tcp::new(),
-        PubOptions {
-            backpressure_boundary: 8192,
-            session_buffer_size: 1024,
-            flush_interval: Some(Duration::from_micros(100)),
-            max_connections: None,
-        },
-    )
-    // Enable the authenticator
-    .with_auth(Auth);
+    let mut pub_socket = PubSocket::new(Tcp::new())
+        // Enable the authenticator
+        .with_auth(Auth);
 
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            // Set the client ID for authentication
-            auth_token: Some(Bytes::from("client1")),
-            ingress_buffer_size: 1024,
-            ..Default::default()
-        },
+        // Set the auth token
+        SubOptions::default().auth_token(Bytes::from("client1")),
     );
 
     let mut sub2 = SubSocket::with_options(
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            // Set the client ID for authentication. This client ID will be rejected.
-            auth_token: Some(Bytes::from("client2")),
-            ingress_buffer_size: 1024,
-            ..Default::default()
-        },
+        // Set the auth token
+        SubOptions::default().auth_token(Bytes::from("client2")),
     );
 
     tracing::info!("Setting up the sockets...");

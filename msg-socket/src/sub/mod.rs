@@ -55,16 +55,32 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
-    pub auth_token: Option<Bytes>,
-    pub timeout: std::time::Duration,
-    pub ingress_buffer_size: usize,
-    pub read_buffer_size: usize,
+    /// The optional authentication token for the client.
+    auth_token: Option<Bytes>,
+    /// The maximum amount of incoming messages that will be buffered before being dropped due to
+    /// a slow consumer.
+    ingress_buffer_size: usize,
+    /// The read buffer size for each session.
+    read_buffer_size: usize,
 }
 
 impl SubOptions {
     /// Sets the authentication token for the socket.
-    pub fn with_token(mut self, auth_token: Bytes) -> Self {
+    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
+        self
+    }
+
+    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
+    /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
+    pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
+        self.ingress_buffer_size = ingress_buffer_size;
+        self
+    }
+
+    /// Sets the read buffer size. This sets the size of the read buffer for each session.
+    pub fn read_buffer_size(mut self, read_buffer_size: usize) -> Self {
+        self.read_buffer_size = read_buffer_size;
         self
     }
 }
@@ -75,7 +91,6 @@ impl Default for SubOptions {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
             auth_token: None,
-            timeout: std::time::Duration::from_secs(5),
         }
     }
 }

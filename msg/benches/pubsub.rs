@@ -151,21 +151,17 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
 
     let publisher = PubSocket::with_options(
         Tcp::new(),
-        PubOptions {
-            flush_interval: Some(Duration::from_micros(100)),
-            backpressure_boundary: buffer_size,
-            session_buffer_size: N_REQS * 2,
-            ..Default::default()
-        },
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            read_buffer_size: buffer_size,
-            ingress_buffer_size: N_REQS * 2,
-            ..Default::default()
-        },
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -200,21 +196,17 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
 
     let publisher = PubSocket::with_options(
         Tcp::new(),
-        PubOptions {
-            flush_interval: Some(Duration::from_micros(100)),
-            backpressure_boundary: buffer_size,
-            session_buffer_size: N_REQS * 2,
-            ..Default::default()
-        },
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions {
-            read_buffer_size: buffer_size,
-            ingress_buffer_size: N_REQS * 2,
-            ..Default::default()
-        },
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {

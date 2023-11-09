@@ -123,11 +123,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
 
     let req = ReqSocket::with_options(
         Tcp::new(),
-        ReqOptions {
-            // Add a flush interval to reduce the number of syscalls
-            flush_interval: Some(Duration::from_micros(50)),
-            ..Default::default()
-        },
+        ReqOptions::default().flush_interval(Duration::from_micros(50)),
     );
 
     let rep = RepSocket::new(Tcp::new());
@@ -161,11 +157,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
 
     let req = ReqSocket::with_options(
         Tcp::new(),
-        ReqOptions {
-            // Add a flush interval to reduce the number of syscalls
-            flush_interval: Some(Duration::from_micros(50)),
-            ..Default::default()
-        },
+        ReqOptions::default().flush_interval(Duration::from_micros(50)),
     );
 
     let rep = RepSocket::new(Tcp::new());

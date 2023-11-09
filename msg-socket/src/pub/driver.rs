@@ -6,7 +6,7 @@ use std::{
 };
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use super::{
     session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
@@ -62,11 +62,11 @@ impl<T: ServerTransport> Future for PubDriver<T> {
 
                         tokio::spawn(session);
 
-                        this.state.stats.increment_active_clients();
                         this.id_counter = this.id_counter.wrapping_add(1);
                     }
                     Err(e) => {
                         error!("Error authenticating client: {:?}", e);
+                        this.state.stats.decrement_active_clients();
                     }
                 }
 
@@ -76,6 +76,21 @@ impl<T: ServerTransport> Future for PubDriver<T> {
             // Poll the transport for new incoming connections
             match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
+                    if let Some(max) = this.options.max_clients {
+                        if this.state.stats.active_clients() >= max {
+                            warn!(
+                                "Max connections reached ({}), rejecting connection from {}",
+                                max, addr
+                            );
+
+                            continue;
+                        }
+                    }
+
+                    // Increment the active clients counter. If the authentication fails, this counter
+                    // will be decremented.
+                    this.state.stats.increment_active_clients();
+
                     // If authentication is enabled, start the authentication process
                     if let Some(ref auth) = this.auth {
                         let authenticator = Arc::clone(auth);
@@ -136,10 +151,11 @@ impl<T: ServerTransport> Future for PubDriver<T> {
 
                         tokio::spawn(session);
 
-                        this.state.stats.increment_active_clients();
                         this.id_counter = this.id_counter.wrapping_add(1);
-
-                        debug!("New connection from {}", addr);
+                        debug!(
+                            "New connection from {}, session ID {}",
+                            addr, this.id_counter
+                        );
                     }
 
                     continue;

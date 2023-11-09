@@ -60,7 +60,10 @@ impl<T: ServerTransport> RepSocket<T> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // Take the transport here, so we can move it into the backend task
-        let mut transport = self.transport.take().unwrap();
+        let mut transport = self
+            .transport
+            .take()
+            .expect("Transport already taken, cannot bind multiple times");
 
         transport
             .bind(addr)
@@ -77,7 +80,7 @@ impl<T: ServerTransport> RepSocket<T> {
             transport,
             options: Arc::clone(&self.options),
             state: Arc::clone(&self.state),
-            peer_states: StreamMap::with_capacity(self.options.max_connections.unwrap_or(64)),
+            peer_states: StreamMap::with_capacity(self.options.max_clients.unwrap_or(64)),
             to_socket,
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
