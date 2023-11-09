@@ -27,13 +27,13 @@ pub enum PubError {
 
 #[derive(Default)]
 pub struct RepOptions {
-    pub max_connections: Option<usize>,
+    pub max_clients: Option<usize>,
 }
 
 impl RepOptions {
-    /// Sets the maximum number of concurrent connections.
-    pub fn max_connections(mut self, max_connections: usize) -> Self {
-        self.max_connections = Some(max_connections);
+    /// Sets the number of maximum concurrent clients.
+    pub fn max_clients(mut self, max_clients: usize) -> Self {
+        self.max_clients = Some(max_clients);
         self
     }
 }
@@ -206,7 +206,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::with_options(Tcp::new(), RepOptions::default().max_connections(1));
+        let mut rep = RepSocket::with_options(Tcp::new(), RepOptions::default().max_clients(1));
         rep.bind("127.0.0.1:0").await.unwrap();
 
         let mut req1 = ReqSocket::new(Tcp::new());

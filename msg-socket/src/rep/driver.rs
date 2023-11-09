@@ -105,7 +105,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
             // Poll the transport for new incoming connections
             match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
-                    if let Some(max) = this.options.max_connections {
+                    if let Some(max) = this.options.max_clients {
                         if this.peer_states.len() >= max {
                             tracing::warn!(
                                 "Max connections reached ({}), rejecting connection from {}",

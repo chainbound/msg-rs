@@ -80,7 +80,7 @@ impl<T: ServerTransport> RepSocket<T> {
             transport,
             options: Arc::clone(&self.options),
             state: Arc::clone(&self.state),
-            peer_states: StreamMap::with_capacity(self.options.max_connections.unwrap_or(64)),
+            peer_states: StreamMap::with_capacity(self.options.max_clients.unwrap_or(64)),
             to_socket,
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
