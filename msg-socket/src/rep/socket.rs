@@ -60,7 +60,10 @@ impl<T: ServerTransport> RepSocket<T> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // Take the transport here, so we can move it into the backend task
-        let mut transport = self.transport.take().unwrap();
+        let mut transport = self
+            .transport
+            .take()
+            .expect("Transport already taken, cannot bind multiple times");
 
         transport
             .bind(addr)

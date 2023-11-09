@@ -25,17 +25,16 @@ pub enum PubError {
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
+#[derive(Default)]
 pub struct RepOptions {
-    pub set_nodelay: bool,
     pub max_connections: Option<usize>,
 }
 
-impl Default for RepOptions {
-    fn default() -> Self {
-        Self {
-            set_nodelay: true,
-            max_connections: None,
-        }
+impl RepOptions {
+    /// Sets the maximum number of concurrent connections.
+    pub fn max_connections(mut self, max_connections: usize) -> Self {
+        self.max_connections = Some(max_connections);
+        self
     }
 }
 
@@ -205,53 +204,22 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_batch_req_rep() {
+    async fn test_rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::new(Tcp::new());
+        let mut rep = RepSocket::with_options(Tcp::new(), RepOptions::default().max_connections(1));
         rep.bind("127.0.0.1:0").await.unwrap();
 
-        let mut req = ReqSocket::new(Tcp::new());
-        req.connect(&rep.local_addr().unwrap().to_string())
+        let mut req1 = ReqSocket::new(Tcp::new());
+        req1.connect(&rep.local_addr().unwrap().to_string())
             .await
             .unwrap();
 
-        let par_factor = 64;
-        let n_reqs = 100000;
+        let mut req2 = ReqSocket::new(Tcp::new());
+        req2.connect(&rep.local_addr().unwrap().to_string())
+            .await
+            .unwrap();
 
-        tokio::spawn(async move {
-            rep.map(|req| async move {
-                req.respond(Bytes::from("hello")).unwrap();
-            })
-            .buffer_unordered(par_factor)
-            .for_each(|_| async {})
-            .await;
-        });
-
-        let mut rng = rand::thread_rng();
-        let msg_vec: Vec<Bytes> = (0..n_reqs)
-            .map(|_| {
-                let mut vec = vec![0u8; 512];
-                rng.fill(&mut vec[..]);
-                Bytes::from(vec)
-            })
-            .collect();
-
-        let start = std::time::Instant::now();
-
-        tokio_stream::iter(msg_vec)
-            .map(|msg| req.request(msg))
-            .buffer_unordered(par_factor)
-            .for_each(|_| async {})
-            .await;
-
-        let elapsed = start.elapsed();
-        // On my machine (Mac M1 8 cores, 16 GB RAM: 400ms or about 250k req/s)
-        tracing::info!(
-            "{} reqs in {:?}, req/s: {}, stats: {:?}",
-            n_reqs,
-            elapsed,
-            n_reqs as f64 / elapsed.as_secs_f64(),
-            req.stats()
-        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(rep.stats().active_clients(), 1);
     }
 }

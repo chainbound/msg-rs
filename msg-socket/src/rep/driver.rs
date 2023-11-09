@@ -105,6 +105,18 @@ impl<T: ServerTransport> Future for RepDriver<T> {
             // Poll the transport for new incoming connections
             match this.transport.poll_accept(cx) {
                 Poll::Ready(Ok((stream, addr))) => {
+                    if let Some(max) = this.options.max_connections {
+                        if this.peer_states.len() >= max {
+                            tracing::warn!(
+                                "Max connections reached ({}), rejecting connection from {}",
+                                max,
+                                addr
+                            );
+
+                            continue;
+                        }
+                    }
+
                     // If authentication is enabled, start the authentication process
                     if let Some(ref auth) = this.auth {
                         let authenticator = Arc::clone(auth);
@@ -209,6 +221,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                             continue;
                         }
                         Err(e) => {
+                            this.state.stats.increment_failed_requests();
                             tracing::error!("Failed to send message to socket: {:?}", e);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(None);
@@ -218,20 +231,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             }
 
             // Then we check for completed requests, and push them onto the egress queue.
-            match this.pending_requests.poll_next_unpin(cx) {
-                Poll::Ready(Some(Some((id, payload)))) => {
-                    let msg = reqrep::Message::new(id, payload);
-                    this.egress_queue.push_back(msg);
+            if let Poll::Ready(Some(Some((id, payload)))) =
+                this.pending_requests.poll_next_unpin(cx)
+            {
+                let msg = reqrep::Message::new(id, payload);
+                this.egress_queue.push_back(msg);
 
-                    continue;
-                }
-                Poll::Ready(Some(None)) => {
-                    tracing::error!("Failed to respond to request");
-                    this.state.stats.increment_failed_requests();
-
-                    continue;
-                }
-                _ => {}
+                continue;
             }
 
             // Finally we accept incoming requests from the peer.
