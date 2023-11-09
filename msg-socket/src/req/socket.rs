@@ -152,12 +152,11 @@ mod tests {
             ReqOptions {
                 auth_token: None,
                 timeout: Duration::from_secs(1),
-                retry_on_initial_failure: true,
+                blocking_connect: true,
                 backoff_duration: Duration::from_secs(1),
                 flush_interval: None,
                 backpressure_boundary: 8192,
                 retry_attempts: Some(3),
-                set_nodelay: true,
             },
         );
 
@@ -191,12 +190,11 @@ mod tests {
             ReqOptions {
                 auth_token: None,
                 timeout: Duration::from_secs(1),
-                retry_on_initial_failure: true,
+                blocking_connect: true,
                 backoff_duration: Duration::from_millis(200),
                 backpressure_boundary: 8192,
                 flush_interval: None,
                 retry_attempts: None,
-                set_nodelay: true,
             },
         );
 

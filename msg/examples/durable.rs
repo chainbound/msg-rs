@@ -66,11 +66,9 @@ async fn main() {
     // and an identifier. This will implicitly turn on client authentication.
     let mut req = ReqSocket::with_options(
         Tcp::new(),
-        ReqOptions {
-            auth_token: Some(Bytes::from("client1")),
-            timeout: Duration::from_secs(4),
-            ..Default::default()
-        },
+        ReqOptions::default()
+            .auth_token(Bytes::from("client1"))
+            .timeout(Duration::from_secs(4)),
     );
 
     let (tx, rx) = oneshot::channel();
@@ -115,10 +113,6 @@ async fn main() {
     tracing::info!("==========================");
 
     tokio::spawn(start_rep());
-    // tokio::time::sleep(Duration::from_secs(2)).await;
-    // rep_task.abort();
-
-    // tokio::spawn(start_rep());
 
     // Wait for the client to finish
     rx.await.unwrap();

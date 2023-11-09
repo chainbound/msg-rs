@@ -167,7 +167,7 @@ mod tests {
         // Initialize socket with a client ID. This will implicitly enable authentication.
         let mut req = ReqSocket::with_options(
             Tcp::new(),
-            ReqOptions::default().with_token(Bytes::from("REQ")),
+            ReqOptions::default().auth_token(Bytes::from("REQ")),
         );
 
         req.connect(&rep.local_addr().unwrap().to_string())
