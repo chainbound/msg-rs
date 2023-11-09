@@ -55,9 +55,12 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
+    /// The optional authentication token for the client.
     auth_token: Option<Bytes>,
-    timeout: std::time::Duration,
+    /// The maximum amount of incoming messages that will be buffered before being dropped due to
+    /// a slow consumer.
     ingress_buffer_size: usize,
+    /// The read buffer size for each session.
     read_buffer_size: usize,
 }
 
@@ -65,12 +68,6 @@ impl SubOptions {
     /// Sets the authentication token for the socket.
     pub fn auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
-        self
-    }
-
-    /// Sets the timeout for the socket.
-    pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.timeout = timeout;
         self
     }
 
@@ -94,7 +91,6 @@ impl Default for SubOptions {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
             auth_token: None,
-            timeout: std::time::Duration::from_secs(5),
         }
     }
 }

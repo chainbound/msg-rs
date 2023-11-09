@@ -32,7 +32,9 @@ pub enum PubError {
 
 #[derive(Debug)]
 pub struct PubOptions {
+    /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
+    /// The maximum number of outgoing messages that can be buffered per session.
     session_buffer_size: usize,
     /// The interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.

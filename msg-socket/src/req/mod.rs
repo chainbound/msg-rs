@@ -40,9 +40,13 @@ pub enum Command {
 
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
+    /// The optional authentication token for the client.
     auth_token: Option<Bytes>,
+    /// Timeout duration for requests.
     timeout: std::time::Duration,
+    /// Wether to block on initial connection to the target.
     blocking_connect: bool,
+    /// The backoff duration for the underlying transport on reconnections.
     backoff_duration: std::time::Duration,
     /// The interval that the request connection should be flushed.
     /// Default is `None`, and the connection is flushed after every send.

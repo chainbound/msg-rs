@@ -27,6 +27,7 @@ pub enum PubError {
 
 #[derive(Default)]
 pub struct RepOptions {
+    /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
 }
 
