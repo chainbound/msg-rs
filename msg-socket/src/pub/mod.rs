@@ -76,8 +76,8 @@ impl PubOptions {
 
     /// Sets the interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.
-    pub fn flush_interval(mut self, flush_interval: Option<std::time::Duration>) -> Self {
-        self.flush_interval = flush_interval;
+    pub fn flush_interval(mut self, flush_interval: std::time::Duration) -> Self {
+        self.flush_interval = Some(flush_interval);
         self
     }
 }

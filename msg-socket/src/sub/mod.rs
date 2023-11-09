@@ -63,8 +63,27 @@ pub struct SubOptions {
 
 impl SubOptions {
     /// Sets the authentication token for the socket.
-    pub fn with_token(mut self, auth_token: Bytes) -> Self {
+    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
+        self
+    }
+
+    /// Sets the timeout for the socket.
+    pub fn timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
+    /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
+    pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
+        self.ingress_buffer_size = ingress_buffer_size;
+        self
+    }
+
+    /// Sets the read buffer size. This sets the size of the read buffer for each session.
+    pub fn read_buffer_size(mut self, read_buffer_size: usize) -> Self {
+        self.read_buffer_size = read_buffer_size;
         self
     }
 }
