@@ -1,4 +1,8 @@
 /target
 .vscode/
+.helix/
+.idea/
+.DS_Store
 *.svg
 *.log
+.env

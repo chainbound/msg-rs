@@ -1,10 +1,11 @@
 [workspace]
-members = ["msg", "msg-socket", "msg-wire", "msg-transport", "msg-common"]
+members = ["msg*"]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.0-alpha"
 edition = "2021"
-rust-version = "1.70"                                                                # Remember to update .clippy.toml and README.md
+rust-version = "1.70"
 license = "MIT OR Apache-2.0"
 description = "A flexible and lightweight messaging library for distributed systems"
 authors = ["Jonas Bostoen", "Nicolas Racchi"]

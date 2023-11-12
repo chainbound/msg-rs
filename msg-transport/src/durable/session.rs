@@ -7,10 +7,7 @@ use std::{
 };
 
 use futures::Future;
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream,
-};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tracing::{debug, error};
 
 pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send + Sync>>;
@@ -96,11 +93,22 @@ pub trait UnderlyingIo: Sized + Unpin {
     }
 }
 
-impl UnderlyingIo for TcpStream {
-    fn establish(addr: SocketAddr) -> PendingIo<TcpStream> {
+#[cfg(not(feature = "turmoil"))]
+impl UnderlyingIo for tokio::net::TcpStream {
+    fn establish(addr: SocketAddr) -> PendingIo<tokio::net::TcpStream> {
         Box::pin(async move {
-            let stream = TcpStream::connect(addr).await?;
+            let stream = tokio::net::TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
+            Ok(stream)
+        })
+    }
+}
+
+#[cfg(feature = "turmoil")]
+impl UnderlyingIo for turmoil::net::TcpStream {
+    fn establish(addr: SocketAddr) -> PendingIo<Self> {
+        Box::pin(async move {
+            let stream = turmoil::net::TcpStream::connect(addr).await?;
             Ok(stream)
         })
     }
@@ -567,6 +575,7 @@ where
     }
 }
 
+#[cfg(not(feature = "turmoil"))]
 #[cfg(test)]
 mod tests {
     use std::sync::{
@@ -589,7 +598,7 @@ mod tests {
 
         let addr = listener.local_addr().unwrap();
 
-        let mut session = DurableSession::<TcpStream>::new(addr);
+        let mut session = DurableSession::<tokio::net::TcpStream>::new(addr);
         session.blocking_connect().await.unwrap();
 
         let last_rx = Arc::new(AtomicI32::new(0));
@@ -644,8 +653,8 @@ mod tests {
     async fn session_with_layer() {
         struct TestLayer;
 
-        impl Layer<TcpStream> for TestLayer {
-            fn process(&mut self, io: TcpStream) -> PendingIo<TcpStream> {
+        impl Layer<tokio::net::TcpStream> for TestLayer {
+            fn process(&mut self, io: tokio::net::TcpStream) -> PendingIo<tokio::net::TcpStream> {
                 Box::pin(async move {
                     let mut io = io;
                     io.write_i32(10).await.unwrap();
@@ -660,7 +669,7 @@ mod tests {
 
         let addr = listener.local_addr().unwrap();
 
-        let mut session = DurableSession::<TcpStream>::new(addr).with_layer(TestLayer);
+        let mut session = DurableSession::<tokio::net::TcpStream>::new(addr).with_layer(TestLayer);
         session.blocking_connect().await.unwrap();
 
         let (mut socket, addr) = listener.accept().await.unwrap();

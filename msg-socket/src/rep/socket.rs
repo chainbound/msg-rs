@@ -65,10 +65,12 @@ impl<T: ServerTransport> RepSocket<T> {
             .take()
             .expect("Transport already taken, cannot bind multiple times");
 
+        println!("before bind");
         transport
             .bind(addr)
             .await
             .map_err(|e| PubError::Transport(Box::new(e)))?;
+        println!("after bind");
 
         let local_addr = transport
             .local_addr()
