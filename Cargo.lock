@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "msg"
-version = "0.1.0-alpha"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "criterion",
@@ -691,11 +691,11 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.0-alpha"
+version = "0.1.1"
 
 [[package]]
 name = "msg-socket"
-version = "0.1.0-alpha"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.0-alpha"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -731,7 +731,7 @@ dependencies = [
 
 [[package]]
 name = "msg-wire"
-version = "0.1.0-alpha"
+version = "0.1.1"
 dependencies = [
  "bytes",
  "msg-common",
