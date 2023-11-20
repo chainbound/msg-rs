@@ -232,7 +232,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherSession<Io> {
                         let now = unix_micros();
 
                         this.stats.increment_rx(msg.payload.len());
-                        this.stats.update_latency(now - msg.timestamp);
+                        this.stats.update_latency(now.saturating_sub(msg.timestamp));
                     }
 
                     return Poll::Ready(Some(result));
