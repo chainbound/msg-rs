@@ -1,0 +1,88 @@
+name: Cross Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export Crate Package Version
+        run: echo "VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
+        id: export
+    outputs:
+      VERSION: ${{ steps.export.outputs.VERSION }}
+
+  build:
+    name: build release
+    strategy:
+      matrix:
+        arch:
+          [
+            aarch64-unknown-linux-gnu,
+            x86_64-unknown-linux-gnu,
+            x86_64-apple-darwin,
+            aarch64-apple-darwin,
+            x86_64-pc-windows-gnu,
+          ]
+        include:
+          - arch: aarch64-unknown-linux-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
+          - arch: x86_64-unknown-linux-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
+          - arch: x86_64-apple-darwin
+            platform: macos-latest
+            profile: maxperf
+          - arch: aarch64-apple-darwin
+            platform: macos-latest
+            profile: maxperf
+          - arch: x86_64-pc-windows-gnu
+            platform: ubuntu-20.04
+            profile: maxperf
+
+    runs-on: ${{ matrix.platform }}
+    needs: extract-version
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup update stable
+      - run: rustup target add ${{ matrix.arch }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Apple M1 setup
+        if: ${{ matrix.job.target == 'aarch64-apple-darwin' }}
+        run: |
+          echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
+      - name: Build for ${{ matrix.arch }}
+        run: |
+          cargo install cross
+          env PROFILE=${{ matrix.profile }} make build-${{ matrix.arch }}
+      - name: Move cross-compiled binary
+        if: matrix.arch != 'x86_64-pc-windows-gnu'
+        run: |
+          mkdir artifacts
+          mv target/${{ matrix.arch }}/${{ matrix.profile }}/* ./artifacts
+      - name: Create artifacts
+        run: tar --directory=artifacts -czf release-${{ env.VERSION }}-${{ matrix.arch }}.tar.gz $(ls -U artifacts/ | head -1)
+        shell: bash
+
+  release:
+    name: Release on Github
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [build, extract-version]
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: "artifacts/*"
+          tag: v${{ env.VERSION }}
