@@ -40,4 +40,4 @@ jobs:
         with:
           crate: semver-util
       - name: Validate Semvers
-        run: semver cmp ${{ env.CRATE_VERSION }} gt ${{ env.GIT_TAG }} || exit 1
+        run: semver cmp ${{ env.CRATE_VERSION }} gte ${{ env.GIT_TAG }} || exit 1

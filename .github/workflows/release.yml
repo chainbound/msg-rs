@@ -1,9 +1,9 @@
-name: Release
+name: Release Crate to Crates.io
 
 on:
   workflow_dispatch:
   workflow_run:
-    workflows: ["CI"]
+    workflows: ["github-release"]
     branches: [main]
     types:
       - completed
