@@ -14,7 +14,7 @@ pub struct PubSocket<T: ServerTransport> {
     options: Arc<PubOptions>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
-    /// The broadcast channel to all active [`SubscriberSession`](super::driver::SubscriberSession)s.
+    /// The broadcast channel to all active [`SubscriberSession`](super::session::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
     /// The optional transport. This is taken when the socket is bound.
     transport: Option<T>,

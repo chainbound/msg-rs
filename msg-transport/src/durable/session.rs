@@ -57,13 +57,13 @@ impl<Io> ReconnectStatus<Io> {
 }
 
 /// Trait that should be implemented for an [AsyncRead] and/or [AsyncWrite]
-/// item to enable it to work with the [DurableIo] struct.
+/// item to enable it to work with the [DurableSession] struct.
 pub trait UnderlyingIo: Sized + Unpin {
     /// The creation function is used by StubbornIo in order to establish both the initial IO connection
     /// in addition to performing reconnects.
     fn establish(endpoint: SocketAddr) -> PendingIo<Self>;
 
-    /// When IO items experience an [io::Error](io::Error) during operation, it does not necessarily mean
+    /// When IO items experience an [io::Error] during operation, it does not necessarily mean
     /// it is a disconnect/termination (ex: WouldBlock). This trait provides sensible defaults to classify
     /// which errors are considered "disconnects", but this can be overridden based on the user's needs.
     #[inline]
