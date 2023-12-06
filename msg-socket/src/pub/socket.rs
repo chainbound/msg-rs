@@ -108,12 +108,14 @@ impl<T: ServerTransport> PubSocket<T> {
         // We compress here since that way we only have to do it once.
         if let Some(ref compressor) = self.compressor {
             let len_before = msg.payload().len();
+
+            // For relatively small messages, this takes <100us
             msg.compress(compressor.as_ref())?;
 
             debug!(
                 "Compressed message from {} to {} bytes",
                 len_before,
-                msg.payload().len()
+                msg.payload().len(),
             );
         }
 
@@ -138,7 +140,16 @@ impl<T: ServerTransport> PubSocket<T> {
 
         // We compress here since that way we only have to do it once.
         if let Some(ref compressor) = self.compressor {
+            let len_before = msg.payload().len();
+
+            // For relatively small messages, this takes <100us
             msg.compress(compressor.as_ref())?;
+
+            debug!(
+                "Compressed message from {} to {} bytes",
+                len_before,
+                msg.payload().len(),
+            );
         }
 
         // Broadcast the message directly to all active sessions.
