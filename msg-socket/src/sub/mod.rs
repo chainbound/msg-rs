@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use core::fmt;
 use msg_wire::pubsub;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -88,7 +89,7 @@ impl Default for SubOptions {
 
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PubMessage {
     /// The source address of the publisher. We need this because
     /// a subscriber can connect to multiple publishers.
@@ -97,6 +98,16 @@ pub struct PubMessage {
     topic: String,
     /// The message payload.
     payload: Bytes,
+}
+
+impl fmt::Debug for PubMessage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PubMessage")
+            .field("source", &self.source)
+            .field("topic", &self.topic)
+            .field("payload_size", &self.payload.len())
+            .finish()
+    }
 }
 
 impl PubMessage {

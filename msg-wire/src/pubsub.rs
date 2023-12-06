@@ -1,3 +1,5 @@
+use core::fmt;
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use thiserror::Error;
 use tokio_util::codec::{Decoder, Encoder};
@@ -15,11 +17,22 @@ pub enum Error {
     WireId(u8),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Message {
     header: Header,
     /// The message payload.
     payload: Bytes,
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut dbg = f.debug_struct("Message");
+        dbg.field("seq", &self.seq());
+        dbg.field("topic", &self.topic());
+        dbg.field("timestamp", &self.timestamp());
+        dbg.field("size", &self.size());
+        dbg.finish()
+    }
 }
 
 impl Message {
