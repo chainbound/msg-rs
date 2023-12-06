@@ -16,7 +16,7 @@ pub trait Compressor {
 }
 
 /// A compressor that uses the gzip algorithm.
-struct GzipCompressor {
+pub struct GzipCompressor {
     level: u32,
 }
 
