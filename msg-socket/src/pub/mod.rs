@@ -1,8 +1,9 @@
 use bytes::Bytes;
-use msg_wire::pubsub;
+use std::io;
 use thiserror::Error;
 
 mod driver;
+use msg_wire::{compression::Compressor, pubsub};
 mod session;
 mod socket;
 mod stats;
@@ -119,6 +120,13 @@ impl PubMessage {
     pub fn into_wire(self, seq: u32) -> pubsub::Message {
         pubsub::Message::new(seq, Bytes::from(self.topic), self.payload)
     }
+
+    #[inline]
+    pub fn compress(&mut self, compressor: &dyn Compressor) -> Result<(), io::Error> {
+        self.payload = compressor.compress(&self.payload)?;
+
+        Ok(())
+    }
 }
 
 /// The publisher socket state, shared between the backend task and the socket.
@@ -133,6 +141,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::{Tcp, TcpOptions};
+    use msg_wire::compression::{GzipCompressor, GzipDecompressor};
 
     use crate::SubSocket;
 
@@ -201,6 +210,48 @@ mod tests {
         tracing::info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
+    }
+
+    #[tokio::test]
+    async fn pubsub_many_compressed() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut pub_socket = PubSocket::new(Tcp::new()).with_compressor(GzipCompressor::new(6));
+        let mut sub1 = SubSocket::new(Tcp::new_with_options(
+            TcpOptions::default().with_blocking_connect(),
+        ))
+        .with_decompressor(GzipDecompressor::new());
+
+        let mut sub2 = SubSocket::new(Tcp::new_with_options(
+            TcpOptions::default().with_blocking_connect(),
+        ))
+        .with_decompressor(GzipDecompressor::new());
+
+        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        let addr = pub_socket.local_addr().unwrap();
+
+        sub1.connect(&addr.to_string()).await.unwrap();
+        sub2.connect(&addr.to_string()).await.unwrap();
+        sub1.subscribe("HELLO".to_string()).await.unwrap();
+        sub2.subscribe("HELLO".to_string()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let original_msg = Bytes::from("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORLD");
+
+        pub_socket
+            .publish("HELLO".to_string(), original_msg.clone())
+            .await
+            .unwrap();
+
+        let msg = sub1.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!(original_msg, msg.payload());
+
+        let msg = sub2.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!(original_msg, msg.payload());
     }
 
     #[tokio::test]

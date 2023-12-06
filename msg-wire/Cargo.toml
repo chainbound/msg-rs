@@ -17,3 +17,5 @@ bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+flate2.workspace = true
+zstd.workspace = true
