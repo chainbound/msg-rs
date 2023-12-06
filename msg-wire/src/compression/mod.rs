@@ -1,18 +1,16 @@
 use bytes::Bytes;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 
 /// This trait is used to implement message-level compression algorithms for payloads.
 /// On outgoing messages, the payload is compressed before being sent using the `compress` method.
 /// On incoming messages, the inverse happens using the `decompress` method.
 pub trait Compressor {
-    type Error: std::error::Error;
-
     /// Compresses a byte slice payload into a `Bytes` object.
-    fn compress(&mut self, data: &[u8]) -> Result<Bytes, Self::Error>;
+    fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error>;
 
     /// Decompresses a compressed byte slice into a `Bytes` object.
-    fn decompress(&mut self, data: &[u8]) -> Result<Bytes, Self::Error>;
+    fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error>;
 }
 
 /// A compressor that uses the gzip algorithm.
@@ -28,9 +26,7 @@ impl GzipCompressor {
 }
 
 impl Compressor for GzipCompressor {
-    type Error = std::io::Error;
-
-    fn compress(&mut self, data: &[u8]) -> Result<Bytes, Self::Error> {
+    fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let mut encoder = GzEncoder::new(
             Vec::with_capacity(data.len() / self.level as usize),
             Compression::new(self.level),
@@ -43,7 +39,7 @@ impl Compressor for GzipCompressor {
         Ok(Bytes::from(bytes))
     }
 
-    fn decompress(&mut self, data: &[u8]) -> Result<Bytes, Self::Error> {
+    fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let mut decoder = GzDecoder::new(data);
 
         let mut bytes = Vec::with_capacity(data.len() * self.level as usize);
@@ -53,13 +49,25 @@ impl Compressor for GzipCompressor {
     }
 }
 
+pub struct NopCompressor;
+
+impl Compressor for NopCompressor {
+    fn compress(&self, _data: &[u8]) -> Result<Bytes, io::Error> {
+        Ok(Bytes::new())
+    }
+
+    fn decompress(&self, _data: &[u8]) -> Result<Bytes, io::Error> {
+        Ok(Bytes::new())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_gzip_compression() {
-        let mut compressor = GzipCompressor::new(6);
+        let compressor = GzipCompressor::new(6);
 
         let data =
             Bytes::from("hellooooooooooooooooo wwwwwoooooooooooooooooooooooooooooooooooooorld");

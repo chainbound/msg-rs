@@ -1,5 +1,7 @@
+use std::borrow::Borrow;
+
 use bytes::Bytes;
-use msg_wire::pubsub;
+use msg_wire::{compression::Compressor, pubsub};
 use thiserror::Error;
 
 mod driver;
@@ -118,6 +120,11 @@ impl PubMessage {
     #[inline]
     pub fn into_wire(self, seq: u32) -> pubsub::Message {
         pubsub::Message::new(seq, Bytes::from(self.topic), self.payload)
+    }
+
+    #[inline]
+    pub fn compress<C: Compressor>(&mut self, compressor: impl Borrow<C>) {
+        self.payload = compressor.borrow().compress(&self.payload).unwrap();
     }
 }
 
