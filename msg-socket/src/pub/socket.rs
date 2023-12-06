@@ -118,7 +118,12 @@ impl<T: ServerTransport, C: Compressor> PubSocket<T, C> {
 
     /// Publishes a message to the given topic. If the topic doesn't exist, this is a no-op.
     pub async fn publish(&self, topic: String, message: Bytes) -> Result<(), PubError> {
-        let msg = PubMessage::new(topic, message);
+        let mut msg = PubMessage::new(topic, message);
+
+        // We compress here since that way we only have to do it once.
+        if let Some(compressor) = self.compressor.clone() {
+            msg.compress::<C>(compressor);
+        }
 
         // Broadcast the message directly to all active sessions.
         if self
