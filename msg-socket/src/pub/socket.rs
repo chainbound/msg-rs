@@ -9,8 +9,6 @@ use msg_transport::ServerTransport;
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
-/// We use a default implementation of [`NopCompressor`] for the compressor type.
-/// This can be changed with `with_compressor`.
 #[derive(Clone)]
 pub struct PubSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.

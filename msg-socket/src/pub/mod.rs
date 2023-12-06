@@ -141,7 +141,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::{Tcp, TcpOptions};
-    use msg_wire::compression::GzipCompressor;
+    use msg_wire::compression::{GzipCompressor, GzipDecompressor};
 
     use crate::SubSocket;
 
@@ -220,12 +220,12 @@ mod tests {
         let mut sub1 = SubSocket::new(Tcp::new_with_options(
             TcpOptions::default().with_blocking_connect(),
         ))
-        .with_compressor(GzipCompressor::new(6));
+        .with_decompressor(GzipDecompressor::new());
 
         let mut sub2 = SubSocket::new(Tcp::new_with_options(
             TcpOptions::default().with_blocking_connect(),
         ))
-        .with_compressor(GzipCompressor::new(6));
+        .with_decompressor(GzipDecompressor::new());
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();

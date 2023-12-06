@@ -1,5 +1,4 @@
 use futures::Stream;
-use msg_wire::compression::Compressor;
 use std::{
     collections::HashSet,
     net::SocketAddr,
@@ -11,6 +10,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamMap;
 
 use msg_transport::ClientTransport;
+use msg_wire::compression::Decompressor;
 
 use super::{
     Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
@@ -53,7 +53,7 @@ where
             transport: Arc::new(transport),
             from_socket,
             to_socket,
-            compressor: None,
+            decompressor: None,
             connection_tasks: JoinSet::new(),
             publishers: StreamMap::with_capacity(24),
             subscribed_topics: HashSet::with_capacity(32),
@@ -70,13 +70,13 @@ where
         }
     }
 
-    /// Sets the payload compressor for the socket. This compressor will be used to decompress
+    /// Sets the payload decompressor for the socket. This decompressor will be used to decompress
     /// all incoming messages from the publishers.
-    pub fn with_compressor<C: Compressor>(mut self, compressor: C) -> Self {
+    pub fn with_decompressor<C: Decompressor>(mut self, decompressor: C) -> Self {
         self.driver
             .as_mut()
             .expect("Driver has been spawned already, cannot set compressor")
-            .set_compressor(compressor);
+            .set_decompressor(decompressor);
 
         self
     }
@@ -189,8 +189,6 @@ where
         &self.state.stats
     }
 }
-
-impl<T> SubSocket<T> where T: ClientTransport + Send + Sync + 'static {}
 
 impl<T: ClientTransport> Drop for SubSocket<T> {
     fn drop(&mut self) {
