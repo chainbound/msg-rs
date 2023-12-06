@@ -4,8 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg_socket::{Authenticator, PubSocket, SubOptions, SubSocket};
-use msg_transport::{Tcp, TcpOptions};
+use msg::{Authenticator, PubSocket, SubOptions, SubSocket, Tcp, TcpOptions};
 
 #[derive(Default)]
 struct Auth;

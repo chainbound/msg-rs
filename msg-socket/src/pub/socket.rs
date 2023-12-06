@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use msg_wire::compression::{Compressor, NopCompressor};
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::broadcast, task::JoinSet};
 use tracing::debug;
@@ -7,12 +6,13 @@ use tracing::debug;
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
 use msg_transport::ServerTransport;
+use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
 /// We use a default implementation of [`NopCompressor`] for the compressor type.
 /// This can be changed with `with_compressor`.
 #[derive(Clone)]
-pub struct PubSocket<T: ServerTransport, C = NopCompressor> {
+pub struct PubSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.
     options: Arc<PubOptions>,
     /// The reply socket state, shared with the driver.
@@ -23,8 +23,10 @@ pub struct PubSocket<T: ServerTransport, C = NopCompressor> {
     transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
-    /// Optional compressor
-    compressor: Option<Arc<C>>,
+    /// Optional message compressor.
+    // NOTE: for now we're using dynamic dispatch, since using generics here
+    // complicates the API a lot. We can always change this later for perf reasons.
+    compressor: Option<Arc<dyn Compressor>>,
     /// The local address this socket is bound to.
     local_addr: Option<SocketAddr>,
 }
@@ -37,16 +39,9 @@ impl<T: ServerTransport> PubSocket<T> {
 
     /// Creates a new publisher socket with the given transport and options.
     pub fn with_options(transport: T, options: PubOptions) -> Self {
-        assert_eq!(
-            options.backpressure_boundary % 2,
-            0,
-            "backpressure_boundary must be a multiple of 2"
-        );
-
         Self {
             transport: Some(transport),
             local_addr: None,
-            // to_driver: None,
             to_sessions_bcast: None,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
@@ -58,6 +53,12 @@ impl<T: ServerTransport> PubSocket<T> {
     /// Sets the connection authenticator for this socket.
     pub fn with_auth<A: Authenticator>(mut self, authenticator: A) -> Self {
         self.auth = Some(Arc::new(authenticator));
+        self
+    }
+
+    /// Sets the message compressor for this socket.
+    pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
+        self.compressor = Some(Arc::new(compressor));
         self
     }
 
@@ -100,29 +101,20 @@ impl<T: ServerTransport> PubSocket<T> {
         Ok(())
     }
 
-    pub fn stats(&self) -> &SocketStats {
-        &self.state.stats
-    }
-
-    /// Returns the local address this socket is bound to. `None` if the socket is not bound.
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.local_addr
-    }
-}
-
-impl<T: ServerTransport, C: Compressor> PubSocket<T, C> {
-    pub fn with_compressor(mut self, compressor: C) -> Self {
-        self.compressor = Some(Arc::new(compressor));
-        self
-    }
-
     /// Publishes a message to the given topic. If the topic doesn't exist, this is a no-op.
     pub async fn publish(&self, topic: String, message: Bytes) -> Result<(), PubError> {
         let mut msg = PubMessage::new(topic, message);
 
         // We compress here since that way we only have to do it once.
-        if let Some(compressor) = self.compressor.clone() {
-            msg.compress::<C>(compressor);
+        if let Some(ref compressor) = self.compressor {
+            let len_before = msg.payload().len();
+            msg.compress(compressor.as_ref())?;
+
+            debug!(
+                "Compressed message from {} to {} bytes",
+                len_before,
+                msg.payload().len()
+            );
         }
 
         // Broadcast the message directly to all active sessions.
@@ -145,8 +137,8 @@ impl<T: ServerTransport, C: Compressor> PubSocket<T, C> {
         let mut msg = PubMessage::new(topic, message);
 
         // We compress here since that way we only have to do it once.
-        if let Some(compressor) = self.compressor.clone() {
-            msg.compress::<C>(compressor);
+        if let Some(ref compressor) = self.compressor {
+            msg.compress(compressor.as_ref())?;
         }
 
         // Broadcast the message directly to all active sessions.
@@ -161,5 +153,14 @@ impl<T: ServerTransport, C: Compressor> PubSocket<T, C> {
         }
 
         Ok(())
+    }
+
+    pub fn stats(&self) -> &SocketStats {
+        &self.state.stats
+    }
+
+    /// Returns the local address this socket is bound to. `None` if the socket is not bound.
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        self.local_addr
     }
 }

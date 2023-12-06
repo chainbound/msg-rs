@@ -5,7 +5,7 @@ use std::io::{self, Read, Write};
 /// This trait is used to implement message-level compression algorithms for payloads.
 /// On outgoing messages, the payload is compressed before being sent using the `compress` method.
 /// On incoming messages, the inverse happens using the `decompress` method.
-pub trait Compressor {
+pub trait Compressor: Send + Sync + Unpin + 'static {
     /// Compresses a byte slice payload into a `Bytes` object.
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error>;
 
@@ -46,18 +46,6 @@ impl Compressor for GzipCompressor {
         decoder.read_to_end(&mut bytes)?;
 
         Ok(Bytes::from(bytes))
-    }
-}
-
-pub struct NopCompressor;
-
-impl Compressor for NopCompressor {
-    fn compress(&self, _data: &[u8]) -> Result<Bytes, io::Error> {
-        Ok(Bytes::new())
-    }
-
-    fn decompress(&self, _data: &[u8]) -> Result<Bytes, io::Error> {
-        Ok(Bytes::new())
     }
 }
 
