@@ -150,8 +150,8 @@ impl PubMessage {
 
     #[inline]
     pub fn compress(&mut self, compressor: &dyn Compressor) -> Result<(), io::Error> {
-        self.compression_type = compressor.compression_type();
         self.payload = compressor.compress(&self.payload)?;
+        self.compression_type = compressor.compression_type();
 
         Ok(())
     }
