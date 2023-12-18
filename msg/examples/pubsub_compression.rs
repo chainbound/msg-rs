@@ -1,7 +1,7 @@
 use bytes::Bytes;
+use futures::StreamExt;
 use std::time::Duration;
 use tokio::time::timeout;
-use tokio_stream::StreamExt;
 use tracing::Instrument;
 
 use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp, TcpOptions};
