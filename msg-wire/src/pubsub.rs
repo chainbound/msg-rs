@@ -6,6 +6,8 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use msg_common::unix_micros;
 
+use crate::compression::CompressionType;
+
 /// The ID of the pub/sub codec on the wire.
 const WIRE_ID: u8 = 0x03;
 
@@ -15,6 +17,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Invalid wire ID: {0}")]
     WireId(u8),
+    #[error("Invalid compression type: {0}")]
+    CompressionType(u8),
 }
 
 #[derive(Clone)]
@@ -43,9 +47,10 @@ impl Message {
     /// # Panics
     /// Panics if the topic is larger than 65535 bytes.
     #[inline]
-    pub fn new(seq: u32, topic: Bytes, payload: Bytes) -> Self {
+    pub fn new(seq: u32, topic: Bytes, payload: Bytes, compression_type: CompressionType) -> Self {
         Self {
             header: Header {
+                compression_type,
                 topic_size: u16::try_from(topic.len()).expect("Topic too large, max 65535 bytes"),
                 topic,
                 timestamp: unix_micros(),
@@ -62,7 +67,7 @@ impl Message {
     pub fn new_sub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.SUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new())
+        Self::new(0, prefix.freeze(), Bytes::new(), CompressionType::None)
     }
 
     /// Creates a new unsubscribe message for the given topic. The topic is prefixed with
@@ -71,7 +76,7 @@ impl Message {
     pub fn new_unsub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.UNSUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new())
+        Self::new(0, prefix.freeze(), Bytes::new(), CompressionType::None)
     }
 
     #[inline]
@@ -105,8 +110,12 @@ impl Message {
     }
 
     #[inline]
-    pub fn into_parts(self) -> (Bytes, Bytes) {
-        (self.header.topic, self.payload)
+    pub fn into_parts(self) -> (CompressionType, Bytes, Bytes) {
+        (
+            self.header.compression_type,
+            self.header.topic,
+            self.payload,
+        )
     }
 
     #[inline]
@@ -117,6 +126,8 @@ impl Message {
 
 #[derive(Debug, Clone)]
 pub struct Header {
+    /// Compression type used for the message payload.
+    pub(crate) compression_type: CompressionType,
     /// Size of the topic in bytes.
     pub(crate) topic_size: u16,
     /// The actual topic.
@@ -182,6 +193,16 @@ impl Decoder for Codec {
                         return Err(Error::WireId(wire_id));
                     }
 
+                    // The src is too small to read the compression type
+                    if src.len() < cursor + 1 {
+                        return Ok(None);
+                    }
+
+                    let compression_type =
+                        CompressionType::try_from(src[cursor]).map_err(Error::CompressionType)?;
+
+                    cursor += 1;
+
                     // The src is too small to read the topic size
                     if src.len() < cursor + 2 {
                         return Ok(None);
@@ -203,6 +224,7 @@ impl Decoder for Codec {
 
                     // Construct the header
                     let header = Header {
+                        compression_type,
                         topic_size,
                         topic,
                         timestamp: src.get_u64(),
@@ -241,6 +263,7 @@ impl Encoder<Message> for Codec {
         dst.reserve(1 + item.header.len() + item.payload_size() as usize);
 
         dst.put_u8(WIRE_ID);
+        dst.put_u8(item.header.compression_type as u8);
         dst.put_u16(item.header.topic_size);
         dst.put(item.header.topic);
         dst.put_u64(item.header.timestamp);

@@ -10,7 +10,6 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamMap;
 
 use msg_transport::ClientTransport;
-use msg_wire::compression::Decompressor;
 
 use super::{
     Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
@@ -53,7 +52,6 @@ where
             transport: Arc::new(transport),
             from_socket,
             to_socket,
-            decompressor: None,
             connection_tasks: JoinSet::new(),
             publishers: StreamMap::with_capacity(24),
             subscribed_topics: HashSet::with_capacity(32),
@@ -68,17 +66,6 @@ where
             state,
             _marker: std::marker::PhantomData,
         }
-    }
-
-    /// Sets the payload decompressor for the socket. This decompressor will be used to decompress
-    /// all incoming messages from the publishers.
-    pub fn with_decompressor<C: Decompressor>(mut self, decompressor: C) -> Self {
-        self.driver
-            .as_mut()
-            .expect("Driver has been spawned already, cannot set compressor")
-            .set_decompressor(decompressor);
-
-        self
     }
 
     /// Asynchronously connects to the endpoint.

@@ -6,9 +6,34 @@ mod zstd;
 pub use gzip::*;
 pub use zstd::*;
 
+/// The possible compression type used for a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CompressionType {
+    None = 0,
+    Gzip = 1,
+    Zstd = 2,
+}
+
+impl TryFrom<u8> for CompressionType {
+    type Error = u8;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(CompressionType::None),
+            1 => Ok(CompressionType::Gzip),
+            2 => Ok(CompressionType::Zstd),
+            _ => Err(value),
+        }
+    }
+}
+
 /// This trait is used to implement message-level compression algorithms for payloads.
 /// On outgoing messages, the payload is compressed before being sent using the `compress` method.
 pub trait Compressor: Send + Sync + Unpin + 'static {
+    /// Returns the compression type assigned to this compressor.
+    fn compression_type(&self) -> CompressionType;
+
     /// Compresses a byte slice payload into a `Bytes` object.
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error>;
 }

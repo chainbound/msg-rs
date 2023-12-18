@@ -2,7 +2,7 @@ use bytes::Bytes;
 use std::io;
 use zstd::{decode_all, stream::encode_all};
 
-use super::{Compressor, Decompressor};
+use super::{CompressionType, Compressor, Decompressor};
 
 pub struct ZstdCompressor {
     level: i32,
@@ -17,6 +17,10 @@ impl ZstdCompressor {
 }
 
 impl Compressor for ZstdCompressor {
+    fn compression_type(&self) -> CompressionType {
+        CompressionType::Zstd
+    }
+
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let compressed = encode_all(data, self.level)?;
 

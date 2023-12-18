@@ -19,7 +19,6 @@ use super::{
 };
 use msg_common::unix_micros;
 use msg_transport::ClientTransport;
-use msg_wire::compression::Decompressor;
 use msg_wire::pubsub;
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
@@ -35,8 +34,6 @@ pub(crate) struct SubDriver<T: ClientTransport> {
     pub(super) to_socket: mpsc::Sender<PubMessage>,
     /// A joinset of authentication tasks.
     pub(super) connection_tasks: JoinSet<ConnectionResult<T::Io, T::Error>>,
-    /// Optional payload decompressor.
-    pub(super) decompressor: Option<Arc<dyn Decompressor>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All active publisher sessions for this subscriber socket.
@@ -59,18 +56,19 @@ where
             if let Poll::Ready(Some((addr, result))) = this.publishers.poll_next_unpin(cx) {
                 match result {
                     Ok(mut msg) => {
-                        if let Some(ref compressor) = this.decompressor {
-                            let Ok(decompressed) = compressor.decompress(&msg.payload) else {
+                        match msg.try_decompress() {
+                            None => { /* No decompression necessary */ }
+                            Some(Ok(decompressed)) => msg.payload = decompressed,
+                            Some(Err(e)) => {
                                 error!(
                                     topic = msg.topic.as_str(),
-                                    "Failed to decompress message payload"
+                                    "Failed to decompress message payload: {:?}", e
                                 );
 
                                 continue;
-                            };
-
-                            msg.payload = decompressed;
+                            }
                         }
+
                         this.on_message(PubMessage::new(addr, msg.topic, msg.payload));
                     }
                     Err(e) => {
@@ -109,12 +107,6 @@ impl<T> SubDriver<T>
 where
     T: ClientTransport + Send + Sync + 'static,
 {
-    /// Sets the payload decompressor for the socket. This decompressor will be used to decompress all incoming
-    /// messages from the publishers.
-    pub fn set_decompressor<C: Decompressor>(&mut self, decompressor: C) {
-        self.decompressor = Some(Arc::new(decompressor));
-    }
-
     fn on_command(&mut self, cmd: Command) {
         debug!("Received command: {:?}", cmd);
         match cmd {

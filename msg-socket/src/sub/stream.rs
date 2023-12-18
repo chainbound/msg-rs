@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use futures::{SinkExt, Stream, StreamExt};
 use std::{
+    io,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -9,7 +10,10 @@ use tokio_util::codec::Framed;
 use tracing::debug;
 
 use super::SubError;
-use msg_wire::pubsub;
+use msg_wire::{
+    compression::{CompressionType, Decompressor, GzipDecompressor, ZstdDecompressor},
+    pubsub,
+};
 
 /// Wraps a framed connection to a publisher and exposes all the PUBSUB specific methods.
 pub(super) struct PublisherStream<Io> {
@@ -49,8 +53,23 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherStream<Io> {
 
 pub(super) struct TopicMessage {
     pub timestamp: u64,
+    pub compression_type: CompressionType,
     pub topic: String,
     pub payload: Bytes,
+}
+
+impl TopicMessage {
+    /// Tries to decompress the message payload if necessary.
+    ///
+    /// - Returns `None` if the payload is not compressed.
+    /// - Returns `Some(Err(..))` if the payload is compressed but decompression failed.
+    pub fn try_decompress(&self) -> Option<Result<Bytes, io::Error>> {
+        match self.compression_type {
+            CompressionType::None => None,
+            CompressionType::Gzip => Some(GzipDecompressor::new().decompress(&self.payload)),
+            CompressionType::Zstd => Some(ZstdDecompressor::new().decompress(&self.payload)),
+        }
+    }
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
@@ -59,6 +78,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
     #[inline]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+
         // We set flush to false only when flush returns ready (i.e. the buffer is fully flushed)
         if this.flush && this.conn.poll_flush_unpin(cx).is_ready() {
             tracing::trace!("Flushed connection");
@@ -68,11 +88,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
         if let Some(result) = ready!(this.conn.poll_next_unpin(cx)) {
             return Poll::Ready(Some(result.map(|msg| {
                 let timestamp = msg.timestamp();
-                let (topic, payload) = msg.into_parts();
+                let (compression_type, topic, payload) = msg.into_parts();
 
                 // TODO: this will allocate. Can we just return the `Cow`?
                 let topic = String::from_utf8_lossy(&topic).to_string();
                 TopicMessage {
+                    compression_type,
                     timestamp,
                     topic,
                     payload,
