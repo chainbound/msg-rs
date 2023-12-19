@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use super::SubError;
 use msg_wire::{
@@ -53,7 +53,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherStream<Io> {
 
 pub(super) struct TopicMessage {
     pub timestamp: u64,
-    pub compression_type: CompressionType,
+    pub compression_type: u8,
     pub topic: String,
     pub payload: Bytes,
 }
@@ -61,13 +61,21 @@ pub(super) struct TopicMessage {
 impl TopicMessage {
     /// Tries to decompress the message payload if necessary.
     ///
+    /// - Returns `Some(Ok(Bytes))` if the payload is compressed and decompression succeeded.
+    /// - Returns `Some(Err(..))` if the payload is compressed but could not be decompressed.
     /// - Returns `None` if the payload is not compressed.
-    /// - Returns `Some(Err(..))` if the payload is compressed but decompression failed.
     pub fn try_decompress(&self) -> Option<Result<Bytes, io::Error>> {
-        match self.compression_type {
-            CompressionType::None => None,
-            CompressionType::Gzip => Some(GzipDecompressor::new().decompress(&self.payload)),
-            CompressionType::Zstd => Some(ZstdDecompressor::new().decompress(&self.payload)),
+        match CompressionType::try_from(self.compression_type) {
+            Ok(supported_compression_type) => match supported_compression_type {
+                CompressionType::None => None,
+                // NOTE: Decompressors are unit structs, so there is no allocation here
+                CompressionType::Gzip => Some(GzipDecompressor::new().decompress(&self.payload)),
+                CompressionType::Zstd => Some(ZstdDecompressor::new().decompress(&self.payload)),
+            },
+            Err(unsupported_compression_type) => Some(Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported compression type: {unsupported_compression_type}"),
+            ))),
         }
     }
 }
@@ -81,14 +89,15 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
 
         // We set flush to false only when flush returns ready (i.e. the buffer is fully flushed)
         if this.flush && this.conn.poll_flush_unpin(cx).is_ready() {
-            tracing::trace!("Flushed connection");
+            trace!("Flushed connection");
             this.flush = false
         }
 
         if let Some(result) = ready!(this.conn.poll_next_unpin(cx)) {
             return Poll::Ready(Some(result.map(|msg| {
                 let timestamp = msg.timestamp();
-                let (compression_type, topic, payload) = msg.into_parts();
+                let compression_type = msg.compression_type();
+                let (topic, payload) = msg.into_parts();
 
                 // TODO: this will allocate. Can we just return the `Cow`?
                 let topic = String::from_utf8_lossy(&topic).to_string();

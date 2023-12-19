@@ -32,6 +32,7 @@ impl Compressor for ZstdCompressor {
 pub struct ZstdDecompressor;
 
 impl ZstdDecompressor {
+    #[inline]
     pub fn new() -> Self {
         Self
     }

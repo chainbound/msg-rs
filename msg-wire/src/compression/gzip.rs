@@ -40,6 +40,7 @@ impl Compressor for GzipCompressor {
 pub struct GzipDecompressor;
 
 impl GzipDecompressor {
+    #[inline]
     pub fn new() -> Self {
         Self
     }

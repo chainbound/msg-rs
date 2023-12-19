@@ -6,8 +6,6 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use msg_common::unix_micros;
 
-use crate::compression::CompressionType;
-
 /// The ID of the pub/sub codec on the wire.
 const WIRE_ID: u8 = 0x03;
 
@@ -17,8 +15,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Invalid wire ID: {0}")]
     WireId(u8),
-    #[error("Invalid compression type: {0}")]
-    CompressionType(u8),
 }
 
 #[derive(Clone)]
@@ -34,6 +30,7 @@ impl fmt::Debug for Message {
         dbg.field("seq", &self.seq());
         dbg.field("topic", &self.topic());
         dbg.field("timestamp", &self.timestamp());
+        dbg.field("compression_type", &self.header.compression_type);
         dbg.field("size", &self.size());
         dbg.finish()
     }
@@ -47,7 +44,7 @@ impl Message {
     /// # Panics
     /// Panics if the topic is larger than 65535 bytes.
     #[inline]
-    pub fn new(seq: u32, topic: Bytes, payload: Bytes, compression_type: CompressionType) -> Self {
+    pub fn new(seq: u32, topic: Bytes, payload: Bytes, compression_type: u8) -> Self {
         Self {
             header: Header {
                 compression_type,
@@ -67,7 +64,7 @@ impl Message {
     pub fn new_sub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.SUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new(), CompressionType::None)
+        Self::new(0, prefix.freeze(), Bytes::new(), 0)
     }
 
     /// Creates a new unsubscribe message for the given topic. The topic is prefixed with
@@ -76,7 +73,7 @@ impl Message {
     pub fn new_unsub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.UNSUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new(), CompressionType::None)
+        Self::new(0, prefix.freeze(), Bytes::new(), 0)
     }
 
     #[inline]
@@ -110,12 +107,13 @@ impl Message {
     }
 
     #[inline]
-    pub fn into_parts(self) -> (CompressionType, Bytes, Bytes) {
-        (
-            self.header.compression_type,
-            self.header.topic,
-            self.payload,
-        )
+    pub fn into_parts(self) -> (Bytes, Bytes) {
+        (self.header.topic, self.payload)
+    }
+
+    #[inline]
+    pub fn compression_type(&self) -> u8 {
+        self.header.compression_type
     }
 
     #[inline]
@@ -127,7 +125,7 @@ impl Message {
 #[derive(Debug, Clone)]
 pub struct Header {
     /// Compression type used for the message payload.
-    pub(crate) compression_type: CompressionType,
+    pub(crate) compression_type: u8,
     /// Size of the topic in bytes.
     pub(crate) topic_size: u16,
     /// The actual topic.
@@ -144,7 +142,12 @@ impl Header {
     /// Returns the length of the header in bytes.
     #[inline]
     pub fn len(&self) -> usize {
-        10 + 8 + self.topic_size as usize
+        8 + // u64
+        4 + // u32 
+        4 + // u32 
+        2 + // u16
+        1 + // u8 
+        self.topic_size as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -198,8 +201,7 @@ impl Decoder for Codec {
                         return Ok(None);
                     }
 
-                    let compression_type =
-                        CompressionType::try_from(src[cursor]).map_err(Error::CompressionType)?;
+                    let compression_type = u8::from_be_bytes([src[cursor]]);
 
                     cursor += 1;
 
@@ -263,7 +265,7 @@ impl Encoder<Message> for Codec {
         dst.reserve(1 + item.header.len() + item.payload_size() as usize);
 
         dst.put_u8(WIRE_ID);
-        dst.put_u8(item.header.compression_type as u8);
+        dst.put_u8(item.header.compression_type);
         dst.put_u16(item.header.topic_size);
         dst.put(item.header.topic);
         dst.put_u64(item.header.timestamp);

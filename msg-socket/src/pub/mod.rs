@@ -144,7 +144,7 @@ impl PubMessage {
             seq,
             Bytes::from(self.topic),
             self.payload,
-            self.compression_type,
+            self.compression_type as u8,
         )
     }
 
