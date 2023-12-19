@@ -39,13 +39,6 @@ impl Compressor for GzipCompressor {
 #[derive(Debug, Default)]
 pub struct GzipDecompressor;
 
-impl GzipDecompressor {
-    #[inline]
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl Decompressor for GzipDecompressor {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let mut decoder = GzDecoder::new(data);

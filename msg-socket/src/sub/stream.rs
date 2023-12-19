@@ -11,7 +11,9 @@ use tracing::{debug, trace};
 
 use super::SubError;
 use msg_wire::{
-    compression::{CompressionType, Decompressor, GzipDecompressor, ZstdDecompressor},
+    compression::{
+        CompressionType, Decompressor, GzipDecompressor, SnappyDecompressor, ZstdDecompressor,
+    },
     pubsub,
 };
 
@@ -69,8 +71,9 @@ impl TopicMessage {
             Ok(supported_compression_type) => match supported_compression_type {
                 CompressionType::None => None,
                 // NOTE: Decompressors are unit structs, so there is no allocation here
-                CompressionType::Gzip => Some(GzipDecompressor::new().decompress(&self.payload)),
-                CompressionType::Zstd => Some(ZstdDecompressor::new().decompress(&self.payload)),
+                CompressionType::Gzip => Some(GzipDecompressor.decompress(&self.payload)),
+                CompressionType::Zstd => Some(ZstdDecompressor.decompress(&self.payload)),
+                CompressionType::Snappy => Some(SnappyDecompressor.decompress(&self.payload)),
             },
             Err(unsupported_compression_type) => Some(Err(io::Error::new(
                 io::ErrorKind::InvalidData,
