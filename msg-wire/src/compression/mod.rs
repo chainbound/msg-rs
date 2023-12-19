@@ -98,40 +98,6 @@ mod tests {
         assert_eq!(data, decompressed);
     }
 
-    #[test]
-    fn test_gzip_compression_speed() {
-        // compress a 1MB string with Gzip and measure the time
-        let compressor = GzipCompressor::new(6);
-        let decompressor = GzipDecompressor;
-
-        let data = Bytes::from("a".repeat(1024 * 1024));
-        let start = std::time::Instant::now();
-        let compressed = compressor.compress(&data).unwrap();
-        let end = std::time::Instant::now();
-        let decompressed = decompressor.decompress(&compressed).unwrap();
-
-        assert_eq!(data, decompressed);
-
-        println!("Gzip compression took {:?}", end - start);
-    }
-
-    #[test]
-    fn test_zstd_compression_speed() {
-        // compress a 1MB string with Zstd and measure the time
-        let compressor = ZstdCompressor::new(6);
-        let decompressor = ZstdDecompressor;
-
-        let data = Bytes::from("a".repeat(1024 * 1024));
-        let start = std::time::Instant::now();
-        let compressed = compressor.compress(&data).unwrap();
-        let end = std::time::Instant::now();
-        let decompressed = decompressor.decompress(&compressed).unwrap();
-
-        assert_eq!(data, decompressed);
-
-        println!("Zstd compression took {:?}", end - start);
-    }
-
     fn compression_test<C: Compressor>(data: &Bytes, comp: C) -> (std::time::Duration, f64, Bytes) {
         let uncompressed_size = data.len() as f64;
         let start = std::time::Instant::now();
