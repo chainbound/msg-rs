@@ -58,7 +58,7 @@ impl Default for PubOptions {
             session_buffer_size: 1024,
             flush_interval: Some(std::time::Duration::from_micros(50)),
             backpressure_boundary: 8192,
-            min_compress_size: 1024,
+            min_compress_size: 8192,
         }
     }
 }
