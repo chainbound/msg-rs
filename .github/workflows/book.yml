@@ -1,0 +1,38 @@
+name: Book Deployment
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: write
+    name: Publish to GitHub Pages
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+      - name: Setup mdbook
+        uses: peaceiris/actions-mdbook@v1
+        with:
+          mdbook-version: "latest"
+      - name: Setup mdbook-mermaid
+        uses: magicgh/mdbook-mermaid-action@v1
+        with:
+          version: "latest"
+      - name: Install mdbook-template
+        run: |
+          mkdir mdbook-template
+          curl -sSL https://github.com/sgoudham/mdbook-template/releases/latest/download/mdbook-template-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook-template
+          echo `pwd`/mdbook-template >> $GITHUB_PATH
+      - name: Build book
+        working-directory: ./book
+        run: mdbook build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ github.ref == 'refs/heads/main' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./book/book

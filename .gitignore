@@ -3,3 +3,4 @@
 .helix/
 *.svg
 *.log
+.DS_Store
