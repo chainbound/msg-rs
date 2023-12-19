@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
+use msg_transport::TcpConnectOptions;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
@@ -22,9 +23,9 @@ impl Authenticator for Auth {
 async fn start_rep() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
-    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
-    while rep.bind("0.0.0.0:4444").await.is_err() {
-        rep = RepSocket::new(Tcp::new()).with_auth(Auth);
+    let mut rep = RepSocket::<Tcp>::new().with_auth(Auth);
+    while rep.bind("0.0.0.0:4444".parse().unwrap()).await.is_err() {
+        rep = RepSocket::<Tcp>::new().with_auth(Auth);
         tracing::warn!("Failed to bind rep socket, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -64,11 +65,10 @@ async fn main() {
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::with_options(
-        Tcp::new(),
+    let mut req = ReqSocket::<Tcp>::with_options(
         ReqOptions::default()
-            .auth_token(Bytes::from("client1"))
-            .timeout(Duration::from_secs(4)),
+            .timeout(Duration::from_secs(4))
+            .connect_options(TcpConnectOptions::default().auth_token(Bytes::from("client1"))),
     );
 
     let (tx, rx) = oneshot::channel();
@@ -76,7 +76,7 @@ async fn main() {
     tokio::spawn(
         async move {
             tracing::info!("Trying to connect to rep socket... This will start the connection process in the background, it won't immediately connect.");
-            req.connect("0.0.0.0:4444").await.unwrap();
+            req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
             for i in 0..10 {
                 tracing::info!("Sending request {i}...");

@@ -1,46 +1,54 @@
 use bytes::Bytes;
 use futures::StreamExt;
+use msg_socket::SubOptions;
+use msg_transport::TcpConnectOptions;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
 use msg::{
     compression::{GzipCompressor, GzipDecompressor},
-    PubSocket, SubSocket, Tcp, TcpOptions,
+    PubSocket, SubSocket, Tcp,
 };
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     // Configure the publisher socket with options
-    let mut pub_socket = PubSocket::new(Tcp::new())
+    let mut pub_socket = PubSocket::<Tcp>::new()
         // Enable Gzip compression (compression level 6)
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(
+    let mut sub1 = SubSocket::<Tcp>::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
+        SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
     )
     // Enable Gzip decompression (at the same level)
     .with_decompressor(GzipDecompressor::new());
 
-    let mut sub2 = SubSocket::new(Tcp::new_with_options(
-        TcpOptions::default().with_blocking_connect(),
-    ))
+    let mut sub2 = SubSocket::<Tcp>::with_options(
+        // TCP transport with blocking connect, usually connection happens in the background.
+        SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+    )
+    // Enable Gzip decompression (at the same level)
     .with_decompressor(GzipDecompressor::new());
 
     tracing::info!("Setting up the sockets...");
-    pub_socket.bind("127.0.0.1:0").await.unwrap();
-    let pub_addr = pub_socket.local_addr().unwrap().to_string();
+    pub_socket
+        .bind("127.0.0.1:0".parse().unwrap())
+        .await
+        .unwrap();
+
+    let pub_addr = pub_socket.local_addr().unwrap();
     tracing::info!("Publisher listening on: {}", pub_addr);
 
-    sub1.connect(&pub_addr).await.unwrap();
+    sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
-    sub2.connect(&pub_addr).await.unwrap();
+    sub2.connect(pub_addr).await.unwrap();
 
     sub2.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");

@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::{Future, SinkExt, StreamExt};
+use msg_transport::ClientTransport;
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
@@ -7,10 +8,7 @@ use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
-};
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
 use crate::req::SocketState;
@@ -22,10 +20,10 @@ use tokio::time::Interval;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
-pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
+pub(crate) struct ReqDriver<T: ClientTransport> {
     /// Options shared with the socket.
     #[allow(unused)]
-    pub(crate) options: Arc<ReqOptions>,
+    pub(crate) options: Arc<ReqOptions<T::ConnectOptions>>,
     /// State shared with the socket.
     pub(crate) socket_state: Arc<SocketState>,
     /// ID counter for outgoing requests.
@@ -33,7 +31,7 @@ pub(crate) struct ReqDriver<T: AsyncRead + AsyncWrite> {
     /// Commands from the socket.
     pub(crate) from_socket: mpsc::Receiver<Command>,
     /// The actual [`Framed`] connection with the `Req`-specific codec.
-    pub(crate) conn: Framed<T, reqrep::Codec>,
+    pub(crate) conn: Framed<T::Io, reqrep::Codec>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -51,7 +49,7 @@ pub(crate) struct PendingRequest {
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
-impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
+impl<T: ClientTransport> ReqDriver<T> {
     fn new_message(&mut self, payload: Bytes) -> reqrep::Message {
         let id = self.id_counter;
         // Wrap add here to avoid overflow
@@ -113,7 +111,7 @@ impl<T: AsyncRead + AsyncWrite> ReqDriver<T> {
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + Unpin> Future for ReqDriver<T> {
+impl<T: ClientTransport + Unpin> Future for ReqDriver<T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

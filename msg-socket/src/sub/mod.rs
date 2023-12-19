@@ -46,23 +46,16 @@ enum Command {
 }
 
 #[derive(Debug, Clone)]
-pub struct SubOptions {
-    /// The optional authentication token for the client.
-    auth_token: Option<Bytes>,
+pub struct SubOptions<T: Clone> {
     /// The maximum amount of incoming messages that will be buffered before being dropped due to
     /// a slow consumer.
     ingress_buffer_size: usize,
     /// The read buffer size for each session.
     read_buffer_size: usize,
+    connect_options: T,
 }
 
-impl SubOptions {
-    /// Sets the authentication token for the socket.
-    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
-        self.auth_token = Some(auth_token);
-        self
-    }
-
+impl<T: Clone> SubOptions<T> {
     /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
     /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
     pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
@@ -75,14 +68,20 @@ impl SubOptions {
         self.read_buffer_size = read_buffer_size;
         self
     }
+
+    /// Sets the connect options for the underlying transport.
+    pub fn connect_options(mut self, connect_options: T) -> Self {
+        self.connect_options = connect_options;
+        self
+    }
 }
 
-impl Default for SubOptions {
+impl<T: Default + Clone> Default for SubOptions<T> {
     fn default() -> Self {
         Self {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
-            auth_token: None,
+            connect_options: T::default(),
         }
     }
 }
@@ -184,10 +183,10 @@ mod tests {
     #[tokio::test]
     async fn test_sub() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut socket = socket::SubSocket::new(Tcp::new());
+        let mut socket = socket::SubSocket::<Tcp>::new();
 
         let addr = spawn_listener().await;
-        socket.connect(&addr.to_string()).await.unwrap();
+        socket.connect(addr).await.unwrap();
         socket.subscribe("HELLO".to_string()).await.unwrap();
 
         let mirror = socket.next().await.unwrap();

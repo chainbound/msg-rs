@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use msg_transport::TcpConnectOptions;
 use tokio_stream::StreamExt;
 
 use msg::{Authenticator, RepSocket, ReqOptions, ReqSocket, Tcp};
@@ -18,17 +19,17 @@ impl Authenticator for Auth {
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
-    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
-    rep.bind("0.0.0.0:4444").await.unwrap();
+    let mut rep = RepSocket::<Tcp>::new().with_auth(Auth);
+    rep.bind("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::with_options(
-        Tcp::new(),
-        ReqOptions::default().auth_token(Bytes::from("client1")),
+    let mut req = ReqSocket::<Tcp>::with_options(
+        ReqOptions::default()
+            .connect_options(TcpConnectOptions::default().auth_token(Bytes::from("client1"))),
     );
 
-    req.connect("0.0.0.0:4444").await.unwrap();
+    req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

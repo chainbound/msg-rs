@@ -15,35 +15,37 @@ use crate::{
     ClientTransport, ServerTransport,
 };
 
-#[derive(Debug, Default)]
-pub struct TcpOptions {
-    pub blocking_connect: bool,
-}
-
-impl TcpOptions {
-    pub fn with_blocking_connect(mut self) -> Self {
-        self.blocking_connect = true;
-        self
-    }
-}
-
+/// Options for connecting over a TCP transport.
+#[derive(Debug, Clone)]
 pub struct TcpConnectOptions {
+    /// Sets the TCP_NODELAY option on the socket.
     pub set_nodelay: bool,
-    pub auth: Option<Bytes>,
+    /// If true, the connection will be established synchronously.
+    pub blocking_connect: bool,
+    /// Optional authentication message.
+    pub auth_token: Option<Bytes>,
 }
 
 impl Default for TcpConnectOptions {
     fn default() -> Self {
         Self {
             set_nodelay: true,
-            auth: None,
+            blocking_connect: false,
+            auth_token: None,
         }
     }
 }
 
 impl TcpConnectOptions {
-    pub fn with_auth(mut self, auth: Bytes) -> Self {
-        self.auth = Some(auth);
+    /// Sets the auth token for this connection.
+    pub fn auth_token(mut self, auth: Bytes) -> Self {
+        self.auth_token = Some(auth);
+        self
+    }
+
+    /// Connect synchronously.
+    pub fn blocking_connect(mut self) -> Self {
+        self.blocking_connect = true;
         self
     }
 }
@@ -51,19 +53,11 @@ impl TcpConnectOptions {
 #[derive(Debug, Default)]
 pub struct Tcp {
     listener: Option<tokio::net::TcpListener>,
-    options: TcpOptions,
 }
 
 impl Tcp {
     pub fn new() -> Self {
-        Self::new_with_options(TcpOptions::default())
-    }
-
-    pub fn new_with_options(options: TcpOptions) -> Self {
-        Self {
-            listener: None,
-            options,
-        }
+        Self { listener: None }
     }
 }
 
@@ -103,13 +97,13 @@ impl Layer<TcpStream> for AuthLayer {
 impl ClientTransport for Tcp {
     type Io = DurableSession<TcpStream>;
     type Error = std::io::Error;
+    type ConnectOptions = TcpConnectOptions;
 
-    async fn connect_with_auth(
-        &self,
+    async fn connect_with_options(
         addr: SocketAddr,
-        auth: Option<Bytes>,
+        options: TcpConnectOptions,
     ) -> Result<Self::Io, Self::Error> {
-        let mut session = if let Some(ref id) = auth {
+        let mut session = if let Some(ref id) = options.auth_token {
             let layer = AuthLayer { id: id.clone() };
 
             Self::Io::new(addr).with_layer(layer)
@@ -117,11 +111,12 @@ impl ClientTransport for Tcp {
             Self::Io::new(addr)
         };
 
-        if self.options.blocking_connect {
+        if options.blocking_connect {
             session.blocking_connect().await?;
         } else {
             session.connect().await;
         }
+
         Ok(session)
     }
 }
@@ -130,15 +125,20 @@ impl ClientTransport for Tcp {
 impl ServerTransport for Tcp {
     type Io = TcpStream;
     type Error = std::io::Error;
+    type BindOptions = ();
 
-    async fn bind(&mut self, addr: &str) -> Result<(), Self::Error> {
+    async fn bind_with_options(
+        addr: SocketAddr,
+        _options: &Self::BindOptions,
+    ) -> Result<Self, Self::Error> {
         let socket = TcpSocket::new_v4()?;
         socket.set_nodelay(true)?;
-        socket.bind(addr.parse().unwrap())?;
+        socket.bind(addr)?;
 
         let listener = socket.listen(128)?;
-        self.listener = Some(listener);
-        Ok(())
+        Ok(Self {
+            listener: Some(listener),
+        })
     }
 
     async fn accept(&self) -> Result<(Self::Io, SocketAddr), Self::Error> {

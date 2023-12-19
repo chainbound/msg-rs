@@ -16,15 +16,14 @@ use crate::{
 use msg_transport::ServerTransport;
 
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
+#[derive(Default)]
 pub struct RepSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.
-    options: Arc<RepOptions>,
+    options: Arc<RepOptions<T::BindOptions>>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
     /// Receiver from the socket driver.
     from_driver: Option<mpsc::Receiver<Request>>,
-    /// The optional transport. This is taken when the socket is bound.
-    transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
     /// The local address this socket is bound to.
@@ -33,15 +32,14 @@ pub struct RepSocket<T: ServerTransport> {
 
 impl<T: ServerTransport> RepSocket<T> {
     /// Creates a new reply socket with the default [`RepOptions`].
-    pub fn new(transport: T) -> Self {
-        Self::with_options(transport, RepOptions::default())
+    pub fn new() -> Self {
+        Self::with_options(RepOptions::default())
     }
 
     /// Sets the options for this socket.
-    pub fn with_options(transport: T, options: RepOptions) -> Self {
+    pub fn with_options(options: RepOptions<T::BindOptions>) -> Self {
         Self {
             from_driver: None,
-            transport: Some(transport),
             local_addr: None,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
@@ -56,17 +54,10 @@ impl<T: ServerTransport> RepSocket<T> {
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind(&mut self, addr: &str) -> Result<(), PubError> {
+    pub async fn bind(&mut self, addr: SocketAddr) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        // Take the transport here, so we can move it into the backend task
-        let mut transport = self
-            .transport
-            .take()
-            .expect("Transport already taken, cannot bind multiple times");
-
-        transport
-            .bind(addr)
+        let transport = T::bind_with_options(addr, &self.options.bind_options)
             .await
             .map_err(|e| PubError::Transport(Box::new(e)))?;
 
