@@ -1,17 +1,17 @@
 use bytes::Bytes;
 use futures::StreamExt;
+use msg_transport::TcpConnectOptions;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg::{PubOptions, PubSocket, SubOptions, SubSocket, Tcp, TcpOptions};
+use msg::{PubOptions, PubSocket, SubOptions, SubSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     // Configure the publisher socket with options
-    let mut pub_socket = PubSocket::with_options(
-        Tcp::new(),
+    let mut pub_socket = PubSocket::<Tcp>::with_options(
         PubOptions::default()
             .backpressure_boundary(8192)
             .session_buffer_size(1024)
@@ -19,28 +19,35 @@ async fn main() {
     );
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::with_options(
+    let mut sub1 = SubSocket::<Tcp>::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions::default().ingress_buffer_size(1024),
+        SubOptions::default()
+            .ingress_buffer_size(1024)
+            .connect_options(TcpConnectOptions::default().blocking_connect()),
     );
 
-    let mut sub2 = SubSocket::with_options(
-        Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-        SubOptions::default().ingress_buffer_size(1024),
+    let mut sub2 = SubSocket::<Tcp>::with_options(
+        // TCP transport with blocking connect, usually connection happens in the background.
+        SubOptions::default()
+            .ingress_buffer_size(1024)
+            .connect_options(TcpConnectOptions::default().blocking_connect()),
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket.bind("127.0.0.1:0").await.unwrap();
-    let pub_addr = pub_socket.local_addr().unwrap().to_string();
+    pub_socket
+        .bind("127.0.0.1:0".parse().unwrap())
+        .await
+        .unwrap();
+    let pub_addr = pub_socket.local_addr().unwrap();
+
     tracing::info!("Publisher listening on: {}", pub_addr);
 
-    sub1.connect(&pub_addr).await.unwrap();
+    sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
-    sub2.connect(&pub_addr).await.unwrap();
+    sub2.connect(pub_addr).await.unwrap();
 
     sub2.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");

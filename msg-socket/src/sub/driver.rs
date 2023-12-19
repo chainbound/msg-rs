@@ -25,9 +25,7 @@ type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
 pub(crate) struct SubDriver<T: ClientTransport> {
     /// Options shared with the socket.
-    pub(super) options: Arc<SubOptions>,
-    /// The transport for this socket driver.
-    pub(super) transport: Arc<T>,
+    pub(super) options: Arc<SubOptions<T::ConnectOptions>>,
     /// Commands from the socket.
     pub(super) from_socket: mpsc::Receiver<Command>,
     /// Messages to the socket.
@@ -131,11 +129,10 @@ where
                 }
             }
             Command::Connect { endpoint } => {
-                let id = self.options.auth_token.clone();
-                let transport = Arc::clone(&self.transport);
+                let options = self.options.connect_options.clone();
 
                 self.connection_tasks.spawn(async move {
-                    let io = transport.connect_with_auth(endpoint, id).await?;
+                    let io = T::connect_with_options(endpoint, options).await?;
 
                     Ok((endpoint, io))
                 });

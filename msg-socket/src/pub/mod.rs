@@ -35,7 +35,7 @@ pub enum PubError {
 }
 
 #[derive(Debug)]
-pub struct PubOptions {
+pub struct PubOptions<T> {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     /// The maximum number of outgoing messages that can be buffered per session.
@@ -51,7 +51,7 @@ pub struct PubOptions {
     min_compress_size: usize,
 }
 
-impl Default for PubOptions {
+impl<T: Default> Default for PubOptions<T> {
     fn default() -> Self {
         Self {
             max_clients: None,
@@ -63,7 +63,7 @@ impl Default for PubOptions {
     }
 }
 
-impl PubOptions {
+impl<T> PubOptions<T> {
     /// Sets the maximum number of concurrent clients.
     pub fn max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
@@ -171,7 +171,7 @@ mod tests {
     use msg_transport::{Tcp, TcpOptions};
     use msg_wire::compression::GzipCompressor;
 
-    use crate::SubSocket;
+    use crate::{SubOptions, SubSocket};
 
     use super::*;
 
@@ -179,15 +179,16 @@ mod tests {
     async fn pubsub_simple() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::new());
-        let mut sub_socket = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut pub_socket = PubSocket::<Tcp>::new();
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        let mut sub_socket = SubSocket::<Tcp>::with_options(
+            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        );
+
+        pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub_socket.connect(&addr.to_string()).await.unwrap();
+        sub_socket.connect(addr).await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -206,20 +207,21 @@ mod tests {
     async fn pubsub_many() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::new());
-        let mut sub1 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut pub_socket = PubSocket::<Tcp>::new();
 
-        let mut sub2 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut sub1 = SubSocket::<Tcp>::with_options(
+            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        );
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        let mut sub2 = SubSocket::<Tcp>::with_options(
+            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        );
+
+        pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(&addr.to_string()).await.unwrap();
-        sub2.connect(&addr.to_string()).await.unwrap();
+        sub1.connect(addr).await.unwrap();
+        sub2.connect(addr).await.unwrap();
         sub1.subscribe("HELLO".to_string()).await.unwrap();
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -255,11 +257,11 @@ mod tests {
             TcpOptions::default().with_blocking_connect(),
         ));
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(&addr.to_string()).await.unwrap();
-        sub2.connect(&addr.to_string()).await.unwrap();
+        sub1.connect(addr).await.unwrap();
+        sub2.connect(addr).await.unwrap();
         sub1.subscribe("HELLO".to_string()).await.unwrap();
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -286,16 +288,22 @@ mod tests {
     async fn pubsub_durable() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::new());
-        // Don't enable blocking connect
-        let mut sub_socket = SubSocket::new(Tcp::new_with_options(TcpOptions::default()));
+        let mut pub_socket = PubSocket::<Tcp>::new();
+
+        let mut sub_socket = SubSocket::<Tcp>::new();
 
         // Try to connect and subscribe before the publisher is up
-        sub_socket.connect("0.0.0.0:6662").await.unwrap();
+        sub_socket
+            .connect("0.0.0.0:6662".parse().unwrap())
+            .await
+            .unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        pub_socket.bind("0.0.0.0:6662").await.unwrap();
+        pub_socket
+            .bind("0.0.0.0:6662".parse().unwrap())
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         pub_socket
@@ -313,25 +321,24 @@ mod tests {
     async fn pubsub_max_clients() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket =
-            PubSocket::with_options(Tcp::new(), PubOptions::default().max_clients(1));
+        let mut pub_socket = PubSocket::<Tcp>::with_options(PubOptions::default().max_clients(1));
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
 
-        let mut sub1 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut sub1 = SubSocket::<Tcp>::with_options(
+            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        );
 
-        let mut sub2 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut sub2 = SubSocket::<Tcp>::with_options(
+            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        );
 
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(&addr.to_string()).await.unwrap();
+        sub1.connect(addr).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(pub_socket.stats().active_clients(), 1);
-        sub2.connect(&addr.to_string()).await.unwrap();
+        sub2.connect(addr).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(pub_socket.stats().active_clients(), 1);
     }

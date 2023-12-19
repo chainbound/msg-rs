@@ -35,7 +35,7 @@ pub(crate) struct RepDriver<T: ServerTransport> {
     pub(crate) state: Arc<SocketState>,
     #[allow(unused)]
     /// Options shared with socket.
-    pub(crate) options: Arc<RepOptions>,
+    pub(crate) options: Arc<RepOptions<T::BindOptions>>,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
     /// Note that when the [`PeerState`] stream ends, it will be silently removed
     /// from this map.

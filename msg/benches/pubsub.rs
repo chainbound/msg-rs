@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
-use msg_transport::{Tcp, TcpOptions};
+use msg_transport::{Tcp, TcpConnectOptions};
 
 const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;
@@ -34,10 +34,13 @@ impl PairBenchmark {
     fn init(&mut self) {
         // Set up the socket connections
         self.rt.block_on(async {
-            self.publisher.bind("127.0.0.1:0").await.unwrap();
+            self.publisher
+                .bind("127.0.0.1:0".parse().unwrap())
+                .await
+                .unwrap();
 
             let addr = self.publisher.local_addr().unwrap();
-            self.subscriber.connect(&addr.to_string()).await.unwrap();
+            self.subscriber.connect(addr).await.unwrap();
 
             self.subscriber
                 .subscribe("HELLO".to_string())
@@ -150,7 +153,6 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     let buffer_size = 1024 * 64;
 
     let publisher = PubSocket::with_options(
-        Tcp::new(),
         PubOptions::default()
             .flush_interval(Duration::from_micros(100))
             .backpressure_boundary(buffer_size)
@@ -158,7 +160,6 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     );
 
     let subscriber = SubSocket::with_options(
-        Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
         SubOptions::default()
             .read_buffer_size(buffer_size)
             .ingress_buffer_size(N_REQS * 2),
@@ -195,7 +196,6 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     let buffer_size = 1024 * 64;
 
     let publisher = PubSocket::with_options(
-        Tcp::new(),
         PubOptions::default()
             .flush_interval(Duration::from_micros(100))
             .backpressure_boundary(buffer_size)
@@ -203,10 +203,10 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     );
 
     let subscriber = SubSocket::with_options(
-        Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
         SubOptions::default()
             .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+            .ingress_buffer_size(N_REQS * 2)
+            .connect_options(TcpConnectOptions::default().blocking_connect()),
     );
 
     let mut bench = PairBenchmark {

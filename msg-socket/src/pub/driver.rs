@@ -21,7 +21,7 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     /// The server transport used to accept incoming connections.
     pub(super) transport: T,
     /// The publisher options (shared with the socket)
-    pub(super) options: Arc<PubOptions>,
+    pub(super) options: Arc<PubOptions<T::BindOptions>>,
     /// The publisher socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
     /// Optional connection authenticator.

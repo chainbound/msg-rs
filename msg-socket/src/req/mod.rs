@@ -39,9 +39,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReqOptions {
-    /// The optional authentication token for the client.
-    auth_token: Option<Bytes>,
+pub struct ReqOptions<T: Clone> {
     /// Timeout duration for requests.
     timeout: std::time::Duration,
     /// Wether to block on initial connection to the target.
@@ -56,15 +54,11 @@ pub struct ReqOptions {
     backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
+    /// The connect options for the underlying transport.
+    connect_options: T,
 }
 
-impl ReqOptions {
-    /// Sets the authentication token for the socket.
-    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
-        self.auth_token = Some(auth_token);
-        self
-    }
-
+impl<T: Clone> ReqOptions<T> {
     /// Sets the timeout for the socket.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -103,18 +97,24 @@ impl ReqOptions {
         self.retry_attempts = Some(retry_attempts);
         self
     }
+
+    /// Sets the connect options for the underlying transport.
+    pub fn connect_options(mut self, connect_options: T) -> Self {
+        self.connect_options = connect_options;
+        self
+    }
 }
 
-impl Default for ReqOptions {
+impl<T: Default + Clone> Default for ReqOptions<T> {
     fn default() -> Self {
         Self {
-            auth_token: None,
             timeout: std::time::Duration::from_secs(5),
             blocking_connect: true,
             backoff_duration: Duration::from_millis(200),
             flush_interval: None,
             backpressure_boundary: 8192,
             retry_attempts: None,
+            connect_options: T::default(),
         }
     }
 }

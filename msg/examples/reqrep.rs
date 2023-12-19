@@ -6,12 +6,12 @@ use msg::{RepSocket, ReqSocket, Tcp};
 #[tokio::main]
 async fn main() {
     // Initialize the reply socket (server side) with a transport
-    let mut rep = RepSocket::new(Tcp::new());
-    rep.bind("0.0.0.0:4444").await.unwrap();
+    let mut rep = RepSocket::<Tcp>::new();
+    rep.bind("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
     // Initialize the request socket (client side) with a transport
-    let mut req = ReqSocket::new(Tcp::new());
-    req.connect("0.0.0.0:4444").await.unwrap();
+    let mut req = ReqSocket::<Tcp>::new();
+    req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

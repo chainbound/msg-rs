@@ -26,15 +26,22 @@ pub enum PubError {
 }
 
 #[derive(Default)]
-pub struct RepOptions {
+pub struct RepOptions<T> {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
+    bind_options: T,
 }
 
-impl RepOptions {
+impl<T> RepOptions<T> {
     /// Sets the number of maximum concurrent clients.
     pub fn max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
+        self
+    }
+
+    /// Sets the bind options for the underlying transport
+    pub fn bind_options(mut self, bind_options: T) -> Self {
+        self.bind_options = bind_options;
         self
     }
 }
@@ -77,23 +84,25 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::Tcp;
+    use msg_transport::{Tcp, TcpConnectOptions};
     use rand::Rng;
 
     use crate::{req::ReqSocket, Authenticator, ReqOptions};
 
     use super::*;
 
+    fn localhost() -> SocketAddr {
+        "127.0.0.1:0".parse().unwrap()
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_req_rep() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::new(Tcp::new());
-        rep.bind("127.0.0.1:0").await.unwrap();
+        let mut rep = RepSocket::<Tcp>::new();
+        rep.bind(localhost()).await.unwrap();
 
-        let mut req = ReqSocket::new(Tcp::new());
-        req.connect(&rep.local_addr().unwrap().to_string())
-            .await
-            .unwrap();
+        let mut req = ReqSocket::<Tcp>::new();
+        req.connect(rep.local_addr().unwrap()).await.unwrap();
 
         tokio::spawn(async move {
             loop {
@@ -129,14 +138,14 @@ mod tests {
         let addr = format!("0.0.0.0:{}", random_port);
 
         // Initialize the request socket (client side) with a transport
-        let mut req = ReqSocket::new(Tcp::new());
+        let mut req = ReqSocket::<Tcp>::new();
         // Try to connect even through the server isn't up yet
-        req.connect(&addr).await.unwrap();
+        req.connect(addr.parse().unwrap()).await.unwrap();
 
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let mut rep = RepSocket::new(Tcp::new());
-        rep.bind(&addr).await.unwrap();
+        let mut rep = RepSocket::<Tcp>::new();
+        rep.bind(addr.parse().unwrap()).await.unwrap();
 
         tokio::spawn(async move {
             // Receive the request and respond with "world"
@@ -162,18 +171,16 @@ mod tests {
         }
 
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
-        rep.bind("127.0.0.1:0").await.unwrap();
+        let mut rep = RepSocket::<Tcp>::new().with_auth(Auth);
+        rep.bind(localhost()).await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::with_options(
-            Tcp::new(),
-            ReqOptions::default().auth_token(Bytes::from("REQ")),
+        let mut req = ReqSocket::<Tcp>::with_options(
+            ReqOptions::default()
+                .connect_options(TcpConnectOptions::default().auth_token(Bytes::from("REQ"))),
         );
 
-        req.connect(&rep.local_addr().unwrap().to_string())
-            .await
-            .unwrap();
+        req.connect(rep.local_addr().unwrap()).await.unwrap();
 
         tracing::info!("Connected to rep");
 
@@ -207,18 +214,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::with_options(Tcp::new(), RepOptions::default().max_clients(1));
-        rep.bind("127.0.0.1:0").await.unwrap();
+        let mut rep = RepSocket::<Tcp>::with_options(RepOptions::default().max_clients(1));
+        rep.bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
 
-        let mut req1 = ReqSocket::new(Tcp::new());
-        req1.connect(&rep.local_addr().unwrap().to_string())
-            .await
-            .unwrap();
+        let mut req1 = ReqSocket::<Tcp>::new();
+        req1.connect(rep.local_addr().unwrap()).await.unwrap();
 
-        let mut req2 = ReqSocket::new(Tcp::new());
-        req2.connect(&rep.local_addr().unwrap().to_string())
-            .await
-            .unwrap();
+        let mut req2 = ReqSocket::<Tcp>::new();
+        req2.connect(rep.local_addr().unwrap()).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);

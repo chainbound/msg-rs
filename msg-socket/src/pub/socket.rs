@@ -9,16 +9,14 @@ use msg_transport::ServerTransport;
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PubSocket<T: ServerTransport> {
     /// The reply socket options, shared with the driver.
-    options: Arc<PubOptions>,
+    options: Arc<PubOptions<T::BindOptions>>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
     /// The broadcast channel to all active [`SubscriberSession`](super::session::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
-    /// The optional transport. This is taken when the socket is bound.
-    transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
     /// Optional message compressor.
@@ -31,14 +29,13 @@ pub struct PubSocket<T: ServerTransport> {
 
 impl<T: ServerTransport> PubSocket<T> {
     /// Creates a new reply socket with the default [`PubOptions`].
-    pub fn new(transport: T) -> Self {
-        Self::with_options(transport, PubOptions::default())
+    pub fn new() -> Self {
+        Self::with_options(PubOptions::default())
     }
 
     /// Creates a new publisher socket with the given transport and options.
-    pub fn with_options(transport: T, options: PubOptions) -> Self {
+    pub fn with_options(options: PubOptions<T::BindOptions>) -> Self {
         Self {
-            transport: Some(transport),
             local_addr: None,
             to_sessions_bcast: None,
             options: Arc::new(options),
@@ -61,16 +58,12 @@ impl<T: ServerTransport> PubSocket<T> {
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind(&mut self, addr: &str) -> Result<(), PubError> {
-        // Take the transport here, so we can move it into the backend task
-        let mut transport = self.transport.take().unwrap();
-
+    pub async fn bind(&mut self, addr: SocketAddr) -> Result<(), PubError> {
         // let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
         let (to_sessions_bcast, from_socket_bcast) =
             broadcast::channel(self.options.session_buffer_size);
 
-        transport
-            .bind(addr)
+        let transport = T::bind_with_options(addr, &self.options.bind_options)
             .await
             .map_err(|e| PubError::Transport(Box::new(e)))?;
 

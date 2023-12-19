@@ -2,6 +2,7 @@ use bytes::Bytes;
 use msg_transport::ClientTransport;
 use msg_wire::reqrep;
 use rustc_hash::FxHashMap;
+use std::net::SocketAddr;
 use std::time::Duration;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
@@ -11,27 +12,27 @@ use crate::{req::stats::SocketStats, req::SocketState};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ReqSocket<T: ClientTransport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
-    /// The underlying transport.
-    transport: T,
     /// Options for the socket. These are shared with the backend task.
-    options: Arc<ReqOptions>,
+    options: Arc<ReqOptions<T::ConnectOptions>>,
     /// Socket state. This is shared with the backend task.
     state: Arc<SocketState>,
 }
 
-impl<T: ClientTransport> ReqSocket<T> {
-    pub fn new(transport: T) -> Self {
-        Self::with_options(transport, ReqOptions::default())
+impl<T> ReqSocket<T>
+where
+    T: ClientTransport + Send + Sync + Unpin + 'static,
+{
+    pub fn new() -> Self {
+        Self::with_options(ReqOptions::default())
     }
 
-    pub fn with_options(transport: T, options: ReqOptions) -> Self {
+    pub fn with_options(options: ReqOptions<T::ConnectOptions>) -> Self {
         Self {
             to_driver: None,
-            transport,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
         }
@@ -58,18 +59,13 @@ impl<T: ClientTransport> ReqSocket<T> {
     }
 
     /// Connects to the target with the default options.
-    pub async fn connect(&mut self, endpoint: &str) -> Result<(), ReqError> {
+    pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        // TODO: return error
-        let endpoint = endpoint.parse().unwrap();
-
         tracing::debug!("Connected to {}", endpoint);
 
-        let stream = self
-            .transport
-            .connect_with_auth(endpoint, self.options.auth_token.clone())
+        let stream = T::connect_with_options(endpoint, self.options.connect_options.clone())
             .await
             .map_err(|e| ReqError::Transport(Box::new(e)))?;
 
@@ -77,7 +73,7 @@ impl<T: ClientTransport> ReqSocket<T> {
         framed.set_backpressure_boundary(self.options.backpressure_boundary);
 
         // Create the socket backend
-        let driver = ReqDriver {
+        let driver: ReqDriver<T> = ReqDriver {
             options: Arc::clone(&self.options),
             id_counter: 0,
             from_socket,
@@ -107,7 +103,7 @@ impl<T: ClientTransport> ReqSocket<T> {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use msg_transport::Tcp;
+    use msg_transport::{Tcp, TcpConnectOptions};
     use std::net::SocketAddr;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -147,21 +143,17 @@ mod tests {
 
         let addr = spawn_listener(Duration::from_secs(0)).await;
 
-        let mut socket = ReqSocket::with_options(
-            Tcp::new(),
-            ReqOptions {
-                auth_token: None,
-                timeout: Duration::from_secs(1),
-                blocking_connect: true,
-                backoff_duration: Duration::from_secs(1),
-                flush_interval: None,
-                backpressure_boundary: 8192,
-                retry_attempts: Some(3),
-            },
-        );
+        let mut socket = ReqSocket::<Tcp>::with_options(ReqOptions {
+            timeout: Duration::from_secs(1),
+            blocking_connect: true,
+            backoff_duration: Duration::from_secs(1),
+            flush_interval: None,
+            backpressure_boundary: 8192,
+            retry_attempts: Some(3),
+            connect_options: TcpConnectOptions::default(),
+        });
 
-        let addr_str = addr.to_string();
-        let connect_result = socket.connect(&addr_str).await;
+        let connect_result = socket.connect(addr).await;
         assert!(
             connect_result.is_ok(),
             "Failed to connect: {:?}",
@@ -185,21 +177,17 @@ mod tests {
 
         let addr = spawn_listener(Duration::from_secs(3)).await;
 
-        let mut socket = ReqSocket::with_options(
-            Tcp::new(),
-            ReqOptions {
-                auth_token: None,
-                timeout: Duration::from_secs(1),
-                blocking_connect: true,
-                backoff_duration: Duration::from_millis(200),
-                backpressure_boundary: 8192,
-                flush_interval: None,
-                retry_attempts: None,
-            },
-        );
+        let mut socket = ReqSocket::<Tcp>::with_options(ReqOptions {
+            timeout: Duration::from_secs(1),
+            blocking_connect: true,
+            backoff_duration: Duration::from_millis(200),
+            backpressure_boundary: 8192,
+            flush_interval: None,
+            retry_attempts: None,
+            connect_options: TcpConnectOptions::default(),
+        });
 
-        let addr_str = addr.to_string();
-        let connect_result = socket.connect(&addr_str).await;
+        let connect_result = socket.connect(addr).await;
         assert!(
             connect_result.is_ok(),
             "Failed to connect: {:?}",

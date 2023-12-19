@@ -23,7 +23,7 @@ pub struct SubSocket<T: ClientTransport> {
     from_driver: mpsc::Receiver<PubMessage>,
     /// Options for the socket. These are shared with the backend task.
     #[allow(unused)]
-    options: Arc<SubOptions>,
+    options: Arc<SubOptions<T::ConnectOptions>>,
     /// The pending driver.
     driver: Option<SubDriver<T>>,
     /// Socket state. This is shared with the socket frontend.
@@ -35,11 +35,12 @@ impl<T> SubSocket<T>
 where
     T: ClientTransport + Send + Sync + 'static,
 {
-    pub fn new(transport: T) -> Self {
-        Self::with_options(transport, SubOptions::default())
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self::with_options(SubOptions::default())
     }
 
-    pub fn with_options(transport: T, options: SubOptions) -> Self {
+    pub fn with_options(options: SubOptions<T::ConnectOptions>) -> Self {
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
         let (to_socket, from_driver) = mpsc::channel(options.ingress_buffer_size);
 
@@ -49,7 +50,6 @@ where
 
         let driver = SubDriver {
             options: Arc::clone(&options),
-            transport: Arc::new(transport),
             from_socket,
             to_socket,
             connection_tasks: JoinSet::new(),
@@ -69,9 +69,8 @@ where
     }
 
     /// Asynchronously connects to the endpoint.
-    pub async fn connect(&mut self, endpoint: &str) -> Result<(), SubError> {
+    pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().unwrap();
 
         self.send_command(Command::Connect { endpoint }).await?;
 
