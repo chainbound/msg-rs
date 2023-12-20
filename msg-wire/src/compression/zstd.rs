@@ -31,13 +31,6 @@ impl Compressor for ZstdCompressor {
 #[derive(Debug, Default)]
 pub struct ZstdDecompressor;
 
-impl ZstdDecompressor {
-    #[inline]
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 impl Decompressor for ZstdDecompressor {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let decompressed = decode_all(data)?;
