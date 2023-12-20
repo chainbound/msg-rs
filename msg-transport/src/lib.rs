@@ -6,6 +6,7 @@ use std::{
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod durable;
+pub mod quic;
 mod tcp;
 pub use tcp::*;
 
