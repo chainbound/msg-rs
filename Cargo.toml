@@ -36,6 +36,7 @@ rand = "0.8"
 rustc-hash = "1"
 flate2 = "1"
 zstd = "0.13"
+snap = "1"
 
 [profile.dev]
 opt-level = 1

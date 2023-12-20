@@ -104,17 +104,19 @@ impl<T: ServerTransport> PubSocket<T> {
         let mut msg = PubMessage::new(topic, message);
 
         // We compress here since that way we only have to do it once.
-        if let Some(ref compressor) = self.compressor {
-            let len_before = msg.payload().len();
+        // Compression is only done if the message is larger than the
+        // configured minimum payload size.
+        let len_before = msg.payload().len();
+        if len_before > self.options.min_compress_size {
+            if let Some(ref compressor) = self.compressor {
+                msg.compress(compressor.as_ref())?;
 
-            // For relatively small messages, this takes <100us
-            msg.compress(compressor.as_ref())?;
-
-            debug!(
-                "Compressed message from {} to {} bytes",
-                len_before,
-                msg.payload().len(),
-            );
+                debug!(
+                    "Compressed message from {} to {} bytes",
+                    len_before,
+                    msg.payload().len(),
+                );
+            }
         }
 
         // Broadcast the message directly to all active sessions.

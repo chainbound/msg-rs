@@ -2,7 +2,7 @@ use bytes::Bytes;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use std::io::{self, Read, Write};
 
-use super::{Compressor, Decompressor};
+use super::{CompressionType, Compressor, Decompressor};
 
 /// A compressor that uses the gzip algorithm.
 pub struct GzipCompressor {
@@ -17,6 +17,10 @@ impl GzipCompressor {
 }
 
 impl Compressor for GzipCompressor {
+    fn compression_type(&self) -> CompressionType {
+        CompressionType::Gzip
+    }
+
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         // Optimistically allocate the compressed buffer to 1/4 of the original size.
         let mut encoder = GzEncoder::new(
@@ -34,12 +38,6 @@ impl Compressor for GzipCompressor {
 
 #[derive(Debug, Default)]
 pub struct GzipDecompressor;
-
-impl GzipDecompressor {
-    pub fn new() -> Self {
-        Self
-    }
-}
 
 impl Decompressor for GzipDecompressor {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {

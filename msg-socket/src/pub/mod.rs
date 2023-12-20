@@ -3,7 +3,10 @@ use std::io;
 use thiserror::Error;
 
 mod driver;
-use msg_wire::{compression::Compressor, pubsub};
+use msg_wire::{
+    compression::{CompressionType, Compressor},
+    pubsub,
+};
 mod session;
 mod socket;
 mod stats;
@@ -43,6 +46,9 @@ pub struct PubOptions {
     /// The maximum number of bytes that can be buffered in the session before being flushed.
     /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
     backpressure_boundary: usize,
+    /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
+    /// this threshold, it will not be compressed.
+    min_compress_size: usize,
 }
 
 impl Default for PubOptions {
@@ -52,6 +58,7 @@ impl Default for PubOptions {
             session_buffer_size: 1024,
             flush_interval: Some(std::time::Duration::from_micros(50)),
             backpressure_boundary: 8192,
+            min_compress_size: 8192,
         }
     }
 }
@@ -83,12 +90,21 @@ impl PubOptions {
         self.flush_interval = Some(flush_interval);
         self
     }
+
+    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller than
+    /// this threshold, it will not be compressed.
+    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+        self.min_compress_size = min_compress_size;
+        self
+    }
 }
 
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
 #[derive(Debug, Clone)]
 pub struct PubMessage {
+    /// The compression type used for the message payload.
+    compression_type: CompressionType,
     /// The topic of the message.
     topic: String,
     /// The message payload.
@@ -98,7 +114,13 @@ pub struct PubMessage {
 #[allow(unused)]
 impl PubMessage {
     pub fn new(topic: String, payload: Bytes) -> Self {
-        Self { topic, payload }
+        Self {
+            // Initialize the compression type to None.
+            // The actual compression type will be set in the `compress` method.
+            compression_type: CompressionType::None,
+            topic,
+            payload,
+        }
     }
 
     #[inline]
@@ -118,12 +140,18 @@ impl PubMessage {
 
     #[inline]
     pub fn into_wire(self, seq: u32) -> pubsub::Message {
-        pubsub::Message::new(seq, Bytes::from(self.topic), self.payload)
+        pubsub::Message::new(
+            seq,
+            Bytes::from(self.topic),
+            self.payload,
+            self.compression_type as u8,
+        )
     }
 
     #[inline]
     pub fn compress(&mut self, compressor: &dyn Compressor) -> Result<(), io::Error> {
         self.payload = compressor.compress(&self.payload)?;
+        self.compression_type = compressor.compression_type();
 
         Ok(())
     }
@@ -141,7 +169,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::{Tcp, TcpOptions};
-    use msg_wire::compression::{GzipCompressor, GzipDecompressor};
+    use msg_wire::compression::GzipCompressor;
 
     use crate::SubSocket;
 
@@ -216,16 +244,16 @@ mod tests {
     async fn pubsub_many_compressed() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::new()).with_compressor(GzipCompressor::new(6));
+        let mut pub_socket =
+            PubSocket::with_options(Tcp::new(), PubOptions::default().min_compress_size(0))
+                .with_compressor(GzipCompressor::new(6));
         let mut sub1 = SubSocket::new(Tcp::new_with_options(
             TcpOptions::default().with_blocking_connect(),
-        ))
-        .with_decompressor(GzipDecompressor::new());
+        ));
 
         let mut sub2 = SubSocket::new(Tcp::new_with_options(
             TcpOptions::default().with_blocking_connect(),
-        ))
-        .with_decompressor(GzipDecompressor::new());
+        ));
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();

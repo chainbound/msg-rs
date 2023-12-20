@@ -4,10 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg::{
-    compression::{GzipCompressor, GzipDecompressor},
-    PubSocket, SubSocket, Tcp, TcpOptions,
-};
+use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp, TcpOptions};
 
 #[tokio::main]
 async fn main() {
@@ -21,14 +18,11 @@ async fn main() {
     let mut sub1 = SubSocket::new(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new_with_options(TcpOptions::default().with_blocking_connect()),
-    )
-    // Enable Gzip decompression (at the same level)
-    .with_decompressor(GzipDecompressor::new());
+    );
 
     let mut sub2 = SubSocket::new(Tcp::new_with_options(
         TcpOptions::default().with_blocking_connect(),
-    ))
-    .with_decompressor(GzipDecompressor::new());
+    ));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();

@@ -30,6 +30,7 @@ impl fmt::Debug for Message {
         dbg.field("seq", &self.seq());
         dbg.field("topic", &self.topic());
         dbg.field("timestamp", &self.timestamp());
+        dbg.field("compression_type", &self.header.compression_type);
         dbg.field("size", &self.size());
         dbg.finish()
     }
@@ -43,9 +44,10 @@ impl Message {
     /// # Panics
     /// Panics if the topic is larger than 65535 bytes.
     #[inline]
-    pub fn new(seq: u32, topic: Bytes, payload: Bytes) -> Self {
+    pub fn new(seq: u32, topic: Bytes, payload: Bytes, compression_type: u8) -> Self {
         Self {
             header: Header {
+                compression_type,
                 topic_size: u16::try_from(topic.len()).expect("Topic too large, max 65535 bytes"),
                 topic,
                 timestamp: unix_micros(),
@@ -62,7 +64,7 @@ impl Message {
     pub fn new_sub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.SUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new())
+        Self::new(0, prefix.freeze(), Bytes::new(), 0)
     }
 
     /// Creates a new unsubscribe message for the given topic. The topic is prefixed with
@@ -71,7 +73,7 @@ impl Message {
     pub fn new_unsub(topic: Bytes) -> Self {
         let mut prefix = BytesMut::from("MSG.UNSUB.");
         prefix.put(topic);
-        Self::new(0, prefix.freeze(), Bytes::new())
+        Self::new(0, prefix.freeze(), Bytes::new(), 0)
     }
 
     #[inline]
@@ -110,6 +112,11 @@ impl Message {
     }
 
     #[inline]
+    pub fn compression_type(&self) -> u8 {
+        self.header.compression_type
+    }
+
+    #[inline]
     pub fn topic(&self) -> &Bytes {
         &self.header.topic
     }
@@ -117,6 +124,8 @@ impl Message {
 
 #[derive(Debug, Clone)]
 pub struct Header {
+    /// Compression type used for the message payload.
+    pub(crate) compression_type: u8,
     /// Size of the topic in bytes.
     pub(crate) topic_size: u16,
     /// The actual topic.
@@ -133,7 +142,12 @@ impl Header {
     /// Returns the length of the header in bytes.
     #[inline]
     pub fn len(&self) -> usize {
-        10 + 8 + self.topic_size as usize
+        8 + // u64
+        4 + // u32 
+        4 + // u32 
+        2 + // u16
+        1 + // u8 
+        self.topic_size as usize
     }
 
     pub fn is_empty(&self) -> bool {
@@ -182,6 +196,15 @@ impl Decoder for Codec {
                         return Err(Error::WireId(wire_id));
                     }
 
+                    // The src is too small to read the compression type
+                    if src.len() < cursor + 1 {
+                        return Ok(None);
+                    }
+
+                    let compression_type = u8::from_be_bytes([src[cursor]]);
+
+                    cursor += 1;
+
                     // The src is too small to read the topic size
                     if src.len() < cursor + 2 {
                         return Ok(None);
@@ -203,6 +226,7 @@ impl Decoder for Codec {
 
                     // Construct the header
                     let header = Header {
+                        compression_type,
                         topic_size,
                         topic,
                         timestamp: src.get_u64(),
@@ -241,6 +265,7 @@ impl Encoder<Message> for Codec {
         dst.reserve(1 + item.header.len() + item.payload_size() as usize);
 
         dst.put_u8(WIRE_ID);
+        dst.put_u8(item.header.compression_type);
         dst.put_u16(item.header.topic_size);
         dst.put(item.header.topic);
         dst.put_u64(item.header.timestamp);
