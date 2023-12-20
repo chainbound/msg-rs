@@ -20,6 +20,9 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 rand.workspace = true
+quinn.workspace = true
+thiserror.workspace = true
+rustls.workspace = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

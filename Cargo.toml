@@ -32,6 +32,11 @@ thiserror = "1"
 tracing = "0.1"
 rand = "0.8"
 
+# transport
+quinn = "0.10"
+# rustls needs to be the same version as the one used by quinn
+rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
+
 # performance
 rustc-hash = "1"
 flate2 = "1"
