@@ -3,9 +3,6 @@
 [![CI](https://github.com/chainbound/msg-rs/actions/workflows/ci.yml/badge.svg)][gh-ci]
 [![License](https://img.shields.io/badge/License-MIT-orange.svg)][mit-license]
 
-[gh-ci]: https://github.com/chainbound/msg-rs/actions/workflows/ci.yml
-[mit-license]: https://github.com/chainbound/msg-rs/blob/main/LICENSE
-
 **A flexible and lightweight messaging library for distributed systems built with Rust and Tokio.**
 
 ## Overview
@@ -13,8 +10,7 @@
 `msg-rs` is a messaging library that was inspired by projects like [ZeroMQ](https://zeromq.org/) and [Nanomsg](https://nanomsg.org/).
 It was built because we needed a Rust-native messaging library like those above.
 
-> **Warning**
-> This project is still in early development and is not ready for production use.
+> MSG is still in ALPHA and is not ready for production use.
 
 ## Features
 
@@ -25,7 +21,7 @@ It was built because we needed a Rust-native messaging library like those above.
   - [ ] Push/Pull
   - [ ] Survey/Respond
 - [ ] Stats (RTT, throughput, packet drops etc.)
- - [x] Request/Reply basic stats
+- [x] Request/Reply basic stats
 - [ ] Queuing
 - [ ] Pluggable transport layer
   - [x] TCP
@@ -73,6 +69,7 @@ async fn main() {
 ```
 
 ### Publish/Subscribe
+
 ```rust
 use bytes::Bytes;
 use tokio_stream::StreamExt;
@@ -105,14 +102,24 @@ async fn main() {
 ```
 
 ## MSRV
+
 The minimum supported Rust version is 1.70.
 
 ## Contributions & Bug Reports
 
-Please report any bugs or issues you encounter by [opening a github issue](https://github.com/chainbound/msg-rs/issues/new).
+If you are interested in contributing or have found a bug, please check out the [contributing guide][contributing].
+Please report any bugs or doubts you encounter by [opening a Github issue][new-issue].
 
-Pull requests are welcome! If you would like to contribute, please open an issue first to discuss the change you would like to make.
+Additionally, you can reach out to us on [Discord][discord] if you have any questions or just want to chat.
 
 ## License
 
-This project is licensed under the [MIT license](https://github.com/chainbound/msg-rs/blob/main/LICENSE).
+This project is licensed under the [MIT license][mit-license].
+
+<!-- Links -->
+
+[gh-ci]: https://github.com/chainbound/msg-rs/actions/workflows/ci.yml
+[discord]: https://discord.gg/nhWcSWYpm9
+[new-issue]: https://github.com/chainbound/msg-rs/issues/new
+[mit-license]: https://github.com/chainbound/msg-rs/blob/main/LICENSE
+[contributing]: https://github.com/chainbound/msg-rs/blob/main/CONTRIBUTING.md
