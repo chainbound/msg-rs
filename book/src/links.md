@@ -8,7 +8,7 @@
 <!-- MSG links -->
 
 [msg]: https://github.com/chainbound/msg-rs
-[book]: https://msg.chainbound.io/book
+[book]: https://chainbound.github.io/msg-rs/
 [issues]: https://github.com/chainbound/msg-rs/issues
 [new-issue]: https://github.com/chainbound/msg-rs/issues/new
 [license]: https://github.com/chainbound/msg-rs/blob/main/LICENSE
