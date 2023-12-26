@@ -12,3 +12,7 @@ We plan to release MSG-RS to [Crates.io](https://crates.io/) once it reaches a b
 Until then, we recommend using the git dependency as shown in the [Getting started](./getting-started.md) section.
 
 {{#include ../links.md}}
+
+## What is the minimum supported Rust version (MSRV)?
+
+MSG-RS currently supports Rust 1.70 or later.
