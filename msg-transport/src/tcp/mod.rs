@@ -84,6 +84,8 @@ impl Layer<TcpStream> for AuthLayer {
                 ))?
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
 
+            conn.close().await?;
+
             if matches!(ack, auth::Message::Ack) {
                 Ok(conn.into_inner())
             } else {
@@ -129,7 +131,7 @@ impl ServerTransport for Tcp {
 
     async fn bind_with_options(
         addr: SocketAddr,
-        _options: &Self::BindOptions,
+        _options: Self::BindOptions,
     ) -> Result<Self, Self::Error> {
         let socket = TcpSocket::new_v4()?;
         socket.set_nodelay(true)?;

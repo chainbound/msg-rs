@@ -1,17 +1,26 @@
-use std::{io, net::SocketAddr, pin::Pin, sync::Arc};
+use std::{
+    io,
+    net::{SocketAddr, UdpSocket},
+    pin::Pin,
+    sync::Arc,
+    task::{ready, Poll},
+};
 
 use bytes::Bytes;
-use futures::FutureExt;
+use futures::future::BoxFuture;
 use quinn::{self, ClientConfig, Endpoint};
 use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc::{self, Receiver};
+use tracing::error;
 
-use crate::{ClientTransport, ServerTransport};
-
-use self::tls::unsafe_tls_config;
+use crate::Transport;
 
 mod config;
+mod stream;
 mod tls;
+
+use stream::QuicStream;
+use tls::unsafe_tls_config;
 
 /// Options for outgoing connections.
 /// By default, unsafe TLS configuration is used (no server verification, no client authentication).
@@ -23,6 +32,13 @@ pub struct QuicConnectOptions {
     pub auth_token: Option<Bytes>,
     pub client_config: quinn::ClientConfig,
     pub local_addr: SocketAddr,
+}
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub endpoint_config: quinn::EndpointConfig,
+    pub client_config: quinn::ClientConfig,
+    pub server_config: quinn::ServerConfig,
 }
 
 impl Default for QuicConnectOptions {
@@ -56,171 +72,161 @@ impl QuicConnectOptions {
     }
 }
 
-/// The state of the accept loop. We need this to poll through the various
-/// futures involved in accepting a connection in `poll_accept`.
-enum AcceptState<'a> {
-    /// Waiting for new incoming connections
-    Waiting,
-    /// A new incoming connection is being accepted
-    Accepting(quinn::Accept<'a>),
-    /// A new incoming connection is being established
-    Connecting(quinn::Connecting),
-}
-
 /// A QUIC transport that implements both [`ClientTransport`] and [`ServerTransport`].
-pub struct Quic<'a> {
-    endpoint: quinn::Endpoint,
-    accept_state: AcceptState<'a>,
+pub struct Quic {
+    config: Config,
+    endpoint: Option<quinn::Endpoint>,
+
+    /// A receiver for incoming connections waiting to be handled.
+    incoming: Option<Receiver<Result<quinn::Connecting, Error>>>,
 }
 
-/// A bi-directional QUIC stream that implements [`AsyncRead`] + [`AsyncWrite`].
-pub struct QuicStream {
-    send: quinn::SendStream,
-    recv: quinn::RecvStream,
-}
-
-impl AsyncRead for QuicStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        AsyncRead::poll_read(Pin::new(&mut self.get_mut().recv), cx, buf)
-    }
-}
-
-impl AsyncWrite for QuicStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        AsyncWrite::poll_write(Pin::new(&mut self.get_mut().send), cx, buf)
-    }
-
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        AsyncWrite::poll_flush(Pin::new(&mut self.get_mut().send), cx)
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().send), cx)
-    }
-}
-
-/// Client-side QUIC errors.
+/// A QUIC error.
 #[derive(Debug, Error)]
-pub enum ClientError {
+pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
     Connect(#[from] quinn::ConnectError),
     #[error(transparent)]
     Connection(#[from] quinn::ConnectionError),
-}
-
-#[async_trait::async_trait]
-impl ClientTransport for Quic<'_> {
-    type Io = QuicStream;
-    type Error = ClientError;
-    type ConnectOptions = QuicConnectOptions;
-
-    async fn connect_with_options(
-        addr: SocketAddr,
-        options: Self::ConnectOptions,
-    ) -> Result<Self::Io, Self::Error> {
-        let mut endpoint = Endpoint::client(options.local_addr)?;
-        endpoint.set_default_client_config(options.client_config);
-
-        let conn = endpoint.connect(addr, "")?.await?;
-
-        // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
-        Ok(conn
-            .open_bi()
-            .await
-            .map(|(send, recv)| QuicStream { send, recv })?)
-    }
-}
-
-/// Server-side QUIC errors.
-#[derive(Debug, Error)]
-pub enum ServerError {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Connection(#[from] quinn::ConnectionError),
     #[error("Endpoint closed")]
     ClosedEndpoint,
 }
 
-#[derive(Default)]
-pub struct BindOptions {
-    pub server_config: quinn::ServerConfig,
+impl Quic {
+    /// Creates a new QUIC transport.
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            endpoint: None,
+            incoming: None,
+        }
+    }
+
+    fn new_endpoint(
+        &self,
+        addr: Option<SocketAddr>,
+        server_config: Option<quinn::ServerConfig>,
+    ) -> Result<Endpoint, Error> {
+        let socket = UdpSocket::bind(addr.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))))?;
+
+        let endpoint = quinn::Endpoint::new(
+            self.config.endpoint_config.clone(),
+            server_config,
+            socket,
+            Arc::new(quinn::TokioRuntime),
+        )?;
+
+        Ok(endpoint)
+    }
 }
 
-impl std::marker::Unpin for Quic<'_> {}
-
 #[async_trait::async_trait]
-impl ServerTransport for Quic<'static> {
-    type Io = QuicStream;
-    type Error = ServerError;
-    type BindOptions = BindOptions;
+impl Transport for Quic {
+    type Output = QuicStream;
 
-    async fn bind_with_options(
-        addr: SocketAddr,
-        options: &Self::BindOptions,
-    ) -> Result<Self, Self::Error> {
-        let mut endpoint = Endpoint::server(options.server_config, addr)?;
+    type Error = Error;
 
-        Ok(Self {
-            endpoint,
-            accept_state: AcceptState::Waiting,
-        })
+    type Connect = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+    type Accept = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+
+    /// Binds a QUIC endpoint to the given address.
+    async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
+        let endpoint = Endpoint::server(self.config.server_config.clone(), addr)?;
+
+        self.endpoint = Some(endpoint);
+
+        Ok(())
     }
 
-    fn local_addr(&self) -> Result<SocketAddr, Self::Error> {
-        Ok(self.endpoint.local_addr()?)
-    }
+    /// Connects to the given address, returning a future representing a pending outbound connection.
+    /// If the endpoint is not bound, it will be bound to the default address.
+    fn connect(&mut self, addr: SocketAddr) -> Result<Self::Connect, Self::Error> {
+        // If we have an endpoint, use it. Otherwise, create a new one.
+        let endpoint = if let Some(endpoint) = self.endpoint.clone() {
+            endpoint
+        } else {
+            let endpoint = self.new_endpoint(None, None)?;
+            self.endpoint = Some(endpoint.clone());
 
-    async fn accept(&self) -> Result<(Self::Io, SocketAddr), Self::Error> {
-        let conn = self
-            .endpoint
-            .accept()
-            .await
-            .ok_or(ServerError::ClosedEndpoint)?;
+            endpoint
+        };
 
-        let connection = conn.await?;
+        let client_config = self.config.client_config.clone();
 
-        // Accept a bi-directional stream and return it. We'll think about multiplexing per topic later.
-        Ok(connection
-            .accept_bi()
-            .await
-            .map(|(send, recv)| (QuicStream { send, recv }, connection.remote_address()))?)
+        Ok(Box::pin(async move {
+            // This `"l"` seems necessary because an empty string is an invalid domain
+            // name. While we don't use domain names, the underlying rustls library
+            // is based upon the assumption that we do.
+            let connection = endpoint
+                .connect_with(client_config, addr, "l")?
+                .await
+                .map_err(Error::from)?;
+
+            // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
+            connection
+                .open_bi()
+                .await
+                .map(|(send, recv)| QuicStream { send, recv })
+                .map_err(Error::from)
+        }))
     }
 
     fn poll_accept(
-        &self,
+        self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(Self::Io, SocketAddr), Self::Error>> {
-        loop {
-            match self.accept_state {
-                AcceptState::Waiting => {
-                    let accept = self.endpoint.accept();
-                    self.accept_state = AcceptState::Accepting(accept);
-                    continue;
-                }
-                AcceptState::Accepting(accept) => {
-                    accept.poll_unpin(cx);
+    ) -> Poll<Result<Self::Accept, Self::Error>> {
+        let this = self.get_mut();
 
-                    self.accept_state = AcceptState::Connecting(connecting);
-                    continue;
+        loop {
+            if let Some(ref mut incoming) = this.incoming {
+                match ready!(incoming.poll_recv(cx)) {
+                    Some(Ok(connecting)) => {
+                        // Return a future that resolves to the output.
+                        return Poll::Ready(Ok(Box::pin(async move {
+                            let connection = connecting.await.map_err(Error::from)?;
+
+                            // Accept a bi-directional stream and return it. We'll think about multiplexing per topic later.
+                            connection
+                                .open_bi()
+                                .await
+                                .map(|(send, recv)| QuicStream { send, recv })
+                                .map_err(Error::from)
+                        })));
+                    }
+                    Some(Err(e)) => {
+                        return Poll::Ready(Err(e));
+                    }
+                    None => {
+                        unreachable!("Incoming channel closed")
+                    }
                 }
-                AcceptState::Connecting(_) => todo!(),
+            } else {
+                // Check if there's an endpoint bound.
+                let Some(endpoint) = this.endpoint.clone() else {
+                    return Poll::Ready(Err(Error::ClosedEndpoint));
+                };
+
+                let (tx, rx) = mpsc::channel(32);
+
+                this.incoming = Some(rx);
+
+                // Spawn a task to accept incoming connections.
+                tokio::spawn(async move {
+                    loop {
+                        let connection_result =
+                            endpoint.accept().await.ok_or(Error::ClosedEndpoint);
+
+                        if tx.send(connection_result).await.is_err() {
+                            error!("Failed to notify new incoming connection, channel closed. Shutting down task.");
+                            break;
+                        };
+                    }
+                });
+
+                // Continue here to make sure we poll the incoming channel.
+                continue;
             }
         }
     }
