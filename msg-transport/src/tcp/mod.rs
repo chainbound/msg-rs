@@ -158,15 +158,8 @@ impl Transport for Tcp {
         match listener.poll_accept(cx) {
             Poll::Ready(Ok((io, addr))) => {
                 tracing::debug!("Accepted connection from {}", addr);
-                let mut session = DurableSession::from(io);
 
-                if let Some(ref id) = this.config.auth_token {
-                    let layer = AuthLayer { id: id.clone() };
-
-                    session = session.with_layer(layer);
-                }
-
-                Poll::Ready(Box::pin(async move { Ok(session) }))
+                Poll::Ready(Box::pin(async move { Ok(DurableSession::from(io)) }))
             }
             Poll::Ready(Err(e)) => Poll::Ready(async_error(e)),
             Poll::Pending => Poll::Pending,
