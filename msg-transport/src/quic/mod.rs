@@ -13,14 +13,15 @@ use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
 use tracing::error;
 
-use crate::Transport;
+use crate::{Acceptor, Transport, TransportExt};
 
 mod config;
 mod stream;
 mod tls;
 
+use config::Config;
 use stream::QuicStream;
-use tls::unsafe_tls_config;
+use tls::unsafe_client_config;
 
 /// Options for outgoing connections.
 /// By default, unsafe TLS configuration is used (no server verification, no client authentication).
@@ -34,11 +35,17 @@ pub struct QuicConnectOptions {
     pub local_addr: SocketAddr,
 }
 
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub endpoint_config: quinn::EndpointConfig,
-    pub client_config: quinn::ClientConfig,
-    pub server_config: quinn::ServerConfig,
+/// A QUIC error.
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Connect(#[from] quinn::ConnectError),
+    #[error(transparent)]
+    Connection(#[from] quinn::ConnectionError),
+    #[error("Endpoint closed")]
+    ClosedEndpoint,
 }
 
 impl Default for QuicConnectOptions {
@@ -47,7 +54,7 @@ impl Default for QuicConnectOptions {
             blocking_connect: false,
             auth_token: None,
             local_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
-            client_config: ClientConfig::new(Arc::new(unsafe_tls_config())),
+            client_config: ClientConfig::new(Arc::new(unsafe_client_config())),
         }
     }
 }
@@ -81,19 +88,6 @@ pub struct Quic {
     incoming: Option<Receiver<Result<quinn::Connecting, Error>>>,
 }
 
-/// A QUIC error.
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error(transparent)]
-    Io(#[from] io::Error),
-    #[error(transparent)]
-    Connect(#[from] quinn::ConnectError),
-    #[error(transparent)]
-    Connection(#[from] quinn::ConnectionError),
-    #[error("Endpoint closed")]
-    ClosedEndpoint,
-}
-
 impl Quic {
     /// Creates a new QUIC transport.
     pub fn new(config: Config) -> Self {
@@ -104,6 +98,8 @@ impl Quic {
         }
     }
 
+    /// Creates a new [`quinn::Endpoint`] with the given configuration and a Tokio runtime. If no `addr` is given,
+    /// the endpoint will be bound to the default address.
     fn new_endpoint(
         &self,
         addr: Option<SocketAddr>,
@@ -142,12 +138,15 @@ impl Transport for Quic {
 
     /// Connects to the given address, returning a future representing a pending outbound connection.
     /// If the endpoint is not bound, it will be bound to the default address.
-    fn connect(&mut self, addr: SocketAddr) -> Result<Self::Connect, Self::Error> {
+    fn connect(&mut self, addr: SocketAddr) -> Self::Connect {
         // If we have an endpoint, use it. Otherwise, create a new one.
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
             endpoint
         } else {
-            let endpoint = self.new_endpoint(None, None)?;
+            let Ok(endpoint) = self.new_endpoint(None, None) else {
+                return Box::pin(async move { Err(Error::ClosedEndpoint) });
+            };
+
             self.endpoint = Some(endpoint.clone());
 
             endpoint
@@ -155,7 +154,7 @@ impl Transport for Quic {
 
         let client_config = self.config.client_config.clone();
 
-        Ok(Box::pin(async move {
+        Box::pin(async move {
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
@@ -164,48 +163,61 @@ impl Transport for Quic {
                 .await
                 .map_err(Error::from)?;
 
+            tracing::debug!("Connected to {}, opening stream", addr);
+
             // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
             connection
                 .open_bi()
                 .await
                 .map(|(send, recv)| QuicStream { send, recv })
                 .map_err(Error::from)
-        }))
+        })
     }
 
-    fn poll_accept(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Self::Accept, Self::Error>> {
+    /// Poll for pending incoming connections.
+    fn poll_accept(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Accept> {
         let this = self.get_mut();
 
         loop {
             if let Some(ref mut incoming) = this.incoming {
+                // Incoming channel and task are spawned, so we can poll it.
                 match ready!(incoming.poll_recv(cx)) {
                     Some(Ok(connecting)) => {
+                        tracing::debug!(
+                            "New incoming connection from {}",
+                            connecting.remote_address()
+                        );
+
                         // Return a future that resolves to the output.
-                        return Poll::Ready(Ok(Box::pin(async move {
+                        return Poll::Ready(Box::pin(async move {
                             let connection = connecting.await.map_err(Error::from)?;
+                            tracing::debug!(
+                                "Accepted connection from {}, opening stream",
+                                connection.remote_address()
+                            );
 
                             // Accept a bi-directional stream and return it. We'll think about multiplexing per topic later.
                             connection
-                                .open_bi()
+                                .accept_bi()
                                 .await
                                 .map(|(send, recv)| QuicStream { send, recv })
                                 .map_err(Error::from)
-                        })));
+                        }));
                     }
                     Some(Err(e)) => {
-                        return Poll::Ready(Err(e));
+                        return Poll::Ready(Box::pin(async move { Err(e) }));
                     }
                     None => {
                         unreachable!("Incoming channel closed")
                     }
                 }
             } else {
+                // We need to set the incoming channel and spawn a task to accept incoming connections
+                // on the endpoint.
+
                 // Check if there's an endpoint bound.
                 let Some(endpoint) = this.endpoint.clone() else {
-                    return Poll::Ready(Err(Error::ClosedEndpoint));
+                    return Poll::Ready(Box::pin(async move { Err(Error::ClosedEndpoint) }));
                 };
 
                 let (tx, rx) = mpsc::channel(32);
@@ -229,5 +241,73 @@ impl Transport for Quic {
                 continue;
             }
         }
+    }
+}
+
+impl TransportExt for Quic {
+    /// Returns the local address this transport is bound to (if it is bound).
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.endpoint.as_ref().and_then(|e| e.local_addr().ok())
+    }
+
+    fn accept(&mut self) -> crate::Acceptor<'_, Self>
+    where
+        Self: Sized + Unpin,
+    {
+        Acceptor::new(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use crate::TransportExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_quic_connection() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let config = Config::default();
+
+        let mut server = Quic::new(config.clone());
+        server
+            .bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .unwrap();
+
+        let server_addr = server.local_addr().unwrap();
+        tracing::info!("Server bound on {:?}", server_addr);
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let mut stream = server.accept().await.unwrap();
+
+            tracing::info!("Accepted connection");
+
+            let mut dst = [0u8; 5];
+
+            stream.read_exact(&mut dst).await.unwrap();
+            tracing::info!("Received: {:?}", String::from_utf8_lossy(&dst));
+
+            stream.shutdown().await.unwrap();
+        });
+
+        let mut client = Quic::new(config);
+
+        let mut stream = client.connect(server_addr).await.unwrap();
+        tracing::info!("Connected to remote");
+
+        // tokio::time::sleep(Duration::from_secs(6)).await;
+
+        stream.write_all(b"Hello").await.unwrap();
+        stream.flush().await.unwrap();
+
+        tracing::info!("Wrote to remote");
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
 }

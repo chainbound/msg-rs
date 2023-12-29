@@ -23,6 +23,7 @@ rand.workspace = true
 quinn.workspace = true
 thiserror.workspace = true
 rustls.workspace = true
+rcgen.workspace = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
