@@ -79,7 +79,14 @@ impl QuicConnectOptions {
     }
 }
 
-/// A QUIC transport that implements both [`ClientTransport`] and [`ServerTransport`].
+/// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`] traits.
+///
+/// # Note on multiplexing
+/// This implementation does not yet support multiplexing. This means that each connection only supports a single
+/// bi-directional stream, which is returned as the I/O object when connecting or accepting.
+///
+/// In a future release, we will add support for multiplexing, which will allow multiple streams per connection based on
+/// socket requirements / semantics.
 pub struct Quic {
     config: Config,
     endpoint: Option<quinn::Endpoint>,
@@ -89,7 +96,7 @@ pub struct Quic {
 }
 
 impl Quic {
-    /// Creates a new QUIC transport.
+    /// Creates a new QUIC transport with the given configuration.
     pub fn new(config: Config) -> Self {
         Self {
             config,
@@ -144,7 +151,7 @@ impl Transport for Quic {
             endpoint
         } else {
             let Ok(endpoint) = self.new_endpoint(None, None) else {
-                return Box::pin(async move { Err(Error::ClosedEndpoint) });
+                return async_error(Error::ClosedEndpoint);
             };
 
             self.endpoint = Some(endpoint.clone());
@@ -205,7 +212,7 @@ impl Transport for Quic {
                         }));
                     }
                     Some(Err(e)) => {
-                        return Poll::Ready(Box::pin(async move { Err(e) }));
+                        return Poll::Ready(async_error(e));
                     }
                     None => {
                         unreachable!("Incoming channel closed")
@@ -217,7 +224,7 @@ impl Transport for Quic {
 
                 // Check if there's an endpoint bound.
                 let Some(endpoint) = this.endpoint.clone() else {
-                    return Poll::Ready(Box::pin(async move { Err(Error::ClosedEndpoint) }));
+                    return Poll::Ready(async_error(Error::ClosedEndpoint));
                 };
 
                 let (tx, rx) = mpsc::channel(32);
@@ -256,6 +263,11 @@ impl TransportExt for Quic {
     {
         Acceptor::new(self)
     }
+}
+
+/// Wraps the given error in a boxed future.
+fn async_error<T>(e: Error) -> BoxFuture<'static, Result<T, Error>> {
+    Box::pin(async move { Err(e) })
 }
 
 #[cfg(test)]
@@ -307,8 +319,6 @@ mod tests {
         let mut stream = client.connect(server_addr).await.unwrap();
         tracing::info!("Connected to remote");
 
-        // tokio::time::sleep(Duration::from_secs(6)).await;
-
         let item = b"Hello";
         stream.write_all(item).await.unwrap();
         stream.flush().await.unwrap();
@@ -317,5 +327,28 @@ mod tests {
         let rcv = rx.await.unwrap();
 
         assert_eq!(rcv, *item);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_quic_connection_late_bind() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let config = Config::default();
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], 9971));
+
+        let mut server = Quic::new(config.clone());
+
+        let mut client = Quic::new(config);
+
+        tokio::spawn(async move {
+            let _stream = client.connect(addr).await.unwrap();
+            tracing::info!("Connected to remote");
+        });
+
+        tokio::time::sleep(Duration::from_secs(17)).await;
+        server.bind(addr).await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
