@@ -36,6 +36,7 @@ rand = "0.8"
 quinn = "0.10"
 # rustls needs to be the same version as the one used by quinn
 rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
+rcgen = "0.12"
 
 # performance
 rustc-hash = "1"
