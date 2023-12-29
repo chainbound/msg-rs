@@ -12,6 +12,7 @@ repository.workspace = true
 
 [dependencies]
 msg-wire.workspace = true
+msg-common.workspace = true
 
 async-trait.workspace = true
 bytes.workspace = true

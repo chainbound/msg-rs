@@ -13,6 +13,8 @@ use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
 use tracing::error;
 
+use msg_common::async_error;
+
 use crate::{Acceptor, Transport, TransportExt};
 
 mod config;
@@ -263,11 +265,6 @@ impl TransportExt for Quic {
     {
         Acceptor::new(self)
     }
-}
-
-/// Wraps the given error in a boxed future.
-fn async_error<T>(e: Error) -> BoxFuture<'static, Result<T, Error>> {
-    Box::pin(async move { Err(e) })
 }
 
 #[cfg(test)]

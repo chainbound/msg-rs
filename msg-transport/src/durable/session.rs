@@ -106,6 +106,18 @@ impl UnderlyingIo for TcpStream {
     }
 }
 
+impl From<TcpStream> for DurableSession<TcpStream> {
+    fn from(stream: TcpStream) -> Self {
+        let endpoint = stream.peer_addr().expect("Valid peer address");
+
+        DurableSession {
+            state: SessionState::Connected(stream),
+            endpoint,
+            layer_stack: None,
+        }
+    }
+}
+
 impl<Io> DurableSession<Io>
 where
     Io: UnderlyingIo + AsyncRead + AsyncWrite + 'static,

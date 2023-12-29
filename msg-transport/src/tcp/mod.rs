@@ -1,19 +1,21 @@
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
+use futures::{future::BoxFuture, SinkExt, StreamExt};
+use msg_common::async_error;
 use std::{
+    io,
     net::SocketAddr,
     task::{Context, Poll},
 };
-use tokio::net::{TcpSocket, TcpStream};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
 use msg_wire::auth;
 
-use crate::AuthLayer;
 use crate::{
     durable::{DurableSession, Layer, PendingIo},
-    ClientTransport, ServerTransport,
+    Acceptor, TransportExt,
 };
+use crate::{AuthLayer, Transport};
 
 /// Options for connecting over a TCP transport.
 #[derive(Debug, Clone)]
@@ -51,13 +53,25 @@ impl TcpConnectOptions {
 }
 
 #[derive(Debug, Default)]
+pub struct Config {
+    /// If true, the connection will be established synchronously.
+    pub blocking_connect: bool,
+    /// Optional authentication message.
+    pub auth_token: Option<Bytes>,
+}
+
+#[derive(Debug, Default)]
 pub struct Tcp {
+    config: Config,
     listener: Option<tokio::net::TcpListener>,
 }
 
 impl Tcp {
-    pub fn new() -> Self {
-        Self { listener: None }
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            listener: None,
+        }
     }
 }
 
@@ -96,67 +110,80 @@ impl Layer<TcpStream> for AuthLayer {
 }
 
 #[async_trait::async_trait]
-impl ClientTransport for Tcp {
-    type Io = DurableSession<TcpStream>;
-    type Error = std::io::Error;
-    type ConnectOptions = TcpConnectOptions;
+impl Transport for Tcp {
+    type Output = DurableSession<TcpStream>;
 
-    async fn connect_with_options(
-        addr: SocketAddr,
-        options: TcpConnectOptions,
-    ) -> Result<Self::Io, Self::Error> {
-        let mut session = if let Some(ref id) = options.auth_token {
+    type Error = io::Error;
+
+    type Connect = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+    type Accept = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+
+    async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
+        let listener = TcpListener::bind(addr).await?;
+
+        self.listener = Some(listener);
+
+        Ok(())
+    }
+
+    fn connect(&mut self, addr: SocketAddr) -> Self::Connect {
+        let mut session = if let Some(ref id) = self.config.auth_token {
             let layer = AuthLayer { id: id.clone() };
 
-            Self::Io::new(addr).with_layer(layer)
+            Self::Output::new(addr).with_layer(layer)
         } else {
-            Self::Io::new(addr)
+            Self::Output::new(addr)
         };
 
-        if options.blocking_connect {
-            session.blocking_connect().await?;
-        } else {
-            session.connect().await;
-        }
+        let blocking_connect = self.config.blocking_connect;
 
-        Ok(session)
+        Box::pin(async move {
+            if blocking_connect {
+                session.blocking_connect().await?;
+            } else {
+                session.connect().await;
+            }
+
+            Ok(session)
+        })
+    }
+
+    fn poll_accept(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept> {
+        let this = self.get_mut();
+
+        let Some(ref listener) = this.listener else {
+            return Poll::Ready(async_error(io::ErrorKind::NotConnected.into()));
+        };
+
+        match listener.poll_accept(cx) {
+            Poll::Ready(Ok((io, addr))) => {
+                tracing::debug!("Accepted connection from {}", addr);
+                let mut session = DurableSession::from(io);
+
+                if let Some(ref id) = this.config.auth_token {
+                    let layer = AuthLayer { id: id.clone() };
+
+                    session = session.with_layer(layer);
+                }
+
+                Poll::Ready(Box::pin(async move { Ok(session) }))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(async_error(e)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl ServerTransport for Tcp {
-    type Io = TcpStream;
-    type Error = std::io::Error;
-    type BindOptions = ();
-
-    async fn bind_with_options(
-        addr: SocketAddr,
-        _options: Self::BindOptions,
-    ) -> Result<Self, Self::Error> {
-        let socket = TcpSocket::new_v4()?;
-        socket.set_nodelay(true)?;
-        socket.bind(addr)?;
-
-        let listener = socket.listen(128)?;
-        Ok(Self {
-            listener: Some(listener),
-        })
+impl TransportExt for Tcp {
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.listener.as_ref().and_then(|l| l.local_addr().ok())
     }
 
-    async fn accept(&self) -> Result<(Self::Io, SocketAddr), Self::Error> {
-        self.listener.as_ref().unwrap().accept().await
-    }
-
-    fn local_addr(&self) -> Result<SocketAddr, Self::Error> {
-        self.listener.as_ref().unwrap().local_addr()
-    }
-
-    fn poll_accept(
-        &self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>> {
-        self.listener.as_ref().unwrap().poll_accept(cx)
+    fn accept(&mut self) -> Acceptor<'_, Self>
+    where
+        Self: Sized + Unpin,
+    {
+        Acceptor::new(self)
     }
 }
-
-// #[async_trait::async_trait]

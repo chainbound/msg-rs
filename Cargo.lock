@@ -752,6 +752,9 @@ dependencies = [
 [[package]]
 name = "msg-common"
 version = "0.1.1"
+dependencies = [
+ "futures",
+]
 
 [[package]]
 name = "msg-socket"
@@ -781,6 +784,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "msg-common",
  "msg-wire",
  "quinn",
  "rand",
