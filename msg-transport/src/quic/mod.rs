@@ -263,7 +263,10 @@ mod tests {
     use std::time::Duration;
 
     use crate::TransportExt;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        sync::oneshot,
+    };
 
     use super::*;
 
@@ -282,8 +285,10 @@ mod tests {
         let server_addr = server.local_addr().unwrap();
         tracing::info!("Server bound on {:?}", server_addr);
 
+        let (tx, rx) = oneshot::channel();
+
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
 
             let mut stream = server.accept().await.unwrap();
 
@@ -292,9 +297,9 @@ mod tests {
             let mut dst = [0u8; 5];
 
             stream.read_exact(&mut dst).await.unwrap();
-            tracing::info!("Received: {:?}", String::from_utf8_lossy(&dst));
 
             stream.shutdown().await.unwrap();
+            tx.send(dst).unwrap();
         });
 
         let mut client = Quic::new(config);
@@ -304,10 +309,13 @@ mod tests {
 
         // tokio::time::sleep(Duration::from_secs(6)).await;
 
-        stream.write_all(b"Hello").await.unwrap();
+        let item = b"Hello";
+        stream.write_all(item).await.unwrap();
         stream.flush().await.unwrap();
 
         tracing::info!("Wrote to remote");
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        let rcv = rx.await.unwrap();
+
+        assert_eq!(rcv, *item);
     }
 }
