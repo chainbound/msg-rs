@@ -1,8 +1,10 @@
 use bytes::Bytes;
-use msg_transport::TcpConnectOptions;
 use tokio_stream::StreamExt;
 
-use msg::{Authenticator, RepSocket, ReqOptions, ReqSocket, Tcp};
+use msg::{
+    tcp::{self, Tcp},
+    Authenticator, RepSocket, ReqSocket,
+};
 
 #[derive(Default)]
 struct Auth;
@@ -19,15 +21,14 @@ impl Authenticator for Auth {
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
-    let mut rep = RepSocket::<Tcp>::new().with_auth(Auth);
+    let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
     rep.bind("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::<Tcp>::with_options(
-        ReqOptions::default()
-            .connect_options(TcpConnectOptions::default().auth_token(Bytes::from("client1"))),
-    );
+    let mut req = ReqSocket::new(Tcp::new(
+        tcp::Config::default().auth_token(Bytes::from("client1")),
+    ));
 
     req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
 

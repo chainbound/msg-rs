@@ -18,12 +18,8 @@ use super::{
     Command, PubMessage, SocketState, SubOptions,
 };
 use msg_common::unix_micros;
-<<<<<<< HEAD
-use msg_transport::ClientTransport;
-=======
 use msg_transport::Transport;
 use msg_wire::compression::Decompressor;
->>>>>>> d5a2337 (feat(socket): new transport API integration)
 use msg_wire::pubsub;
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;

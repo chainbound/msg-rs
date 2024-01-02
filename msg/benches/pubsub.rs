@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
-use msg_transport::{Tcp, TcpConnectOptions};
+use msg_transport::tcp::{self, Tcp};
 
 const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;
@@ -153,6 +153,7 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     let buffer_size = 1024 * 64;
 
     let publisher = PubSocket::with_options(
+        Tcp::default(),
         PubOptions::default()
             .flush_interval(Duration::from_micros(100))
             .backpressure_boundary(buffer_size)
@@ -160,6 +161,7 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     );
 
     let subscriber = SubSocket::with_options(
+        Tcp::default(),
         SubOptions::default()
             .read_buffer_size(buffer_size)
             .ingress_buffer_size(N_REQS * 2),
@@ -196,6 +198,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     let buffer_size = 1024 * 64;
 
     let publisher = PubSocket::with_options(
+        Tcp::default(),
         PubOptions::default()
             .flush_interval(Duration::from_micros(100))
             .backpressure_boundary(buffer_size)
@@ -203,10 +206,10 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     );
 
     let subscriber = SubSocket::with_options(
+        Tcp::new(tcp::Config::default().blocking_connect(true)),
         SubOptions::default()
             .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2)
-            .connect_options(TcpConnectOptions::default().blocking_connect()),
+            .ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
