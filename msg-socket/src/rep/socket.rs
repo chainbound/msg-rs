@@ -1,4 +1,4 @@
-use futures::Stream;
+use futures::{stream::FuturesUnordered, Stream};
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -13,34 +13,41 @@ use crate::{
     rep::{SocketState, SocketStats},
     Authenticator, PubError, RepOptions, Request,
 };
-use msg_transport::ServerTransport;
+use msg_transport::{Transport, TransportExt};
 
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
 #[derive(Default)]
-pub struct RepSocket<T: ServerTransport> {
+pub struct RepSocket<T: Transport> {
     /// The reply socket options, shared with the driver.
-    options: Arc<RepOptions<T::BindOptions>>,
+    options: Arc<RepOptions>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
     /// Receiver from the socket driver.
     from_driver: Option<mpsc::Receiver<Request>>,
+    /// The transport used by this socket. This value is temporary and will be moved
+    /// to the driver task once the socket is bound.
+    transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
     /// The local address this socket is bound to.
     local_addr: Option<SocketAddr>,
 }
 
-impl<T: ServerTransport> RepSocket<T> {
+impl<T> RepSocket<T>
+where
+    T: TransportExt + Send + Unpin + 'static,
+{
     /// Creates a new reply socket with the default [`RepOptions`].
-    pub fn new() -> Self {
-        Self::with_options(RepOptions::default())
+    pub fn new(transport: T) -> Self {
+        Self::with_options(transport, RepOptions::default())
     }
 
     /// Sets the options for this socket.
-    pub fn with_options(options: RepOptions<T::BindOptions>) -> Self {
+    pub fn with_options(transport: T, options: RepOptions) -> Self {
         Self {
             from_driver: None,
             local_addr: None,
+            transport: Some(transport),
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
             auth: None,
@@ -57,13 +64,19 @@ impl<T: ServerTransport> RepSocket<T> {
     pub async fn bind(&mut self, addr: SocketAddr) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let transport = T::bind_with_options(addr, &self.options.bind_options)
+        let mut transport = self
+            .transport
+            .take()
+            .expect("Transport has been moved already");
+
+        transport
+            .bind(addr)
             .await
             .map_err(|e| PubError::Transport(Box::new(e)))?;
 
         let local_addr = transport
             .local_addr()
-            .map_err(|e| PubError::Transport(Box::new(e)))?;
+            .expect("Local address set after binding");
 
         tracing::debug!("Listening on {}", local_addr);
 
@@ -75,6 +88,7 @@ impl<T: ServerTransport> RepSocket<T> {
             to_socket,
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
+            conn_tasks: FuturesUnordered::new(),
         };
 
         tokio::spawn(backend);
@@ -95,11 +109,12 @@ impl<T: ServerTransport> RepSocket<T> {
     }
 }
 
-impl<T: ServerTransport> Stream for RepSocket<T> {
+impl<T: Transport + Unpin> Stream for RepSocket<T> {
     type Item = Request;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.from_driver
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut()
+            .from_driver
             .as_mut()
             .expect("Inactive socket")
             .poll_recv(cx)

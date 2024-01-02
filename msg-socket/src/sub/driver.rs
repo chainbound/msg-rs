@@ -18,15 +18,17 @@ use super::{
     Command, PubMessage, SocketState, SubOptions,
 };
 use msg_common::unix_micros;
-use msg_transport::ClientTransport;
+use msg_transport::Transport;
 use msg_wire::compression::Decompressor;
 use msg_wire::pubsub;
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
-pub(crate) struct SubDriver<T: ClientTransport> {
+pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
-    pub(super) options: Arc<SubOptions<T::ConnectOptions>>,
+    pub(super) options: Arc<SubOptions>,
+    /// The transport for this socket.
+    pub(super) transport: T,
     /// Commands from the socket.
     pub(super) from_socket: mpsc::Receiver<Command>,
     /// Messages to the socket.
@@ -45,7 +47,7 @@ pub(crate) struct SubDriver<T: ClientTransport> {
 
 impl<T> Future for SubDriver<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + Unpin + 'static,
 {
     type Output = ();
 
@@ -105,7 +107,7 @@ where
 
 impl<T> SubDriver<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + 'static,
 {
     /// Sets the payload decompressor for the socket. This decompressor will be used to decompress all incoming
     /// messages from the publishers.
@@ -137,10 +139,10 @@ where
                 }
             }
             Command::Connect { endpoint } => {
-                let options = self.options.connect_options.clone();
+                let connect = self.transport.connect(endpoint);
 
                 self.connection_tasks.spawn(async move {
-                    let io = T::connect_with_options(endpoint, options).await?;
+                    let io = connect.await?;
 
                     Ok((endpoint, io))
                 });

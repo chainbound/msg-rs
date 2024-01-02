@@ -1,6 +1,4 @@
 use bytes::Bytes;
-use msg_transport::ClientTransport;
-use msg_wire::reqrep;
 use rustc_hash::FxHashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -8,31 +6,36 @@ use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
-use crate::{req::stats::SocketStats, req::SocketState};
+use msg_transport::Transport;
+use msg_wire::reqrep;
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
+use crate::{req::stats::SocketStats, req::SocketState};
 
-#[derive(Debug, Clone, Default)]
-pub struct ReqSocket<T: ClientTransport> {
+#[derive(Debug)]
+pub struct ReqSocket<T: Transport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
+    /// The socket transport.
+    transport: T,
     /// Options for the socket. These are shared with the backend task.
-    options: Arc<ReqOptions<T::ConnectOptions>>,
+    options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
     state: Arc<SocketState>,
 }
 
 impl<T> ReqSocket<T>
 where
-    T: ClientTransport + Send + Sync + Unpin + 'static,
+    T: Transport + Send + Sync + Unpin + 'static,
 {
-    pub fn new() -> Self {
-        Self::with_options(ReqOptions::default())
+    pub fn new(transport: T) -> Self {
+        Self::with_options(transport, ReqOptions::default())
     }
 
-    pub fn with_options(options: ReqOptions<T::ConnectOptions>) -> Self {
+    pub fn with_options(transport: T, options: ReqOptions) -> Self {
         Self {
             to_driver: None,
+            transport,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
         }
@@ -65,7 +68,9 @@ where
 
         tracing::debug!("Connected to {}", endpoint);
 
-        let stream = T::connect_with_options(endpoint, self.options.connect_options.clone())
+        let stream = self
+            .transport
+            .connect(endpoint)
             .await
             .map_err(|e| ReqError::Transport(Box::new(e)))?;
 
@@ -103,7 +108,7 @@ where
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use msg_transport::{Tcp, TcpConnectOptions};
+    use msg_transport::tcp::Tcp;
     use std::net::SocketAddr;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -143,15 +148,17 @@ mod tests {
 
         let addr = spawn_listener(Duration::from_secs(0)).await;
 
-        let mut socket = ReqSocket::<Tcp>::with_options(ReqOptions {
-            timeout: Duration::from_secs(1),
-            blocking_connect: true,
-            backoff_duration: Duration::from_secs(1),
-            flush_interval: None,
-            backpressure_boundary: 8192,
-            retry_attempts: Some(3),
-            connect_options: TcpConnectOptions::default(),
-        });
+        let mut socket = ReqSocket::with_options(
+            Tcp::default(),
+            ReqOptions {
+                timeout: Duration::from_secs(1),
+                blocking_connect: true,
+                backoff_duration: Duration::from_secs(1),
+                flush_interval: None,
+                backpressure_boundary: 8192,
+                retry_attempts: Some(3),
+            },
+        );
 
         let connect_result = socket.connect(addr).await;
         assert!(
@@ -177,15 +184,17 @@ mod tests {
 
         let addr = spawn_listener(Duration::from_secs(3)).await;
 
-        let mut socket = ReqSocket::<Tcp>::with_options(ReqOptions {
-            timeout: Duration::from_secs(1),
-            blocking_connect: true,
-            backoff_duration: Duration::from_millis(200),
-            backpressure_boundary: 8192,
-            flush_interval: None,
-            retry_attempts: None,
-            connect_options: TcpConnectOptions::default(),
-        });
+        let mut socket = ReqSocket::with_options(
+            Tcp::default(),
+            ReqOptions {
+                timeout: Duration::from_secs(1),
+                blocking_connect: true,
+                backoff_duration: Duration::from_millis(200),
+                backpressure_boundary: 8192,
+                flush_interval: None,
+                retry_attempts: None,
+            },
+        );
 
         let connect_result = socket.connect(addr).await;
         assert!(

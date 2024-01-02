@@ -2,6 +2,7 @@ use bytes::Bytes;
 use futures::{stream::FuturesUnordered, Future, FutureExt, SinkExt, Stream, StreamExt};
 use std::{
     collections::VecDeque,
+    io,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
@@ -14,9 +15,10 @@ use tokio::{
 };
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
+use tracing::{debug, error, info, warn};
 
 use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
-use msg_transport::ServerTransport;
+use msg_transport::{PeerAddress, Transport};
 use msg_wire::{auth, reqrep};
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
@@ -28,27 +30,30 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     should_flush: bool,
 }
 
-pub(crate) struct RepDriver<T: ServerTransport> {
+pub(crate) struct RepDriver<T: Transport> {
     /// The server transport used to accept incoming connections.
     pub(crate) transport: T,
     /// The reply socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
     #[allow(unused)]
     /// Options shared with socket.
-    pub(crate) options: Arc<RepOptions<T::BindOptions>>,
+    pub(crate) options: Arc<RepOptions>,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
-    /// Note that when the [`PeerState`] stream ends, it will be silently removed
-    /// from this map.
     pub(crate) peer_states: StreamMap<SocketAddr, StreamNotifyClose<PeerState<T::Io>>>,
     /// Sender to the socket front-end. Used to notify the socket of incoming requests.
     pub(crate) to_socket: mpsc::Sender<Request>,
     /// Optional connection authenticator.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
+    /// A set of pending incoming connections, represented by [`Transport::Accept`].
+    pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
     pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
 }
 
-impl<T: ServerTransport> Future for RepDriver<T> {
+impl<T> Future for RepDriver<T>
+where
+    T: Transport + Unpin + 'static,
+{
     type Output = Result<(), PubError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -58,15 +63,15 @@ impl<T: ServerTransport> Future for RepDriver<T> {
             if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
                 match msg {
                     Some(Ok(request)) => {
-                        tracing::debug!("Received request from peer {}", peer);
+                        debug!("Received request from peer {}", peer);
                         this.state.stats.increment_rx(request.msg().len());
                         let _ = this.to_socket.try_send(request);
                     }
                     Some(Err(e)) => {
-                        tracing::error!("Error receiving message from peer {}: {:?}", peer, e);
+                        error!("Error receiving message from peer {}: {:?}", peer, e);
                     }
                     None => {
-                        tracing::debug!("Peer {} disconnected", peer);
+                        debug!("Peer {} disconnected", peer);
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -87,8 +92,7 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                                 pending_requests: FuturesUnordered::new(),
                                 conn: Framed::new(auth.stream, reqrep::Codec::new()),
                                 addr: auth.addr,
-                                // TODO: pre-allocate according to some options
-                                egress_queue: VecDeque::with_capacity(64),
+                                egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),
                                 should_flush: false,
                             }),
@@ -102,94 +106,121 @@ impl<T: ServerTransport> Future for RepDriver<T> {
                 continue;
             }
 
-            // Poll the transport for new incoming connections
-            match this.transport.poll_accept(cx) {
-                Poll::Ready(Ok((stream, addr))) => {
-                    if let Some(max) = this.options.max_clients {
-                        if this.peer_states.len() >= max {
-                            tracing::warn!(
-                                "Max connections reached ({}), rejecting connection from {}",
-                                max,
-                                addr
-                            );
-
-                            continue;
+            if let Poll::Ready(Some(incoming)) = this.conn_tasks.poll_next_unpin(cx) {
+                match incoming {
+                    Ok(io) => {
+                        if let Err(e) = this.on_incoming(io) {
+                            error!("Error accepting incoming connection: {:?}", e);
+                            this.state.stats.decrement_active_clients();
                         }
                     }
+                    Err(e) => {
+                        error!("Error accepting incoming connection: {:?}", e);
 
-                    // If authentication is enabled, start the authentication process
-                    if let Some(ref auth) = this.auth {
-                        let authenticator = Arc::clone(auth);
-                        tracing::debug!("New connection from {}, authenticating", addr);
-                        this.auth_tasks.spawn(async move {
-                            let mut conn = Framed::new(stream, auth::Codec::new_server());
+                        // Active clients have already been incremented in the initial call to `poll_accept`,
+                        // so we need to decrement them here.
+                        this.state.stats.decrement_active_clients();
+                    }
+                }
 
-                            tracing::debug!("Waiting for auth");
-                            // Wait for the response
-                            let auth = conn
-                                .next()
-                                .await
-                                .ok_or(PubError::SocketClosed)?
-                                .map_err(|e| PubError::Auth(e.to_string()))?;
+                continue;
+            }
 
-                            tracing::debug!("Auth received: {:?}", auth);
-
-                            let auth::Message::Auth(id) = auth else {
-                                conn.send(auth::Message::Reject).await?;
-                                conn.flush().await?;
-                                conn.close().await?;
-                                return Err(PubError::Auth("Invalid auth message".to_string()));
-                            };
-
-                            // If authentication fails, send a reject message and close the connection
-                            if !authenticator.authenticate(&id) {
-                                conn.send(auth::Message::Reject).await?;
-                                conn.flush().await?;
-                                conn.close().await?;
-                                return Err(PubError::Auth("Authentication failed".to_string()));
-                            }
-
-                            // Send ack
-                            conn.send(auth::Message::Ack).await?;
-                            conn.flush().await?;
-
-                            Ok(AuthResult {
-                                id,
-                                addr,
-                                stream: conn.into_inner(),
-                            })
-                        });
-                    } else {
-                        this.state.stats.increment_active_clients();
-                        this.peer_states.insert(
-                            addr,
-                            StreamNotifyClose::new(PeerState {
-                                pending_requests: FuturesUnordered::new(),
-                                conn: Framed::new(stream, reqrep::Codec::new()),
-                                addr,
-                                // TODO: pre-allocate according to some options
-                                egress_queue: VecDeque::with_capacity(64),
-                                state: Arc::clone(&this.state),
-                                should_flush: false,
-                            }),
+            // Finally, poll the transport for new incoming connection futures and push them to the incoming connection tasks.
+            if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
+                if let Some(max) = this.options.max_clients {
+                    if this.state.stats.active_clients() >= max {
+                        warn!(
+                            "Max connections reached ({}), rejecting new incoming connection",
+                            max
                         );
 
-                        tracing::debug!("New connection from {}", addr);
+                        continue;
                     }
-
-                    continue;
                 }
-                Poll::Ready(Err(e)) => {
-                    // Errors here are usually about `WouldBlock`
-                    tracing::error!("Error accepting connection: {:?}", e);
 
-                    continue;
-                }
-                Poll::Pending => {}
+                // Increment the active clients counter. If the authentication fails, this counter
+                // will be decremented.
+                this.state.stats.increment_active_clients();
+
+                this.conn_tasks.push(accept);
+
+                continue;
             }
 
             return Poll::Pending;
         }
+    }
+}
+
+impl<T> RepDriver<T>
+where
+    T: Transport + Unpin + 'static,
+{
+    /// Handles an incoming connection. If this returns an error, the active connections counter
+    /// should be decremented.
+    fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
+        let addr = io.peer_addr()?;
+
+        info!("New connection from {}", addr);
+
+        // If authentication is enabled, start the authentication process
+        if let Some(ref auth) = self.auth {
+            let authenticator = Arc::clone(auth);
+            debug!("New connection from {}, authenticating", addr);
+            self.auth_tasks.spawn(async move {
+                let mut conn = Framed::new(io, auth::Codec::new_server());
+
+                debug!("Waiting for auth");
+                // Wait for the response
+                let auth = conn
+                    .next()
+                    .await
+                    .ok_or(PubError::SocketClosed)?
+                    .map_err(|e| PubError::Auth(e.to_string()))?;
+
+                debug!("Auth received: {:?}", auth);
+
+                let auth::Message::Auth(id) = auth else {
+                    conn.send(auth::Message::Reject).await?;
+                    conn.flush().await?;
+                    conn.close().await?;
+                    return Err(PubError::Auth("Invalid auth message".to_string()));
+                };
+
+                // If authentication fails, send a reject message and close the connection
+                if !authenticator.authenticate(&id) {
+                    conn.send(auth::Message::Reject).await?;
+                    conn.flush().await?;
+                    conn.close().await?;
+                    return Err(PubError::Auth("Authentication failed".to_string()));
+                }
+
+                // Send ack
+                conn.send(auth::Message::Ack).await?;
+                conn.flush().await?;
+
+                Ok(AuthResult {
+                    id,
+                    addr,
+                    stream: conn.into_inner(),
+                })
+            });
+        } else {
+            self.peer_states.insert(
+                addr,
+                StreamNotifyClose::new(PeerState {
+                    pending_requests: FuturesUnordered::new(),
+                    conn: Framed::new(io, reqrep::Codec::new()),
+                    addr,
+                    egress_queue: VecDeque::with_capacity(128),
+                    state: Arc::clone(&self.state),
+                    should_flush: false,
+                }),
+            );
+        }
+
+        Ok(())
     }
 }
 

@@ -60,6 +60,20 @@ pub struct Config {
     pub auth_token: Option<Bytes>,
 }
 
+impl Config {
+    /// Sets the auth token for this connection.
+    pub fn auth_token(mut self, auth: Bytes) -> Self {
+        self.auth_token = Some(auth);
+        self
+    }
+
+    /// Connect synchronously.
+    pub fn blocking_connect(mut self, b: bool) -> Self {
+        self.blocking_connect = b;
+        self
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Tcp {
     config: Config,
@@ -111,12 +125,12 @@ impl Layer<TcpStream> for AuthLayer {
 
 #[async_trait::async_trait]
 impl Transport for Tcp {
-    type Output = DurableSession<TcpStream>;
+    type Io = DurableSession<TcpStream>;
 
     type Error = io::Error;
 
-    type Connect = BoxFuture<'static, Result<Self::Output, Self::Error>>;
-    type Accept = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+    type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
+    type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
 
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
         let listener = TcpListener::bind(addr).await?;
@@ -130,9 +144,9 @@ impl Transport for Tcp {
         let mut session = if let Some(ref id) = self.config.auth_token {
             let layer = AuthLayer { id: id.clone() };
 
-            Self::Output::new(addr).with_layer(layer)
+            Self::Io::new(addr).with_layer(layer)
         } else {
-            Self::Output::new(addr)
+            Self::Io::new(addr)
         };
 
         let blocking_connect = self.config.blocking_connect;

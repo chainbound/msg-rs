@@ -39,7 +39,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReqOptions<T: Clone> {
+pub struct ReqOptions {
     /// Timeout duration for requests.
     timeout: std::time::Duration,
     /// Wether to block on initial connection to the target.
@@ -54,11 +54,9 @@ pub struct ReqOptions<T: Clone> {
     backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
-    /// The connect options for the underlying transport.
-    connect_options: T,
 }
 
-impl<T: Clone> ReqOptions<T> {
+impl ReqOptions {
     /// Sets the timeout for the socket.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -97,15 +95,9 @@ impl<T: Clone> ReqOptions<T> {
         self.retry_attempts = Some(retry_attempts);
         self
     }
-
-    /// Sets the connect options for the underlying transport.
-    pub fn connect_options(mut self, connect_options: T) -> Self {
-        self.connect_options = connect_options;
-        self
-    }
 }
 
-impl<T: Default + Clone> Default for ReqOptions<T> {
+impl Default for ReqOptions {
     fn default() -> Self {
         Self {
             timeout: std::time::Duration::from_secs(5),
@@ -114,7 +106,6 @@ impl<T: Default + Clone> Default for ReqOptions<T> {
             flush_interval: None,
             backpressure_boundary: 8192,
             retry_attempts: None,
-            connect_options: T::default(),
         }
     }
 }

@@ -9,7 +9,7 @@ use std::{
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamMap;
 
-use msg_transport::ClientTransport;
+use msg_transport::Transport;
 use msg_wire::compression::Decompressor;
 
 use super::{
@@ -17,14 +17,14 @@ use super::{
     DEFAULT_BUFFER_SIZE,
 };
 
-pub struct SubSocket<T: ClientTransport> {
+pub struct SubSocket<T: Transport> {
     /// Command channel to the socket driver.
     to_driver: mpsc::Sender<Command>,
     /// Receiver channel from the socket driver.
     from_driver: mpsc::Receiver<PubMessage>,
     /// Options for the socket. These are shared with the backend task.
     #[allow(unused)]
-    options: Arc<SubOptions<T::ConnectOptions>>,
+    options: Arc<SubOptions>,
     /// The pending driver.
     driver: Option<SubDriver<T>>,
     /// Socket state. This is shared with the socket frontend.
@@ -34,14 +34,14 @@ pub struct SubSocket<T: ClientTransport> {
 
 impl<T> SubSocket<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + Unpin + 'static,
 {
     #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
-        Self::with_options(SubOptions::default())
+    pub fn new(transport: T) -> Self {
+        Self::with_options(transport, SubOptions::default())
     }
 
-    pub fn with_options(options: SubOptions<T::ConnectOptions>) -> Self {
+    pub fn with_options(transport: T, options: SubOptions) -> Self {
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
         let (to_socket, from_driver) = mpsc::channel(options.ingress_buffer_size);
 
@@ -51,6 +51,7 @@ where
 
         let driver = SubDriver {
             options: Arc::clone(&options),
+            transport,
             from_socket,
             to_socket,
             decompressor: None,
@@ -189,14 +190,14 @@ where
     }
 }
 
-impl<T: ClientTransport> Drop for SubSocket<T> {
+impl<T: Transport> Drop for SubSocket<T> {
     fn drop(&mut self) {
         // Try to tell the driver to gracefully shut down.
         let _ = self.to_driver.try_send(Command::Shutdown);
     }
 }
 
-impl<T: ClientTransport + Unpin> Stream for SubSocket<T> {
+impl<T: Transport + Unpin> Stream for SubSocket<T> {
     type Item = PubMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

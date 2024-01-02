@@ -1,20 +1,24 @@
 use bytes::Bytes;
+use futures::stream::FuturesUnordered;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::broadcast, task::JoinSet};
 use tracing::debug;
 
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
-use msg_transport::ServerTransport;
+use msg_transport::{Transport, TransportExt};
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
 #[derive(Clone, Default)]
-pub struct PubSocket<T: ServerTransport> {
+pub struct PubSocket<T: Transport> {
     /// The reply socket options, shared with the driver.
-    options: Arc<PubOptions<T::BindOptions>>,
+    options: Arc<PubOptions>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
+    /// The transport used by this socket. This value is temporary and will be moved
+    /// to the driver task once the socket is bound.
+    transport: Option<T>,
     /// The broadcast channel to all active [`SubscriberSession`](super::session::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
     /// Optional connection authenticator.
@@ -27,18 +31,22 @@ pub struct PubSocket<T: ServerTransport> {
     local_addr: Option<SocketAddr>,
 }
 
-impl<T: ServerTransport> PubSocket<T> {
+impl<T> PubSocket<T>
+where
+    T: TransportExt + Send + Unpin + 'static,
+{
     /// Creates a new reply socket with the default [`PubOptions`].
-    pub fn new() -> Self {
-        Self::with_options(PubOptions::default())
+    pub fn new(transport: T) -> Self {
+        Self::with_options(transport, PubOptions::default())
     }
 
     /// Creates a new publisher socket with the given transport and options.
-    pub fn with_options(options: PubOptions<T::BindOptions>) -> Self {
+    pub fn with_options(transport: T, options: PubOptions) -> Self {
         Self {
             local_addr: None,
             to_sessions_bcast: None,
             options: Arc::new(options),
+            transport: Some(transport),
             state: Arc::new(SocketState::default()),
             auth: None,
             compressor: None,
@@ -63,13 +71,19 @@ impl<T: ServerTransport> PubSocket<T> {
         let (to_sessions_bcast, from_socket_bcast) =
             broadcast::channel(self.options.session_buffer_size);
 
-        let transport = T::bind_with_options(addr, &self.options.bind_options)
+        let mut transport = self
+            .transport
+            .take()
+            .expect("Transport has been moved already");
+
+        transport
+            .bind(addr)
             .await
             .map_err(|e| PubError::Transport(Box::new(e)))?;
 
         let local_addr = transport
             .local_addr()
-            .map_err(|e| PubError::Transport(Box::new(e)))?;
+            .expect("Local address set after binding");
 
         tracing::debug!("Listening on {}", local_addr);
 
@@ -80,6 +94,7 @@ impl<T: ServerTransport> PubSocket<T> {
             state: Arc::clone(&self.state),
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
+            conn_tasks: FuturesUnordered::new(),
             from_socket_bcast,
         };
 

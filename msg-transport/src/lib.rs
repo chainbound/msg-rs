@@ -9,8 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod durable;
 pub mod quic;
-mod tcp;
-pub use tcp::*;
+pub mod tcp;
 
 #[async_trait::async_trait]
 pub trait ClientTransport {
@@ -58,18 +57,18 @@ pub trait Transport {
     ///
     /// The output type is transport-specific, and can be a handle to directly write to the
     /// connection, or it can be a substream multiplexer in the case of stream protocols.
-    type Output: AsyncRead + AsyncWrite;
+    type Io: AsyncRead + AsyncWrite + PeerAddress + Send + Unpin;
 
     /// An error that occurred when setting up the connection.
-    type Error: std::error::Error;
+    type Error: std::error::Error + Send + Sync;
 
     /// A pending [`Transport::Output`] for an outbound connection,
     /// obtained when calling [`Transport::connect`].
-    type Connect: Future<Output = Result<Self::Output, Self::Error>>;
+    type Connect: Future<Output = Result<Self::Io, Self::Error>> + Send;
 
     /// A pending [`Transport::Output`] for an inbound connection,
     /// obtained when calling [`Transport::poll_accept`].
-    type Accept: Future<Output = Result<Self::Output, Self::Error>> + Unpin;
+    type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
 
     /// Binds to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error>;
@@ -109,7 +108,7 @@ impl<'a, T> Future for Acceptor<'a, T>
 where
     T: Transport + Unpin,
 {
-    type Output = Result<T::Output, T::Error>;
+    type Output = Result<T::Io, T::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match Pin::new(&mut *self.get_mut().inner).poll_accept(cx) {
@@ -121,6 +120,11 @@ where
             Poll::Pending => Poll::Pending,
         }
     }
+}
+
+/// Trait for connection types that can return their peer address.
+pub trait PeerAddress {
+    fn peer_addr(&self) -> Result<SocketAddr, std::io::Error>;
 }
 
 pub struct AuthLayer {
