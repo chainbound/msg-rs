@@ -10,7 +10,7 @@ use pprof::criterion::Output;
 use rand::Rng;
 
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
-use msg_transport::Tcp;
+use msg_transport::tcp::{self, Tcp};
 use tokio::runtime::Runtime;
 
 const N_REQS: usize = 10_000;
@@ -118,10 +118,12 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let req =
-        ReqSocket::with_options(ReqOptions::default().flush_interval(Duration::from_micros(50)));
+    let req = ReqSocket::with_options(
+        Tcp::new(tcp::Config::default().blocking_connect(true)),
+        ReqOptions::default().flush_interval(Duration::from_micros(50)),
+    );
 
-    let rep = RepSocket::<Tcp>::new();
+    let rep = RepSocket::new(Tcp::default());
 
     let mut bench = PairBenchmark {
         rt,
@@ -150,10 +152,12 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let req =
-        ReqSocket::with_options(ReqOptions::default().flush_interval(Duration::from_micros(50)));
+    let req = ReqSocket::with_options(
+        Tcp::default(),
+        ReqOptions::default().flush_interval(Duration::from_micros(50)),
+    );
 
-    let rep = RepSocket::<Tcp>::new();
+    let rep = RepSocket::new(Tcp::default());
 
     let mut bench = PairBenchmark {
         rt,

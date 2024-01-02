@@ -1,37 +1,37 @@
 use bytes::Bytes;
-use futures::StreamExt;
-use msg_socket::SubOptions;
-use msg_transport::TcpConnectOptions;
 use std::time::Duration;
 use tokio::time::timeout;
+use tokio_stream::StreamExt;
 use tracing::Instrument;
 
 use msg::{
     compression::{GzipCompressor, GzipDecompressor},
-    PubSocket, SubSocket, Tcp,
+    tcp::{self, Tcp},
+    PubSocket, SubSocket,
 };
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
     // Configure the publisher socket with options
-    let mut pub_socket = PubSocket::<Tcp>::new()
+    let mut pub_socket = PubSocket::new(Tcp::default())
         // Enable Gzip compression (compression level 6)
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::<Tcp>::with_options(
+    let mut sub1 = SubSocket::new(
         // TCP transport with blocking connect, usually connection happens in the background.
-        SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        Tcp::new(tcp::Config::default().blocking_connect(true)),
     )
-    // Enable Gzip decompression (at the same level)
+    // Enable Gzip decompression
     .with_decompressor(GzipDecompressor::new());
 
-    let mut sub2 = SubSocket::<Tcp>::with_options(
+    // Configure the subscribers with options
+    let mut sub2 = SubSocket::new(
         // TCP transport with blocking connect, usually connection happens in the background.
-        SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
+        Tcp::new(tcp::Config::default().blocking_connect(true)),
     )
-    // Enable Gzip decompression (at the same level)
+    // Enable Gzip decompression
     .with_decompressor(GzipDecompressor::new());
 
     tracing::info!("Setting up the sockets...");
