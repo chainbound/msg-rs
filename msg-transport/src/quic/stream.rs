@@ -1,9 +1,12 @@
-use std::pin::Pin;
+use std::{net::SocketAddr, pin::Pin};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::PeerAddress;
+
 /// A bi-directional QUIC stream that implements [`AsyncRead`] + [`AsyncWrite`].
 pub struct QuicStream {
+    pub(super) peer: SocketAddr,
     pub(super) send: quinn::SendStream,
     pub(super) recv: quinn::RecvStream,
 }
@@ -39,5 +42,11 @@ impl AsyncWrite for QuicStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().send), cx)
+    }
+}
+
+impl PeerAddress for QuicStream {
+    fn peer_addr(&self) -> Result<SocketAddr, std::io::Error> {
+        Ok(self.peer)
     }
 }

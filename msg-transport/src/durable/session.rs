@@ -13,6 +13,8 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+use crate::PeerAddress;
+
 pub type PendingIo<Io> = Pin<Box<dyn Future<Output = io::Result<Io>> + Send + Sync>>;
 
 /// A layer can be applied to pre-process a newly established IO object. If you need
@@ -115,6 +117,15 @@ impl From<TcpStream> for DurableSession<TcpStream> {
             endpoint,
             layer_stack: None,
         }
+    }
+}
+
+impl<Io> PeerAddress for DurableSession<Io>
+where
+    Io: UnderlyingIo + AsyncRead + AsyncWrite + 'static,
+{
+    fn peer_addr(&self) -> Result<SocketAddr, std::io::Error> {
+        Ok(self.endpoint)
     }
 }
 

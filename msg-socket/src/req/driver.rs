@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{Future, SinkExt, StreamExt};
-use msg_transport::ClientTransport;
+use msg_transport::Transport;
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
@@ -20,10 +20,10 @@ use tokio::time::Interval;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
-pub(crate) struct ReqDriver<T: ClientTransport> {
+pub(crate) struct ReqDriver<T: Transport> {
     /// Options shared with the socket.
     #[allow(unused)]
-    pub(crate) options: Arc<ReqOptions<T::ConnectOptions>>,
+    pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
     pub(crate) socket_state: Arc<SocketState>,
     /// ID counter for outgoing requests.
@@ -49,7 +49,7 @@ pub(crate) struct PendingRequest {
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
-impl<T: ClientTransport> ReqDriver<T> {
+impl<T: Transport> ReqDriver<T> {
     fn new_message(&mut self, payload: Bytes) -> reqrep::Message {
         let id = self.id_counter;
         // Wrap add here to avoid overflow
@@ -111,7 +111,10 @@ impl<T: ClientTransport> ReqDriver<T> {
     }
 }
 
-impl<T: ClientTransport + Unpin> Future for ReqDriver<T> {
+impl<T> Future for ReqDriver<T>
+where
+    T: Transport + Unpin,
+{
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

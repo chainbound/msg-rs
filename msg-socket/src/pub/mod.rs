@@ -35,7 +35,7 @@ pub enum PubError {
 }
 
 #[derive(Debug)]
-pub struct PubOptions<T> {
+pub struct PubOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     /// The maximum number of outgoing messages that can be buffered per session.
@@ -51,7 +51,7 @@ pub struct PubOptions<T> {
     min_compress_size: usize,
 }
 
-impl<T: Default> Default for PubOptions<T> {
+impl Default for PubOptions {
     fn default() -> Self {
         Self {
             max_clients: None,
@@ -63,7 +63,7 @@ impl<T: Default> Default for PubOptions<T> {
     }
 }
 
-impl<T> PubOptions<T> {
+impl PubOptions {
     /// Sets the maximum number of concurrent clients.
     pub fn max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
@@ -168,8 +168,8 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::{Tcp, TcpOptions};
-    use msg_wire::compression::GzipCompressor;
+    use msg_transport::tcp::{self, Tcp};
+    use msg_wire::compression::{GzipCompressor, GzipDecompressor};
 
     use crate::{SubOptions, SubSocket};
 
@@ -179,11 +179,9 @@ mod tests {
     async fn pubsub_simple() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::<Tcp>::new();
+        let mut pub_socket = PubSocket::new(Tcp::default());
 
-        let mut sub_socket = SubSocket::<Tcp>::with_options(
-            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
-        );
+        let mut sub_socket = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
@@ -207,15 +205,13 @@ mod tests {
     async fn pubsub_many() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::<Tcp>::new();
+        let mut pub_socket = PubSocket::new(Tcp::default());
 
-        let mut sub1 = SubSocket::<Tcp>::with_options(
-            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
-        );
+        let mut sub1 =
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)));
 
-        let mut sub2 = SubSocket::<Tcp>::with_options(
-            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
-        );
+        let mut sub2 =
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)));
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
@@ -247,15 +243,15 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut pub_socket =
-            PubSocket::with_options(Tcp::new(), PubOptions::default().min_compress_size(0))
-                .with_compressor(GzipCompressor::new(6));
-        let mut sub1 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+            PubSocket::<Tcp>::new(Tcp::default()).with_compressor(GzipCompressor::new(6));
 
-        let mut sub2 = SubSocket::new(Tcp::new_with_options(
-            TcpOptions::default().with_blocking_connect(),
-        ));
+        let mut sub1 =
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)))
+                .with_decompressor(GzipDecompressor::new());
+
+        let mut sub2 =
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)))
+                .with_decompressor(GzipDecompressor::new());
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
@@ -288,9 +284,9 @@ mod tests {
     async fn pubsub_durable() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::<Tcp>::new();
+        let mut pub_socket = PubSocket::<Tcp>::new(Tcp::default());
 
-        let mut sub_socket = SubSocket::<Tcp>::new();
+        let mut sub_socket = SubSocket::<Tcp>::new(Tcp::default());
 
         // Try to connect and subscribe before the publisher is up
         sub_socket
@@ -321,17 +317,14 @@ mod tests {
     async fn pubsub_max_clients() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::<Tcp>::with_options(PubOptions::default().max_clients(1));
+        let mut pub_socket =
+            PubSocket::with_options(Tcp::default(), PubOptions::default().max_clients(1));
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
 
-        let mut sub1 = SubSocket::<Tcp>::with_options(
-            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
-        );
+        let mut sub1 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
 
-        let mut sub2 = SubSocket::<Tcp>::with_options(
-            SubOptions::default().connect_options(TcpConnectOptions::default().blocking_connect()),
-        );
+        let mut sub2 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
 
         let addr = pub_socket.local_addr().unwrap();
 

@@ -129,12 +129,12 @@ impl Quic {
 
 #[async_trait::async_trait]
 impl Transport for Quic {
-    type Output = QuicStream;
+    type Io = QuicStream;
 
     type Error = Error;
 
-    type Connect = BoxFuture<'static, Result<Self::Output, Self::Error>>;
-    type Accept = BoxFuture<'static, Result<Self::Output, Self::Error>>;
+    type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
+    type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
 
     /// Binds a QUIC endpoint to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
@@ -178,7 +178,11 @@ impl Transport for Quic {
             connection
                 .open_bi()
                 .await
-                .map(|(send, recv)| QuicStream { send, recv })
+                .map(|(send, recv)| QuicStream {
+                    peer: addr,
+                    send,
+                    recv,
+                })
                 .map_err(Error::from)
         })
     }
@@ -192,10 +196,9 @@ impl Transport for Quic {
                 // Incoming channel and task are spawned, so we can poll it.
                 match ready!(incoming.poll_recv(cx)) {
                     Some(Ok(connecting)) => {
-                        tracing::debug!(
-                            "New incoming connection from {}",
-                            connecting.remote_address()
-                        );
+                        let peer = connecting.remote_address();
+
+                        tracing::debug!("New incoming connection from {}", peer);
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
@@ -209,7 +212,7 @@ impl Transport for Quic {
                             connection
                                 .accept_bi()
                                 .await
-                                .map(|(send, recv)| QuicStream { send, recv })
+                                .map(|(send, recv)| QuicStream { peer, send, recv })
                                 .map_err(Error::from)
                         }));
                     }
