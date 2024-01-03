@@ -14,10 +14,12 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         // The expected RTT in ms
-        const EXPECTED_RTT: u32 = 100;
+        const EXPECTED_RTT: u32 = 200;
         // The maximum bandwidth we expect to see in bytes per second
         const MAX_STREAM_BANDWIDTH: u32 = MiB * 10;
         const STREAM_RWND: u32 = MAX_STREAM_BANDWIDTH / 1000 * EXPECTED_RTT;
+
+        const INITIAL_MTU: u16 = 1460;
 
         let mut transport = quinn::TransportConfig::default();
         transport
@@ -28,7 +30,11 @@ impl Default for Config {
             // Disable datagram support
             .datagram_receive_buffer_size(None)
             .datagram_send_buffer_size(0)
-            .stream_receive_window(STREAM_RWND.into())
+            .max_concurrent_uni_streams(0u32.into())
+            .initial_mtu(INITIAL_MTU)
+            .min_mtu(INITIAL_MTU)
+            .allow_spin(false)
+            .stream_receive_window((8 * STREAM_RWND).into())
             .send_window((8 * STREAM_RWND).into());
 
         let transport = Arc::new(transport);
