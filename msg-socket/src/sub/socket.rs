@@ -10,7 +10,6 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamMap;
 
 use msg_transport::Transport;
-use msg_wire::compression::Decompressor;
 
 use super::{
     Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,

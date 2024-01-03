@@ -169,7 +169,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::tcp::{self, Tcp};
-    use msg_wire::compression::{GzipCompressor, GzipDecompressor};
+    use msg_wire::compression::GzipCompressor;
 
     use crate::{SubOptions, SubSocket};
 
@@ -246,12 +246,10 @@ mod tests {
             PubSocket::<Tcp>::new(Tcp::default()).with_compressor(GzipCompressor::new(6));
 
         let mut sub1 =
-            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)))
-                .with_decompressor(GzipDecompressor::new());
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)));
 
         let mut sub2 =
-            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)))
-                .with_decompressor(GzipDecompressor::new());
+            SubSocket::<Tcp>::new(Tcp::new(tcp::Config::default().blocking_connect(true)));
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();

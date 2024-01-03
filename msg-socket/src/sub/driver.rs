@@ -19,7 +19,6 @@ use super::{
 };
 use msg_common::unix_micros;
 use msg_transport::Transport;
-use msg_wire::compression::Decompressor;
 use msg_wire::pubsub;
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
