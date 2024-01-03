@@ -136,6 +136,7 @@ where
                 }
                 Poll::Ready(Some(Err(e))) => {
                     if let reqrep::Error::Io(e) = e {
+                        tracing::error!("Socket error: {:?}", e);
                         if e.kind() == std::io::ErrorKind::Other {
                             tracing::error!("Other error: {:?}", e);
                             return Poll::Ready(());

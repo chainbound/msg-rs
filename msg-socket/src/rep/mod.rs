@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_req_rep() {
+    async fn test_req_rep_simple() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::new(Tcp::default());
         rep.bind(localhost()).await.unwrap();

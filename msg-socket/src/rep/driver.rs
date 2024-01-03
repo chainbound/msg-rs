@@ -71,7 +71,7 @@ where
                         error!("Error receiving message from peer {}: {:?}", peer, e);
                     }
                     None => {
-                        debug!("Peer {} disconnected", peer);
+                        warn!("Peer {} disconnected", peer);
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -83,8 +83,7 @@ where
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        tracing::debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
-                        this.state.stats.increment_active_clients();
+                        tracing::info!("Authentication passed for {:?} ({})", auth.id, auth.addr);
 
                         this.peer_states.insert(
                             auth.addr,
@@ -100,6 +99,7 @@ where
                     }
                     Err(e) => {
                         tracing::error!("Error authenticating client: {:?}", e);
+                        this.state.stats.decrement_active_clients();
                     }
                 }
 
@@ -295,7 +295,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     return Poll::Ready(Some(Ok(request)));
                 }
                 Poll::Ready(None) => {
-                    tracing::debug!("Connection closed");
+                    tracing::error!("Framed closed unexpectedly (peer {})", this.addr);
                     return Poll::Ready(None);
                 }
                 Poll::Pending => {}

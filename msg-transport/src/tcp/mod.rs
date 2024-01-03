@@ -112,7 +112,7 @@ impl Layer<TcpStream> for AuthLayer {
                 ))?
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
 
-            conn.close().await?;
+            // conn.close().await?;
 
             if matches!(ack, auth::Message::Ack) {
                 Ok(conn.into_inner())
@@ -173,7 +173,10 @@ impl Transport for Tcp {
             Poll::Ready(Ok((io, addr))) => {
                 tracing::debug!("Accepted connection from {}", addr);
 
-                Poll::Ready(Box::pin(async move { Ok(DurableSession::from(io)) }))
+                let mut session = DurableSession::from(io);
+                session.set_reconnect(false);
+
+                Poll::Ready(Box::pin(async move { Ok(session) }))
             }
             Poll::Ready(Err(e)) => Poll::Ready(async_error(e)),
             Poll::Pending => Poll::Pending,

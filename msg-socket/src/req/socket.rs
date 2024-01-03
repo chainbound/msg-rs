@@ -66,7 +66,7 @@ where
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        tracing::debug!("Connected to {}", endpoint);
+        tracing::info!("Connecting to {}", endpoint);
 
         let stream = self
             .transport
