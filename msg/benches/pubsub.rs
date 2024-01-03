@@ -10,7 +10,11 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
-use msg_transport::tcp::{self, Tcp};
+use msg_transport::{
+    quic::Quic,
+    tcp::{self, Tcp},
+    Transport,
+};
 
 const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;
@@ -20,16 +24,16 @@ const MSG_SIZE: usize = 512;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-struct PairBenchmark {
+struct PairBenchmark<T: Transport> {
     rt: Runtime,
-    publisher: PubSocket<Tcp>,
-    subscriber: SubSocket<Tcp>,
+    publisher: PubSocket<T>,
+    subscriber: SubSocket<T>,
 
     n_reqs: usize,
     msg_sizes: Vec<usize>,
 }
 
-impl PairBenchmark {
+impl<T: Transport + Send + Sync + Unpin + 'static> PairBenchmark<T> {
     /// Sets up the publisher and subscriber sockets.
     fn init(&mut self) {
         // Set up the socket connections
@@ -231,10 +235,99 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     bench.bench_message_throughput(group);
 }
 
+fn pubsub_single_thread_quic(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let buffer_size = 1024 * 64;
+
+    let publisher = PubSocket::with_options(
+        Quic::default(),
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
+    );
+
+    let subscriber = SubSocket::with_options(
+        Quic::default(),
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
+    );
+
+    let mut bench = PairBenchmark {
+        rt,
+        publisher,
+        subscriber,
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init();
+
+    let mut group = c.benchmark_group("pubsub_single_thread_quic_bytes");
+    group.sample_size(10);
+    bench.bench_bytes_throughput(group);
+
+    let mut group = c.benchmark_group("pubsub_single_thread_quic_msgs");
+    group.sample_size(10);
+    bench.bench_message_throughput(group);
+}
+
+fn pubsub_multi_thread_quic(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let buffer_size = 1024 * 64;
+
+    let publisher = PubSocket::with_options(
+        Quic::default(),
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
+    );
+
+    let subscriber = SubSocket::with_options(
+        Quic::default(),
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
+    );
+
+    let mut bench = PairBenchmark {
+        rt,
+        publisher,
+        subscriber,
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init();
+
+    let mut group = c.benchmark_group("pubsub_multi_thread_quic_bytes");
+    group.sample_size(10);
+    bench.bench_bytes_throughput(group);
+
+    let mut group = c.benchmark_group("pubsub_multi_thread_quic_msgs");
+    group.sample_size(10);
+    bench.bench_message_throughput(group);
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = pubsub_single_thread_tcp, pubsub_multi_thread_tcp
+    targets = pubsub_single_thread_tcp, pubsub_multi_thread_tcp, pubsub_single_thread_quic, pubsub_multi_thread_quic
 }
 
 // Runs various benchmarks for the `PubSocket` and `SubSocket`.

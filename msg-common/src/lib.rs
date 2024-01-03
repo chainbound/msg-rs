@@ -17,3 +17,10 @@ pub fn async_error<E: std::error::Error + Send + 'static, T>(
 ) -> BoxFuture<'static, Result<T, E>> {
     Box::pin(async move { Err(e) })
 }
+
+#[allow(non_upper_case_globals)]
+pub mod constants {
+    pub const KiB: u32 = 1024;
+    pub const MiB: u32 = 1024 * KiB;
+    pub const GiB: u32 = 1024 * MiB;
+}

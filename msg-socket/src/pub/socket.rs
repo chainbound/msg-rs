@@ -33,7 +33,7 @@ pub struct PubSocket<T: Transport> {
 
 impl<T> PubSocket<T>
 where
-    T: TransportExt + Send + Unpin + 'static,
+    T: Transport + Send + Unpin + 'static,
 {
     /// Creates a new reply socket with the default [`PubOptions`].
     pub fn new(transport: T) -> Self {
@@ -181,3 +181,5 @@ where
         self.local_addr
     }
 }
+
+impl<T> PubSocket<T> where T: TransportExt {}

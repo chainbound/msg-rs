@@ -89,6 +89,7 @@ impl QuicConnectOptions {
 ///
 /// In a future release, we will add support for multiplexing, which will allow multiple streams per connection based on
 /// socket requirements / semantics.
+#[derive(Debug, Default)]
 pub struct Quic {
     config: Config,
     endpoint: Option<quinn::Endpoint>,
@@ -135,6 +136,11 @@ impl Transport for Quic {
 
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
     type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
+
+    /// Returns the local address this transport is bound to (if it is bound).
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.endpoint.as_ref().and_then(|e| e.local_addr().ok())
+    }
 
     /// Binds a QUIC endpoint to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
@@ -257,11 +263,6 @@ impl Transport for Quic {
 }
 
 impl TransportExt for Quic {
-    /// Returns the local address this transport is bound to (if it is bound).
-    fn local_addr(&self) -> Option<SocketAddr> {
-        self.endpoint.as_ref().and_then(|e| e.local_addr().ok())
-    }
-
     fn accept(&mut self) -> crate::Acceptor<'_, Self>
     where
         Self: Sized + Unpin,
