@@ -5,7 +5,11 @@ use tokio_stream::StreamExt;
 use tracing::Instrument;
 
 use msg::{
+<<<<<<< HEAD
     compression::GzipCompressor,
+=======
+    compression::{GzipCompressor, GzipDecompressor},
+>>>>>>> a8e78dad9e9360fd342641ffbad86a2f4ef7faae
     tcp::{self, Tcp},
     PubSocket, SubSocket,
 };
@@ -22,13 +26,25 @@ async fn main() {
     let mut sub1 = SubSocket::new(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new(tcp::Config::default().blocking_connect(true)),
+<<<<<<< HEAD
     );
+=======
+    )
+    // Enable Gzip decompression
+    .with_decompressor(GzipDecompressor::new());
+>>>>>>> a8e78dad9e9360fd342641ffbad86a2f4ef7faae
 
     // Configure the subscribers with options
     let mut sub2 = SubSocket::new(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::new(tcp::Config::default().blocking_connect(true)),
+<<<<<<< HEAD
     );
+=======
+    )
+    // Enable Gzip decompression
+    .with_decompressor(GzipDecompressor::new());
+>>>>>>> a8e78dad9e9360fd342641ffbad86a2f4ef7faae
 
     tracing::info!("Setting up the sockets...");
     pub_socket
