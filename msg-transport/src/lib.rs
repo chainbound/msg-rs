@@ -34,6 +34,9 @@ pub trait Transport {
     /// obtained when calling [`Transport::poll_accept`].
     type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
 
+    /// Returns the local address this transport is bound to (if it is bound).
+    fn local_addr(&self) -> Option<SocketAddr>;
+
     /// Binds to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error>;
 
@@ -46,9 +49,6 @@ pub trait Transport {
 }
 
 pub trait TransportExt: Transport {
-    /// Returns the local address this transport is bound to (if it is bound).
-    fn local_addr(&self) -> Option<SocketAddr>;
-
     /// Async-friendly interface for accepting inbound connections.
     fn accept(&mut self) -> Acceptor<'_, Self>
     where

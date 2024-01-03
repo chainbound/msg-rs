@@ -132,6 +132,10 @@ impl Transport for Tcp {
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
     type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
 
+    fn local_addr(&self) -> Option<SocketAddr> {
+        self.listener.as_ref().and_then(|l| l.local_addr().ok())
+    }
+
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
         let listener = TcpListener::bind(addr).await?;
 
@@ -186,10 +190,6 @@ impl Transport for Tcp {
 
 #[async_trait::async_trait]
 impl TransportExt for Tcp {
-    fn local_addr(&self) -> Option<SocketAddr> {
-        self.listener.as_ref().and_then(|l| l.local_addr().ok())
-    }
-
     fn accept(&mut self) -> Acceptor<'_, Self>
     where
         Self: Sized + Unpin,

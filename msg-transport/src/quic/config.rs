@@ -1,8 +1,8 @@
+use quinn::IdleTimeout;
 use std::{sync::Arc, time::Duration};
 
-use quinn::IdleTimeout;
-
 use super::tls::{self_signed_certificate, unsafe_client_config};
+use msg_common::constants::MiB;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -13,6 +13,12 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
+        // The expected RTT in ms
+        const EXPECTED_RTT: u32 = 100;
+        // The maximum bandwidth we expect to see in bytes per second
+        const MAX_STREAM_BANDWIDTH: u32 = MiB * 10;
+        const STREAM_RWND: u32 = MAX_STREAM_BANDWIDTH / 1000 * EXPECTED_RTT;
+
         let mut transport = quinn::TransportConfig::default();
         transport
             .keep_alive_interval(Some(Duration::from_secs(10)))
@@ -21,7 +27,9 @@ impl Default for Config {
             ))
             // Disable datagram support
             .datagram_receive_buffer_size(None)
-            .datagram_send_buffer_size(0);
+            .datagram_send_buffer_size(0)
+            .stream_receive_window(STREAM_RWND.into())
+            .send_window((8 * STREAM_RWND).into());
 
         let transport = Arc::new(transport);
         let (cert, key) = self_signed_certificate();
