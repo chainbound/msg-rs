@@ -116,6 +116,7 @@ impl From<TcpStream> for DurableSession<TcpStream> {
             state: SessionState::Connected(stream),
             endpoint,
             layer_stack: None,
+            should_reconnect: true,
         }
     }
 }
@@ -141,7 +142,13 @@ where
             }),
             endpoint,
             layer_stack: None,
+            should_reconnect: true,
         }
+    }
+
+    /// Sets whether or not the session should attempt to reconnect if it is disconnected.
+    pub fn set_reconnect(&mut self, should_reconnect: bool) {
+        self.should_reconnect = should_reconnect;
     }
 
     /// Adds a layer to the session. The layer will be applied to all established or re-established
@@ -178,6 +185,15 @@ where
     fn on_disconnect(mut self: Pin<&mut Self>, cx: &mut Context<'_>) {
         // We copy here because we can't do it after borrowing self in the match below
         let endpoint = self.endpoint;
+
+        if !self.should_reconnect {
+            debug!(
+                "Session was disconnected from {}, not reconnecting",
+                endpoint
+            );
+            self.state = SessionState::Terminated(io::ErrorKind::NotConnected.into());
+            return;
+        }
 
         match &mut self.state {
             SessionState::Connected(_) => {
@@ -248,6 +264,7 @@ pub struct DurableSession<Io: UnderlyingIo> {
     /// Optional layer stack. If this is `None`, newly connected (or reconnected) sessions will
     /// be passed through without processing.
     layer_stack: Option<Box<dyn Layer<Io> + Send>>,
+    should_reconnect: bool,
 }
 
 impl<Io> AsyncRead for DurableSession<Io>
@@ -259,6 +276,8 @@ where
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        let reconnect = self.should_reconnect;
+
         match &mut self.state {
             SessionState::Disconnected(reconnect_status) => {
                 match ready!(reconnect_status.poll_reconnect(cx)) {
@@ -318,13 +337,20 @@ where
                 let post_len = buf.filled().len();
                 let bytes_read = post_len - pre_len;
 
+                tracing::debug!("Read {} bytes, {}", bytes_read, reconnect);
+
                 let disconnected = match poll {
-                    Poll::Ready(Ok(())) => io.is_final_read(bytes_read),
+                    Poll::Ready(Ok(())) => reconnect && io.is_final_read(bytes_read),
                     Poll::Ready(Err(ref e)) => io.is_disconnect_error(e),
                     Poll::Pending => false,
                 };
 
                 if disconnected {
+                    tracing::error!(
+                        "Disconnected from {}, {}",
+                        self.endpoint,
+                        self.should_reconnect
+                    );
                     self.on_disconnect(cx);
                     Poll::Pending
                 } else {
