@@ -6,7 +6,7 @@ use tracing::debug;
 
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
-use msg_transport::{Transport, TransportExt};
+use msg_transport::Transport;
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
@@ -183,5 +183,3 @@ where
         self.local_addr
     }
 }
-
-impl<T> PubSocket<T> where T: TransportExt {}

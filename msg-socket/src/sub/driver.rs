@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::{Future, Stream, StreamExt};
 use std::collections::{HashSet, VecDeque};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -130,7 +130,14 @@ where
                     debug!(topic = topic.as_str(), "Not subscribed to topic");
                 }
             }
-            Command::Connect { endpoint } => {
+            Command::Connect { mut endpoint } => {
+                // Some transport implementations (e.g. Quinn) can't dial an unspecified IP address, so replace
+                // it with localhost.
+                if endpoint.ip().is_unspecified() {
+                    // TODO: support IPv6
+                    endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+                }
+
                 let connect = self.transport.connect(endpoint);
 
                 self.connection_tasks.spawn(async move {

@@ -171,9 +171,18 @@ mod tests {
     use msg_transport::tcp::{self, Tcp};
     use msg_wire::compression::GzipCompressor;
 
-    use crate::{SubOptions, SubSocket};
+    use crate::{Authenticator, SubOptions, SubSocket};
 
     use super::*;
+
+    struct Auth;
+
+    impl Authenticator for Auth {
+        fn authenticate(&self, id: &Bytes) -> bool {
+            tracing::info!("Auth request from: {:?}", id);
+            true
+        }
+    }
 
     #[tokio::test]
     async fn pubsub_simple() {
@@ -182,6 +191,35 @@ mod tests {
         let mut pub_socket = PubSocket::new(Tcp::default());
 
         let mut sub_socket = SubSocket::with_options(Tcp::default(), SubOptions::default());
+
+        pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
+        let addr = pub_socket.local_addr().unwrap();
+
+        sub_socket.connect(addr).await.unwrap();
+        sub_socket.subscribe("HELLO".to_string()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        pub_socket
+            .publish("HELLO".to_string(), "WORLD".into())
+            .await
+            .unwrap();
+
+        let msg = sub_socket.next().await.unwrap();
+        tracing::info!("Received message: {:?}", msg);
+        assert_eq!("HELLO", msg.topic());
+        assert_eq!("WORLD", msg.payload());
+    }
+
+    #[tokio::test]
+    async fn pubsub_auth() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut pub_socket = PubSocket::new(Tcp::default()).with_auth(Auth);
+
+        let mut sub_socket = SubSocket::with_options(
+            Tcp::new(tcp::Config::default().auth_token(Bytes::from("hello"))),
+            SubOptions::default(),
+        );
 
         pub_socket.bind("0.0.0.0:0".parse().unwrap()).await.unwrap();
         let addr = pub_socket.local_addr().unwrap();

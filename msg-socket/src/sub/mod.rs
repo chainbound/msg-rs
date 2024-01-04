@@ -47,6 +47,8 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
+    /// Optional authentication token.
+    auth_token: Option<Bytes>,
     /// The maximum amount of incoming messages that will be buffered before being dropped due to
     /// a slow consumer.
     ingress_buffer_size: usize,
@@ -55,6 +57,13 @@ pub struct SubOptions {
 }
 
 impl SubOptions {
+    /// Sets the authentication token for this socket. This will activate the authentication layer
+    /// and send the token to the publisher.
+    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
+        self.auth_token = Some(auth_token);
+        self
+    }
+
     /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
     /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
     pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
@@ -72,6 +81,7 @@ impl SubOptions {
 impl Default for SubOptions {
     fn default() -> Self {
         Self {
+            auth_token: None,
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
         }
