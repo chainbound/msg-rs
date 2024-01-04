@@ -98,17 +98,18 @@ async fn run_transfer<T: Transport + Send + Unpin + 'static>(
             .expect("failed to read test file"),
     );
 
-    let start = Instant::now();
-    pub_socket
-        .publish("HELLO_TOPIC".to_string(), data.clone())
-        .await
-        .unwrap();
+    for _ in 0..100 {
+        let start = Instant::now();
+        pub_socket
+            .publish("HELLO_TOPIC".to_string(), data.clone())
+            .await
+            .unwrap();
 
-    tracing::info!("Published message in {:?}", start.elapsed());
+        let recv = sub_socket.next().await.unwrap();
+        let elapsed = start.elapsed();
+        tracing::info!("{} transfer took {:?}", transport, elapsed);
+        assert_eq!(recv.into_payload(), data);
 
-    let recv = sub_socket.next().await.unwrap();
-    let elapsed = start.elapsed();
-    tracing::info!("{} transfer took {:?}", transport, elapsed);
-
-    assert_eq!(recv.into_payload(), data);
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
