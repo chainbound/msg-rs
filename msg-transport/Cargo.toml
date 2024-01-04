@@ -21,8 +21,9 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 rand.workspace = true
-quinn.workspace = true
 thiserror.workspace = true
+
+quinn.workspace = true
 rustls.workspace = true
 rcgen.workspace = true
 

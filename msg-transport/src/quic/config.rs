@@ -14,14 +14,22 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         // The expected RTT in ms
-        const EXPECTED_RTT: u32 = 200;
+        const EXPECTED_RTT: u32 = 100;
         // The maximum bandwidth we expect to see in bytes per second
-        const MAX_STREAM_BANDWIDTH: u32 = MiB * 10;
+        const MAX_STREAM_BANDWIDTH: u32 = MiB * 1000;
         const STREAM_RWND: u32 = MAX_STREAM_BANDWIDTH / 1000 * EXPECTED_RTT;
 
         const INITIAL_MTU: u16 = 1460;
 
+        // Default initial window is 12000 bytes. This is limited to not overwhelm slow links.
+        let mut cc = quinn::congestion::CubicConfig::default();
+        // 4 MiB initial window
+        // Note that this is a very high initial window outside of private networks.
+        // TODO: document this and make it configurable
+        cc.initial_window((MiB * 4) as u64);
+
         let mut transport = quinn::TransportConfig::default();
+
         transport
             .keep_alive_interval(Some(Duration::from_secs(10)))
             .max_idle_timeout(Some(
@@ -35,6 +43,7 @@ impl Default for Config {
             .min_mtu(INITIAL_MTU)
             .allow_spin(false)
             .stream_receive_window((8 * STREAM_RWND).into())
+            .congestion_controller_factory(Arc::new(cc))
             .send_window((8 * STREAM_RWND).into());
 
         let transport = Arc::new(transport);

@@ -1,3 +1,5 @@
+use futures::future::BoxFuture;
+use quinn::{self, Endpoint};
 use std::{
     io,
     net::{SocketAddr, UdpSocket},
@@ -5,10 +7,6 @@ use std::{
     sync::Arc,
     task::{ready, Poll},
 };
-
-use bytes::Bytes;
-use futures::future::BoxFuture;
-use quinn::{self, ClientConfig, Endpoint};
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
 use tracing::error;
@@ -23,19 +21,6 @@ mod tls;
 
 use config::Config;
 use stream::QuicStream;
-use tls::unsafe_client_config;
-
-/// Options for outgoing connections.
-/// By default, unsafe TLS configuration is used (no server verification, no client authentication).
-// TODO: additional configuration options related to transport etc
-#[derive(Debug, Clone)]
-pub struct QuicConnectOptions {
-    pub blocking_connect: bool,
-    /// Optional authentication message.
-    pub auth_token: Option<Bytes>,
-    pub client_config: quinn::ClientConfig,
-    pub local_addr: SocketAddr,
-}
 
 /// A QUIC error.
 #[derive(Debug, Error)]
@@ -48,37 +33,6 @@ pub enum Error {
     Connection(#[from] quinn::ConnectionError),
     #[error("Endpoint closed")]
     ClosedEndpoint,
-}
-
-impl Default for QuicConnectOptions {
-    fn default() -> Self {
-        Self {
-            blocking_connect: false,
-            auth_token: None,
-            local_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
-            client_config: ClientConfig::new(Arc::new(unsafe_client_config())),
-        }
-    }
-}
-
-impl QuicConnectOptions {
-    /// Sets the auth token for this connection.
-    pub fn auth_token(mut self, auth: Bytes) -> Self {
-        self.auth_token = Some(auth);
-        self
-    }
-
-    /// Connect synchronously.
-    pub fn blocking_connect(mut self) -> Self {
-        self.blocking_connect = true;
-        self
-    }
-
-    /// Sets the local address for this connection.
-    pub fn local_addr(mut self, addr: SocketAddr) -> Self {
-        self.local_addr = addr;
-        self
-    }
 }
 
 /// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`] traits.
