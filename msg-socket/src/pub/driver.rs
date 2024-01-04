@@ -1,21 +1,22 @@
-use futures::{Future, SinkExt, StreamExt};
+use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use std::{
+    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 use super::{
     session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
 };
 use crate::{AuthResult, Authenticator};
-use msg_transport::ServerTransport;
+use msg_transport::{PeerAddress, Transport};
 use msg_wire::{auth, pubsub};
 
-pub(crate) struct PubDriver<T: ServerTransport> {
+pub(crate) struct PubDriver<T: Transport> {
     /// Session ID counter.
     pub(super) id_counter: u32,
     /// The server transport used to accept incoming connections.
@@ -26,19 +27,25 @@ pub(crate) struct PubDriver<T: ServerTransport> {
     pub(crate) state: Arc<SocketState>,
     /// Optional connection authenticator.
     pub(super) auth: Option<Arc<dyn Authenticator>>,
+    /// A set of pending incoming connections, represented by [`Transport::Accept`].
+    pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
     pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
 
-impl<T: ServerTransport> Future for PubDriver<T> {
+impl<T> Future for PubDriver<T>
+where
+    T: Transport + Unpin + 'static,
+{
     type Output = Result<(), PubError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
 
         loop {
+            // First, poll the joinset of authentication tasks. If a new connection has been handled we spawn a new session for it.
             if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
                 match auth {
                     Ok(auth) => {
@@ -73,103 +80,132 @@ impl<T: ServerTransport> Future for PubDriver<T> {
                 continue;
             }
 
-            // Poll the transport for new incoming connections
-            match this.transport.poll_accept(cx) {
-                Poll::Ready(Ok((stream, addr))) => {
-                    if let Some(max) = this.options.max_clients {
-                        if this.state.stats.active_clients() >= max {
-                            warn!(
-                                "Max connections reached ({}), rejecting connection from {}",
-                                max, addr
-                            );
-
-                            continue;
+            // Then poll the incoming connection tasks. If a new connection has been accepted, spawn a new authentication task for it.
+            if let Poll::Ready(Some(incoming)) = this.conn_tasks.poll_next_unpin(cx) {
+                match incoming {
+                    Ok(io) => {
+                        if let Err(e) = this.on_incoming(io) {
+                            error!("Error accepting incoming connection: {:?}", e);
+                            this.state.stats.decrement_active_clients();
                         }
                     }
+                    Err(e) => {
+                        error!("Error accepting incoming connection: {:?}", e);
 
-                    // Increment the active clients counter. If the authentication fails, this counter
-                    // will be decremented.
-                    this.state.stats.increment_active_clients();
-
-                    // If authentication is enabled, start the authentication process
-                    if let Some(ref auth) = this.auth {
-                        let authenticator = Arc::clone(auth);
-                        debug!("New connection from {}, authenticating", addr);
-                        this.auth_tasks.spawn(async move {
-                            let mut conn = Framed::new(stream, auth::Codec::new_server());
-
-                            debug!("Waiting for auth");
-                            // Wait for the response
-                            let auth = conn
-                                .next()
-                                .await
-                                .ok_or(PubError::SocketClosed)?
-                                .map_err(|e| PubError::Auth(e.to_string()))?;
-
-                            debug!("Auth received: {:?}", auth);
-
-                            let auth::Message::Auth(id) = auth else {
-                                conn.send(auth::Message::Reject).await?;
-                                conn.flush().await?;
-                                conn.close().await?;
-                                return Err(PubError::Auth("Invalid auth message".to_string()));
-                            };
-
-                            // If authentication fails, send a reject message and close the connection
-                            if !authenticator.authenticate(&id) {
-                                conn.send(auth::Message::Reject).await?;
-                                conn.flush().await?;
-                                conn.close().await?;
-                                return Err(PubError::Auth("Authentication failed".to_string()));
-                            }
-
-                            // Send ack
-                            conn.send(auth::Message::Ack).await?;
-                            conn.flush().await?;
-
-                            Ok(AuthResult {
-                                id,
-                                addr,
-                                stream: conn.into_inner(),
-                            })
-                        });
-                    } else {
-                        let mut framed = Framed::new(stream, pubsub::Codec::new());
-                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
-
-                        let session = SubscriberSession {
-                            seq: 0,
-                            session_id: this.id_counter,
-                            from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            state: Arc::clone(&this.state),
-                            pending_egress: None,
-                            conn: framed,
-                            topic_filter: PrefixTrie::new(),
-                            should_flush: false,
-                            flush_interval: this.options.flush_interval.map(tokio::time::interval),
-                        };
-
-                        tokio::spawn(session);
-
-                        this.id_counter = this.id_counter.wrapping_add(1);
-                        debug!(
-                            "New connection from {}, session ID {}",
-                            addr, this.id_counter
-                        );
+                        // Active clients have already been incremented in the initial call to `poll_accept`,
+                        // so we need to decrement them here.
+                        this.state.stats.decrement_active_clients();
                     }
-
-                    continue;
                 }
-                Poll::Ready(Err(e)) => {
-                    // Errors here are usually about `WouldBlock`
-                    error!("Error accepting connection: {:?}", e);
 
-                    continue;
+                continue;
+            }
+
+            // Finally, poll the transport for new incoming connection futures and push them to the incoming connection tasks.
+            if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
+                if let Some(max) = this.options.max_clients {
+                    if this.state.stats.active_clients() >= max {
+                        warn!(
+                            "Max connections reached ({}), rejecting new incoming connection",
+                            max
+                        );
+
+                        continue;
+                    }
                 }
-                Poll::Pending => {}
+
+                // Increment the active clients counter. If the authentication fails, this counter
+                // will be decremented.
+                this.state.stats.increment_active_clients();
+
+                this.conn_tasks.push(accept);
+
+                continue;
             }
 
             return Poll::Pending;
         }
+    }
+}
+
+impl<T> PubDriver<T>
+where
+    T: Transport + Unpin + 'static,
+{
+    /// Handles an incoming connection. If this returns an error, the active connections counter
+    /// should be decremented.
+    fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
+        let addr = io.peer_addr()?;
+
+        info!("New connection from {}", addr);
+
+        // If authentication is enabled, start the authentication process
+        if let Some(ref auth) = self.auth {
+            let authenticator = Arc::clone(auth);
+            debug!("New connection from {}, authenticating", addr);
+            self.auth_tasks.spawn(async move {
+                let mut conn = Framed::new(io, auth::Codec::new_server());
+
+                debug!("Waiting for auth");
+                // Wait for the response
+                let auth = conn
+                    .next()
+                    .await
+                    .ok_or(PubError::SocketClosed)?
+                    .map_err(|e| PubError::Auth(e.to_string()))?;
+
+                debug!("Auth received: {:?}", auth);
+
+                let auth::Message::Auth(id) = auth else {
+                    conn.send(auth::Message::Reject).await?;
+                    conn.flush().await?;
+                    conn.close().await?;
+                    return Err(PubError::Auth("Invalid auth message".to_string()));
+                };
+
+                // If authentication fails, send a reject message and close the connection
+                if !authenticator.authenticate(&id) {
+                    conn.send(auth::Message::Reject).await?;
+                    conn.flush().await?;
+                    conn.close().await?;
+                    return Err(PubError::Auth("Authentication failed".to_string()));
+                }
+
+                // Send ack
+                conn.send(auth::Message::Ack).await?;
+                conn.flush().await?;
+
+                Ok(AuthResult {
+                    id,
+                    addr,
+                    stream: conn.into_inner(),
+                })
+            });
+        } else {
+            let mut framed = Framed::new(io, pubsub::Codec::new());
+            framed.set_backpressure_boundary(self.options.backpressure_boundary);
+
+            let session = SubscriberSession {
+                seq: 0,
+                session_id: self.id_counter,
+                from_socket_bcast: self.from_socket_bcast.resubscribe().into(),
+                state: Arc::clone(&self.state),
+                pending_egress: None,
+                conn: framed,
+                topic_filter: PrefixTrie::new(),
+                should_flush: false,
+                flush_interval: self.options.flush_interval.map(tokio::time::interval),
+            };
+
+            tokio::spawn(session);
+
+            self.id_counter = self.id_counter.wrapping_add(1);
+            debug!(
+                "New connection from {}, session ID {}",
+                addr, self.id_counter
+            );
+        }
+
+        Ok(())
     }
 }

@@ -47,7 +47,7 @@ enum Command {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
-    /// The optional authentication token for the client.
+    /// Optional authentication token.
     auth_token: Option<Bytes>,
     /// The maximum amount of incoming messages that will be buffered before being dropped due to
     /// a slow consumer.
@@ -57,7 +57,8 @@ pub struct SubOptions {
 }
 
 impl SubOptions {
-    /// Sets the authentication token for the socket.
+    /// Sets the authentication token for this socket. This will activate the authentication layer
+    /// and send the token to the publisher.
     pub fn auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
         self
@@ -80,9 +81,9 @@ impl SubOptions {
 impl Default for SubOptions {
     fn default() -> Self {
         Self {
+            auth_token: None,
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
-            auth_token: None,
         }
     }
 }
@@ -148,7 +149,7 @@ pub(crate) struct SocketState {
 
 #[cfg(test)]
 mod tests {
-    use msg_transport::Tcp;
+    use msg_transport::tcp::Tcp;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -184,10 +185,10 @@ mod tests {
     #[tokio::test]
     async fn test_sub() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut socket = socket::SubSocket::new(Tcp::new());
+        let mut socket = socket::SubSocket::new(Tcp::default());
 
         let addr = spawn_listener().await;
-        socket.connect(&addr.to_string()).await.unwrap();
+        socket.connect(addr).await.unwrap();
         socket.subscribe("HELLO".to_string()).await.unwrap();
 
         let mirror = socket.next().await.unwrap();

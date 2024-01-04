@@ -40,8 +40,6 @@ pub enum Command {
 
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
-    /// The optional authentication token for the client.
-    auth_token: Option<Bytes>,
     /// Timeout duration for requests.
     timeout: std::time::Duration,
     /// Wether to block on initial connection to the target.
@@ -59,12 +57,6 @@ pub struct ReqOptions {
 }
 
 impl ReqOptions {
-    /// Sets the authentication token for the socket.
-    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
-        self.auth_token = Some(auth_token);
-        self
-    }
-
     /// Sets the timeout for the socket.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
@@ -108,7 +100,6 @@ impl ReqOptions {
 impl Default for ReqOptions {
     fn default() -> Self {
         Self {
-            auth_token: None,
             timeout: std::time::Duration::from_secs(5),
             blocking_connect: true,
             backoff_duration: Duration::from_millis(200),

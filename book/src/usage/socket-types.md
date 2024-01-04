@@ -25,11 +25,11 @@ use msg::{RepSocket, ReqSocket, Tcp};
 #[tokio::main]
 async fn main() {
     // Initialize the reply socket (server side) with a transport
-    let mut rep = RepSocket::new(Tcp::new());
+    let mut rep = RepSocket::new(Tcp::default());
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
-    let mut req = ReqSocket::new(Tcp::new());
+    let mut req = ReqSocket::new(Tcp::default());
     req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
@@ -64,11 +64,11 @@ use msg::{PubSocket, SubSocket, Tcp};
 #[tokio::main]
 async fn main() {
     // Initialize the publisher socket (server side) with a transport
-    let mut pub_socket = PubSocket::new(Tcp::new());
+    let mut pub_socket = PubSocket::new(Tcp::default());
     pub_socket.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the subscriber socket (client side) with a transport
-    let mut sub_socket = SubSocket::new(Tcp::new());
+    let mut sub_socket = SubSocket::new(Tcp::default());
     sub_socket.connect("0.0.0.0:4444").await.unwrap();
 
     let topic = "some_interesting_topic".to_string();

@@ -25,6 +25,11 @@ Here is an example of how you can add an authenticator to a
 client-server application:
 
 ```rust
+use msg::{
+    tcp::{self, Tcp},
+    Authenticator, ReqSocket, RepSocket,
+};
+
 // Define some custom authentication logic
 #[derive(Default)]
 struct Auth;
@@ -42,16 +47,20 @@ impl Authenticator for Auth {
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator that we just implemented:
-    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
+    let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
     // The identifier will be sent to the server when the connection is established.
     let mut req = ReqSocket::with_options(
-        Tcp::new(),
+        Tcp::default(),
         ReqOptions::default().auth_token(Bytes::from("client1")),
     );
+
+    // The auth token needs to be set on the transport layer for now.
+    let tcp_config = tcp::Config::default().auth_token(Bytes::from("client1"));
+    let mut req = ReqSocket::new(Tcp::new(tcp_config));
 }
 ```
 

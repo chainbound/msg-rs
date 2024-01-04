@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::{Future, Stream, StreamExt};
 use std::collections::{HashSet, VecDeque};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -18,16 +18,16 @@ use super::{
     Command, PubMessage, SocketState, SubOptions,
 };
 use msg_common::unix_micros;
-use msg_transport::ClientTransport;
+use msg_transport::Transport;
 use msg_wire::pubsub;
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
-pub(crate) struct SubDriver<T: ClientTransport> {
+pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
     pub(super) options: Arc<SubOptions>,
-    /// The transport for this socket driver.
-    pub(super) transport: Arc<T>,
+    /// The transport for this socket.
+    pub(super) transport: T,
     /// Commands from the socket.
     pub(super) from_socket: mpsc::Receiver<Command>,
     /// Messages to the socket.
@@ -44,7 +44,7 @@ pub(crate) struct SubDriver<T: ClientTransport> {
 
 impl<T> Future for SubDriver<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + Unpin + 'static,
 {
     type Output = ();
 
@@ -105,7 +105,7 @@ where
 
 impl<T> SubDriver<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + 'static,
 {
     fn on_command(&mut self, cmd: Command) {
         debug!("Received command: {:?}", cmd);
@@ -130,12 +130,18 @@ where
                     debug!(topic = topic.as_str(), "Not subscribed to topic");
                 }
             }
-            Command::Connect { endpoint } => {
-                let id = self.options.auth_token.clone();
-                let transport = Arc::clone(&self.transport);
+            Command::Connect { mut endpoint } => {
+                // Some transport implementations (e.g. Quinn) can't dial an unspecified IP address, so replace
+                // it with localhost.
+                if endpoint.ip().is_unspecified() {
+                    // TODO: support IPv6
+                    endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+                }
+
+                let connect = self.transport.connect(endpoint);
 
                 self.connection_tasks.spawn(async move {
-                    let io = transport.connect_with_auth(endpoint, id).await?;
+                    let io = connect.await?;
 
                     Ok((endpoint, io))
                 });
