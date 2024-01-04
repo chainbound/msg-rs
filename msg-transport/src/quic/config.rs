@@ -13,7 +13,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        // The expected RTT in ms
+        // The expected RTT in ms. This has a big impact on initial performance.
         const EXPECTED_RTT: u32 = 100;
         // The maximum bandwidth we expect to see in bytes per second
         const MAX_STREAM_BANDWIDTH: u32 = MiB * 1000;
@@ -26,7 +26,7 @@ impl Default for Config {
         // 4 MiB initial window
         // Note that this is a very high initial window outside of private networks.
         // TODO: document this and make it configurable
-        cc.initial_window((MiB * 4) as u64);
+        cc.initial_window(MiB as u64);
 
         let mut transport = quinn::TransportConfig::default();
 
@@ -44,6 +44,7 @@ impl Default for Config {
             .allow_spin(false)
             .stream_receive_window((8 * STREAM_RWND).into())
             .congestion_controller_factory(Arc::new(cc))
+            .initial_rtt(Duration::from_millis(EXPECTED_RTT.into()))
             .send_window((8 * STREAM_RWND).into());
 
         let transport = Arc::new(transport);
