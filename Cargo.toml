@@ -1,5 +1,12 @@
 [workspace]
-members = ["msg", "msg-socket", "msg-wire", "msg-transport", "msg-common"]
+members = [
+    "msg",
+    "msg-socket",
+    "msg-wire",
+    "msg-transport",
+    "msg-common",
+    "msg-sim",
+]
 
 [workspace.package]
 version = "0.1.1"
@@ -16,6 +23,7 @@ msg-wire = { path = "./msg-wire" }
 msg-socket = { path = "./msg-socket" }
 msg-transport = { path = "./msg-transport" }
 msg-common = { path = "./msg-common" }
+msg-sim = { path = "./msg-sim" }
 
 # async
 async-trait = "0.1"
