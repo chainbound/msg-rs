@@ -1,4 +1,5 @@
 use futures::Stream;
+use rustc_hash::FxHashMap;
 use std::{
     collections::HashSet,
     net::SocketAddr,
@@ -7,7 +8,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{sync::mpsc, task::JoinSet};
-use tokio_stream::StreamMap;
 
 use msg_transport::ClientTransport;
 
@@ -47,13 +47,16 @@ where
 
         let state = Arc::new(SocketState::default());
 
+        let mut publishers = FxHashMap::default();
+        publishers.reserve(32);
+
         let driver = SubDriver {
             options: Arc::clone(&options),
             transport: Arc::new(transport),
             from_socket,
             to_socket,
             connection_tasks: JoinSet::new(),
-            publishers: StreamMap::with_capacity(24),
+            publishers,
             subscribed_topics: HashSet::with_capacity(32),
             state: Arc::clone(&state),
         };

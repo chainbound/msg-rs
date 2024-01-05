@@ -721,6 +721,9 @@ dependencies = [
 [[package]]
 name = "msg-common"
 version = "0.1.1"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "msg-socket"
