@@ -1,5 +1,10 @@
 use std::{collections::HashMap, time::Duration};
 
+use protocol::Protocol;
+
+mod cmd;
+mod protocol;
+
 /// A type alias for a network device.
 pub type Device = String;
 
@@ -9,8 +14,10 @@ pub struct SimConfig {
     target_bw: u64,
     default_bw: u64,
     packet_loss: f64,
+    protocols: Vec<Protocol>,
 }
 
+#[derive(Default)]
 pub struct Simulator {
     /// A map of active simulations.
     active_sims: HashMap<Device, Simulation>,
