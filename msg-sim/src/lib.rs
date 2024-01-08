@@ -13,7 +13,8 @@ pub struct SimConfig {
     latency: Duration,
     target_bw: u64,
     default_bw: u64,
-    packet_loss: f64,
+    /// The packet loss rate in percent.
+    packet_loss_rate: f64,
     protocols: Vec<Protocol>,
 }
 
