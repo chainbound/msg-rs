@@ -1,12 +1,21 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, net::IpAddr, time::Duration};
 
 use protocol::Protocol;
 
 mod cmd;
 mod protocol;
 
+#[cfg(target_os = "macos")]
+mod dummynet;
+
+const KIB: u64 = 1024;
+const MIB: u64 = 1024 * KIB;
+const GIB: u64 = 1024 * MIB;
+
 /// A type alias for a network device.
-pub type Device = String;
+pub struct Endpoint {
+    device: String,
+}
 
 #[derive(Debug)]
 pub struct SimConfig {
@@ -21,7 +30,7 @@ pub struct SimConfig {
 #[derive(Default)]
 pub struct Simulator {
     /// A map of active simulations.
-    active_sims: HashMap<Device, Simulation>,
+    active_sims: HashMap<IpAddr, Simulation>,
 }
 
 impl Simulator {
@@ -32,19 +41,16 @@ impl Simulator {
     }
 
     /// Starts a new simulation on the given device according to the config.
-    pub fn start(&mut self, device: Device, config: SimConfig) {
-        let mut simulation = Simulation {
-            device: device.clone(),
-            config,
-        };
+    pub fn start(&mut self, endpoint: IpAddr, config: SimConfig) {
+        let mut simulation = Simulation { endpoint, config };
 
         simulation.start();
 
-        self.active_sims.insert(device, simulation);
+        self.active_sims.insert(endpoint, simulation);
     }
 
     /// Stops the simulation on the given device.
-    pub fn stop(&mut self, device: Device) {
+    pub fn stop(&mut self, device: IpAddr) {
         // This will drop the simulation, which will kill the process.
         self.active_sims.remove(&device);
     }
@@ -52,29 +58,28 @@ impl Simulator {
 
 /// An active simulation.
 struct Simulation {
-    device: Device,
+    endpoint: IpAddr,
     config: SimConfig,
 }
 
 impl Simulation {
     /// Starts the simulation.
-    fn start(&mut self) {
-        // TODO: start the simulation by executing the right command
-        #[cfg(target_os = "linux")]
-        {}
+    #[cfg(target_os = "linux")]
+    fn start(&mut self) {}
 
-        #[cfg(target_os = "macos")]
-        {}
-    }
+    #[cfg(target_os = "macos")]
+    fn start(&mut self) {}
 }
 
 impl Drop for Simulation {
-    fn drop(&mut self) {
-        // TODO: kill the simulation by executing the right command
-        #[cfg(target_os = "linux")]
-        {}
+    #[cfg(target_os = "linux")]
+    fn drop(&mut self) {}
 
-        #[cfg(target_os = "macos")]
-        {}
-    }
+    #[cfg(target_os = "macos")]
+    fn drop(&mut self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 }
