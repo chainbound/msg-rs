@@ -41,12 +41,7 @@ impl Simulator {
     pub fn start(&mut self, endpoint: IpAddr, config: SimulationConfig) -> io::Result<usize> {
         let id = self.sim_id;
 
-        let mut simulation = Simulation {
-            endpoint,
-            config,
-            id,
-            active_pf: None,
-        };
+        let mut simulation = Simulation::new(id, endpoint, config);
 
         simulation.start()?;
 
@@ -75,9 +70,21 @@ struct Simulation {
 }
 
 impl Simulation {
+    fn new(id: usize, endpoint: IpAddr, config: SimulationConfig) -> Self {
+        Self {
+            id,
+            endpoint,
+            config,
+            #[cfg(target_os = "macos")]
+            active_pf: None,
+        }
+    }
+
     /// Starts the simulation.
     #[cfg(target_os = "linux")]
-    fn start(&mut self) {}
+    fn start(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 
     #[cfg(target_os = "macos")]
     fn start(&mut self) -> io::Result<()> {
