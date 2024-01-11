@@ -13,7 +13,7 @@ pub struct Pipe {
     /// Optional bandwidth cap in Kbps.
     pub bandwidth: Option<u64>,
     /// Optional propagation delay in ms.
-    pub delay: Option<u64>,
+    pub delay: Option<u128>,
     /// Optional packet loss rate in percent.
     pub plr: Option<f64>,
 }
@@ -36,7 +36,7 @@ impl Pipe {
     }
 
     /// Set the propagation delay of the pipe in ms.
-    pub fn delay(mut self, delay: u64) -> Self {
+    pub fn delay(mut self, delay: u128) -> Self {
         self.delay = Some(delay);
         self
     }
