@@ -10,6 +10,7 @@ pub mod dummynet;
 use dummynet::{PacketFilter, Pipe};
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct SimulationConfig {
     /// The latency of the connection.
     latency: Option<Duration>,
@@ -60,6 +61,7 @@ impl Simulator {
 }
 
 /// An active simulation.
+#[allow(unused)]
 struct Simulation {
     id: usize,
     endpoint: IpAddr,
