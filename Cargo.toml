@@ -52,6 +52,9 @@ flate2 = "1"
 zstd = "0.13"
 snap = "1"
 
+# simulation
+pnet = "0.34"
+
 [profile.dev]
 opt-level = 1
 overflow-checks = false
