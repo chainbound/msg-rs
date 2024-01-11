@@ -7,16 +7,18 @@ members = [
     "msg-common",
     "msg-sim",
 ]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.1"
 edition = "2021"
 rust-version = "1.70"                                                                # Remember to update .clippy.toml and README.md
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "A flexible and lightweight messaging library for distributed systems"
 authors = ["Jonas Bostoen", "Nicolas Racchi"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
+keywords = ["messaging", "distributed", "systems", "networking", "quic", "quinn", "tokio", "async", "simulation", "pnet", "udp", "tcp", "socket"]
 
 [workspace.dependencies]
 msg-wire = { path = "./msg-wire" }
@@ -32,25 +34,27 @@ tokio-util = { version = "0.7", features = ["codec"] }
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 parking_lot = "0.12"
-criterion = { version = "0.5", features = ["async_tokio"] }
-pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 
+
+# general
 bytes = "1"
 thiserror = "1"
 tracing = "0.1"
+rustc-hash = "1"
 rand = "0.8"
 
-# transport
+# NETWORKING
 quinn = "0.10"
 # rustls needs to be the same version as the one used by quinn
 rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
 rcgen = "0.12"
-
-# performance
-rustc-hash = "1"
 flate2 = "1"
 zstd = "0.13"
 snap = "1"
+
+# benchmarking & profiling
+criterion = { version = "0.5", features = ["async_tokio"] }
+pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 
 # simulation
 pnet = "0.34"
