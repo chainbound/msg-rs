@@ -1,29 +1,23 @@
-use std::{collections::HashMap, net::IpAddr, time::Duration};
+use std::{collections::HashMap, io, net::IpAddr, time::Duration};
 
 use protocol::Protocol;
 
-mod cmd;
 mod protocol;
 
 #[cfg(target_os = "macos")]
-mod dummynet;
-
-const KIB: u64 = 1024;
-const MIB: u64 = 1024 * KIB;
-const GIB: u64 = 1024 * MIB;
-
-/// A type alias for a network device.
-pub struct Endpoint {
-    device: String,
-}
+pub mod dummynet;
+#[cfg(target_os = "macos")]
+use dummynet::{PacketFilter, Pipe};
 
 #[derive(Debug)]
-pub struct SimConfig {
-    latency: Duration,
-    target_bw: u64,
-    default_bw: u64,
+pub struct SimulationConfig {
+    /// The latency of the connection.
+    latency: Option<Duration>,
+    /// The bandwidth in Kbps.
+    bw: Option<u64>,
     /// The packet loss rate in percent.
-    packet_loss_rate: f64,
+    plr: Option<f64>,
+    /// The supported protocols.
     protocols: Vec<Protocol>,
 }
 
@@ -31,22 +25,36 @@ pub struct SimConfig {
 pub struct Simulator {
     /// A map of active simulations.
     active_sims: HashMap<IpAddr, Simulation>,
+    /// Simulation ID counter.
+    sim_id: usize,
 }
 
 impl Simulator {
     pub fn new() -> Self {
         Self {
             active_sims: HashMap::new(),
+            sim_id: 0,
         }
     }
 
-    /// Starts a new simulation on the given device according to the config.
-    pub fn start(&mut self, endpoint: IpAddr, config: SimConfig) {
-        let mut simulation = Simulation { endpoint, config };
+    /// Starts a new simulation on the given endpoint according to the config.
+    pub fn start(&mut self, endpoint: IpAddr, config: SimulationConfig) -> io::Result<usize> {
+        let id = self.sim_id;
 
-        simulation.start();
+        let mut simulation = Simulation {
+            endpoint,
+            config,
+            id,
+            active_pf: None,
+        };
+
+        simulation.start()?;
+
+        self.sim_id += 1;
 
         self.active_sims.insert(endpoint, simulation);
+
+        Ok(id)
     }
 
     /// Stops the simulation on the given device.
@@ -58,8 +66,12 @@ impl Simulator {
 
 /// An active simulation.
 struct Simulation {
+    id: usize,
     endpoint: IpAddr,
-    config: SimConfig,
+    config: SimulationConfig,
+
+    #[cfg(target_os = "macos")]
+    active_pf: Option<PacketFilter>,
 }
 
 impl Simulation {
@@ -68,7 +80,37 @@ impl Simulation {
     fn start(&mut self) {}
 
     #[cfg(target_os = "macos")]
-    fn start(&mut self) {}
+    fn start(&mut self) -> io::Result<()> {
+        // Create a dummynet pipe
+        let mut pipe = Pipe::new(self.id);
+
+        // Configure the pipe according to the simulation config.
+        if let Some(latency) = self.config.latency {
+            pipe = pipe.delay(latency.as_millis());
+        }
+
+        if let Some(bw) = self.config.bw {
+            pipe = pipe.bandwidth(bw);
+        }
+
+        if let Some(plr) = self.config.plr {
+            pipe = pipe.plr(plr);
+        }
+
+        let mut pf = PacketFilter::new(pipe)
+            .anchor(format!("msg-sim-{}", self.id))
+            .endpoint(self.endpoint);
+
+        if !self.config.protocols.is_empty() {
+            pf = pf.protocols(self.config.protocols.clone());
+        }
+
+        pf.enable()?;
+
+        self.active_pf = Some(pf);
+
+        Ok(())
+    }
 }
 
 impl Drop for Simulation {
@@ -76,10 +118,9 @@ impl Drop for Simulation {
     fn drop(&mut self) {}
 
     #[cfg(target_os = "macos")]
-    fn drop(&mut self) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
+    fn drop(&mut self) {
+        if let Some(pf) = self.active_pf.take() {
+            pf.destroy().unwrap();
+        }
+    }
 }
