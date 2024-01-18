@@ -180,7 +180,7 @@ MSG-RS supports message compression out of the box, and it is very easy to use.<
 It can also help reduce the amount of bandwidth used by your application.</p>
 <p>In MSG, compression is handled by the socket type.</p>
 <p>Here is an example of setting up a pub/sub socket with compression:</p>
-<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp, TcpOptions};
+<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -190,9 +190,7 @@ async fn main() {
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(Tcp::new_with_options(
-        TcpOptions::default().with_blocking_connect(),
-    ));
+    let mut sub1 = SubSocket::new(Tcp::default());
 
     // ...
 }</code></pre></pre>

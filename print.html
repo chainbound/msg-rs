@@ -262,11 +262,11 @@ use msg::{RepSocket, ReqSocket, Tcp};
 #[tokio::main]
 async fn main() {
     // Initialize the reply socket (server side) with a transport
-    let mut rep = RepSocket::new(Tcp::new());
+    let mut rep = RepSocket::new(Tcp::default());
     rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     // Initialize the request socket (client side) with a transport
-    let mut req = ReqSocket::new(Tcp::new());
+    let mut req = ReqSocket::new(Tcp::default());
     req.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     tokio::spawn(async move {
@@ -295,11 +295,11 @@ use msg::{PubSocket, SubSocket, Tcp};
 #[tokio::main]
 async fn main() {
     // Initialize the publisher socket (server side) with a transport
-    let mut pub_socket = PubSocket::new(Tcp::new());
+    let mut pub_socket = PubSocket::new(Tcp::default());
     pub_socket.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     // Initialize the subscriber socket (client side) with a transport
-    let mut sub_socket = SubSocket::new(Tcp::new());
+    let mut sub_socket = SubSocket::new(Tcp::default());
     sub_socket.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     let topic = &quot;some_interesting_topic&quot;.to_string();
@@ -324,6 +324,7 @@ handles the actual sending and receiving of messages. The following transport
 layers are supported:</p>
 <ul>
 <li><a href="usage/transport-layers.html#tcp">TCP</a></li>
+<li><a href="usage/transport-layers.html#quic">QUIC</a></li>
 </ul>
 <!--
 - [IPC](#ipc)
@@ -347,12 +348,40 @@ be lost or corrupted.</p>
 
 #[tokio::main]
 async fn main() {
-    // Initialize the reply socket (server side) with TCP
-    let mut rep = RepSocket::new(Tcp::new());
+    // Initialize the reply socket (server side) with default TCP
+    let mut rep = RepSocket::new(Tcp::default());
     rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
-    // Initialize the request socket (client side) with TCP
-    let mut req = ReqSocket::new(Tcp::new());
+    // Initialize the request socket (client side) with default TCP
+    let mut req = ReqSocket::new(Tcp::default());
+    req.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
+
+    // ...
+}</code></pre></pre>
+<h2 id="quic"><a class="header" href="#quic">QUIC</a></h2>
+<h3 id="why-choose-quic"><a class="header" href="#why-choose-quic">Why choose QUIC?</a></h3>
+<p>QUIC is a new transport layer protocol that is built on top of UDP. It is designed to provide the same
+reliability &amp; security guarantees as TCP + TLS, while solving some of the issues that it has, like</p>
+<ul>
+<li><strong>Head-of-line blocking</strong>: If a packet is lost, all subsequent packets are held up until the lost packet is retransmitted. This can be a problem especially when multiplexing multiple streams over a single connection because it can cause a single slow stream to block all other streams.</li>
+<li><strong>Slow connection setup</strong>: TCP + TLS requires 2-3 round trips to establish a connection, which can be slow on high latency networks.</li>
+<li><strong>No support for multiplexing</strong>: TCP does not support multiplexing multiple streams over a single connection. This means that if you want to send multiple streams of data over a single connection, you have to implement your own multiplexing layer on top of TCP, which can run into issues like head-of-line blocking that we've seen above.</li>
+</ul>
+<h3 id="quic-in-msg"><a class="header" href="#quic-in-msg">QUIC in MSG</a></h3>
+<p>The MSG QUIC implementation is based on <a href="https://github.com/quinn-rs/quinn">quinn</a>. It relies on self-signed certificates and does not verify
+server certificates. Also, due to how our <code>Transport</code> abstraction works, we don't support QUIC connections with multiple streams. This means that the <code>Quic</code> transport implementation will do all its work over a single, bi-directional stream for now.</p>
+<h3 id="how-to-use-quic"><a class="header" href="#how-to-use-quic">How to use QUIC</a></h3>
+<p>In MSG, here is how you can setup any socket type with the QUIC transport:</p>
+<pre><pre class="playground"><code class="language-rust">use msg::{RepSocket, ReqSocket, Quic};
+
+#[tokio::main]
+async fn main() {
+    // Initialize the reply socket (server side) with default QUIC
+    let mut rep = RepSocket::new(Quic::default());
+    rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
+
+    // Initialize the request socket (client side) with default QUIC
+    let mut req = ReqSocket::new(Quic::default());
     req.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     // ...
@@ -379,7 +408,12 @@ is established. The <code>id</code> parameter is the identity of the connecting 
 <p><strong>Note: the Authenticator is used by the server-side socket only!</strong></p>
 <p>Here is an example of how you can add an authenticator to a
 client-server application:</p>
-<pre><pre class="playground"><code class="language-rust">// Define some custom authentication logic
+<pre><pre class="playground"><code class="language-rust">use msg::{
+    tcp::{self, Tcp},
+    Authenticator, ReqSocket, RepSocket,
+};
+
+// Define some custom authentication logic
 #[derive(Default)]
 struct Auth;
 
@@ -396,16 +430,20 @@ impl Authenticator for Auth {
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator that we just implemented:
-    let mut rep = RepSocket::new(Tcp::new()).with_auth(Auth);
+    let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
     rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
     // The identifier will be sent to the server when the connection is established.
     let mut req = ReqSocket::with_options(
-        Tcp::new(),
+        Tcp::default(),
         ReqOptions::default().auth_token(Bytes::from(&quot;client1&quot;)),
     );
+
+    // The auth token needs to be set on the transport layer for now.
+    let tcp_config = tcp::Config::default().auth_token(Bytes::from(&quot;client1&quot;));
+    let mut req = ReqSocket::new(Tcp::new(tcp_config));
 }</code></pre></pre>
 <!-- External -->
 <!-- MSG links -->
@@ -417,7 +455,7 @@ MSG-RS supports message compression out of the box, and it is very easy to use.<
 It can also help reduce the amount of bandwidth used by your application.</p>
 <p>In MSG, compression is handled by the socket type.</p>
 <p>Here is an example of setting up a pub/sub socket with compression:</p>
-<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp, TcpOptions};
+<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -427,9 +465,7 @@ async fn main() {
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(Tcp::new_with_options(
-        TcpOptions::default().with_blocking_connect(),
-    ));
+    let mut sub1 = SubSocket::new(Tcp::default());
 
     // ...
 }</code></pre></pre>
@@ -452,7 +488,7 @@ If you need this, please <a href="https://github.com/chainbound/msg-rs/issues/ne
 <!-- MSG links -->
 <!-- Chainbound links -->
 <div style="break-before: page; page-break-before: always;"></div><h1 id="encryption"><a class="header" href="#encryption">Encryption</a></h1>
-<p>Encryption over messages is not yet supported in MSG-RS.</p>
+<p>Encryption over messages is not yet supported in MSG-RS unless you're using a transport layer that supports it (like QUIC).</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="logging"><a class="header" href="#logging">Logging</a></h1>
 <p>MSG-RS uses the <a href="https://docs.rs/tracing/latest/tracing/">tracing</a> ecosystem crate for logging.</p>
 <p>The tracing targets are configured using the <a href="https://docs.rs/tracing-subscriber/latest/tracing_subscriber/">tracing-subscriber</a> crate.
