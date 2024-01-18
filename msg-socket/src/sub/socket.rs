@@ -9,14 +9,14 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinSet};
 
-use msg_transport::ClientTransport;
+use msg_transport::Transport;
 
 use super::{
     Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
     DEFAULT_BUFFER_SIZE,
 };
 
-pub struct SubSocket<T: ClientTransport> {
+pub struct SubSocket<T: Transport> {
     /// Command channel to the socket driver.
     to_driver: mpsc::Sender<Command>,
     /// Receiver channel from the socket driver.
@@ -33,8 +33,9 @@ pub struct SubSocket<T: ClientTransport> {
 
 impl<T> SubSocket<T>
 where
-    T: ClientTransport + Send + Sync + 'static,
+    T: Transport + Send + Sync + Unpin + 'static,
 {
+    #[allow(clippy::new_without_default)]
     pub fn new(transport: T) -> Self {
         Self::with_options(transport, SubOptions::default())
     }
@@ -52,7 +53,7 @@ where
 
         let driver = SubDriver {
             options: Arc::clone(&options),
-            transport: Arc::new(transport),
+            transport,
             from_socket,
             to_socket,
             connection_tasks: JoinSet::new(),
@@ -72,9 +73,8 @@ where
     }
 
     /// Asynchronously connects to the endpoint.
-    pub async fn connect(&mut self, endpoint: &str) -> Result<(), SubError> {
+    pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().unwrap();
 
         self.send_command(Command::Connect { endpoint }).await?;
 
@@ -180,14 +180,14 @@ where
     }
 }
 
-impl<T: ClientTransport> Drop for SubSocket<T> {
+impl<T: Transport> Drop for SubSocket<T> {
     fn drop(&mut self) {
         // Try to tell the driver to gracefully shut down.
         let _ = self.to_driver.try_send(Command::Shutdown);
     }
 }
 
-impl<T: ClientTransport + Unpin> Stream for SubSocket<T> {
+impl<T: Transport + Unpin> Stream for SubSocket<T> {
     type Item = PubMessage;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

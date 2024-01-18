@@ -10,7 +10,7 @@ use pprof::criterion::Output;
 use rand::Rng;
 
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
-use msg_transport::Tcp;
+use msg_transport::tcp::{self, Tcp};
 use tokio::runtime::Runtime;
 
 const N_REQS: usize = 10_000;
@@ -36,12 +36,9 @@ impl PairBenchmark {
         let mut rep = self.rep.take().unwrap();
         // setup the socket connections
         self.rt.block_on(async {
-            rep.bind("127.0.0.1:0").await.unwrap();
+            rep.bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
 
-            self.req
-                .connect(&rep.local_addr().unwrap().to_string())
-                .await
-                .unwrap();
+            self.req.connect(rep.local_addr().unwrap()).await.unwrap();
 
             tokio::spawn(async move {
                 rep.map(|req| async move {
@@ -122,11 +119,11 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
         .unwrap();
 
     let req = ReqSocket::with_options(
-        Tcp::new(),
+        Tcp::new(tcp::Config::default().blocking_connect(true)),
         ReqOptions::default().flush_interval(Duration::from_micros(50)),
     );
 
-    let rep = RepSocket::new(Tcp::new());
+    let rep = RepSocket::new(Tcp::default());
 
     let mut bench = PairBenchmark {
         rt,
@@ -156,11 +153,11 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
         .unwrap();
 
     let req = ReqSocket::with_options(
-        Tcp::new(),
+        Tcp::default(),
         ReqOptions::default().flush_interval(Duration::from_micros(50)),
     );
 
-    let rep = RepSocket::new(Tcp::new());
+    let rep = RepSocket::new(Tcp::default());
 
     let mut bench = PairBenchmark {
         rt,

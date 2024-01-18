@@ -5,6 +5,7 @@ handles the actual sending and receiving of messages. The following transport
 layers are supported:
 
 - [TCP](#tcp)
+- [QUIC](#quic)
 <!--
 - [IPC](#ipc)
 - [Inproc](#inproc)
@@ -35,12 +36,49 @@ use msg::{RepSocket, ReqSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
-    // Initialize the reply socket (server side) with TCP
-    let mut rep = RepSocket::new(Tcp::new());
+    // Initialize the reply socket (server side) with default TCP
+    let mut rep = RepSocket::new(Tcp::default());
     rep.bind("0.0.0.0:4444").await.unwrap();
 
-    // Initialize the request socket (client side) with TCP
-    let mut req = ReqSocket::new(Tcp::new());
+    // Initialize the request socket (client side) with default TCP
+    let mut req = ReqSocket::new(Tcp::default());
+    req.connect("0.0.0.0:4444").await.unwrap();
+
+    // ...
+}
+```
+
+## QUIC
+
+### Why choose QUIC?
+
+QUIC is a new transport layer protocol that is built on top of UDP. It is designed to provide the same
+reliability & security guarantees as TCP + TLS, while solving some of the issues that it has, like
+
+- **Head-of-line blocking**: If a packet is lost, all subsequent packets are held up until the lost packet is retransmitted. This can be a problem especially when multiplexing multiple streams over a single connection because it can cause a single slow stream to block all other streams.
+- **Slow connection setup**: TCP + TLS requires 2-3 round trips to establish a connection, which can be slow on high latency networks.
+- **No support for multiplexing**: TCP does not support multiplexing multiple streams over a single connection. This means that if you want to send multiple streams of data over a single connection, you have to implement your own multiplexing layer on top of TCP, which can run into issues like head-of-line blocking that we've seen above.
+
+### QUIC in MSG
+
+The MSG QUIC implementation is based on [quinn](https://github.com/quinn-rs/quinn). It relies on self-signed certificates and does not verify
+server certificates. Also, due to how our `Transport` abstraction works, we don't support QUIC connections with multiple streams. This means that the `Quic` transport implementation will do all its work over a single, bi-directional stream for now.
+
+### How to use QUIC
+
+In MSG, here is how you can setup any socket type with the QUIC transport:
+
+```rust
+use msg::{RepSocket, ReqSocket, Quic};
+
+#[tokio::main]
+async fn main() {
+    // Initialize the reply socket (server side) with default QUIC
+    let mut rep = RepSocket::new(Quic::default());
+    rep.bind("0.0.0.0:4444").await.unwrap();
+
+    // Initialize the request socket (client side) with default QUIC
+    let mut req = ReqSocket::new(Quic::default());
     req.connect("0.0.0.0:4444").await.unwrap();
 
     // ...

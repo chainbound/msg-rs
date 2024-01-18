@@ -11,7 +11,7 @@ In MSG, compression is handled by the socket type.
 Here is an example of setting up a pub/sub socket with compression:
 
 ```rust
-use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp, TcpOptions};
+use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -21,9 +21,7 @@ async fn main() {
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(Tcp::new_with_options(
-        TcpOptions::default().with_blocking_connect(),
-    ));
+    let mut sub1 = SubSocket::new(Tcp::default());
 
     // ...
 }

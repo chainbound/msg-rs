@@ -1,191 +1,96 @@
 use bytes::Bytes;
-use durable::{DurableSession, Layer, PendingIo};
-use futures::{SinkExt, StreamExt};
-use msg_wire::auth;
+use futures::{Future, FutureExt};
 use std::{
     net::SocketAddr,
+    pin::Pin,
     task::{Context, Poll},
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::{TcpSocket, TcpStream},
-};
-use tokio_util::codec::Framed;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod durable;
+pub mod quic;
+pub mod tcp;
 
+/// A transport provides connection-oriented communication between two peers through
+/// ordered and reliable streams of bytes.
+///
+/// It provides an interface to manage both inbound and outbound connections.
 #[async_trait::async_trait]
-pub trait ClientTransport {
-    type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
-    type Error: std::error::Error + Send + Sync + 'static;
+pub trait Transport {
+    /// The result of a successful connection.
+    ///
+    /// The output type is transport-specific, and can be a handle to directly write to the
+    /// connection, or it can be a substream multiplexer in the case of stream protocols.
+    type Io: AsyncRead + AsyncWrite + PeerAddress + Send + Unpin;
 
-    // TODO: we can improve upon this interface
-    async fn connect_with_auth(
-        &self,
-        addr: SocketAddr,
-        auth: Option<Bytes>,
-    ) -> Result<Self::Io, Self::Error>;
+    /// An error that occurred when setting up the connection.
+    type Error: std::error::Error + Send + Sync;
+
+    /// A pending [`Transport::Output`] for an outbound connection,
+    /// obtained when calling [`Transport::connect`].
+    type Connect: Future<Output = Result<Self::Io, Self::Error>> + Send;
+
+    /// A pending [`Transport::Output`] for an inbound connection,
+    /// obtained when calling [`Transport::poll_accept`].
+    type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
+
+    /// Returns the local address this transport is bound to (if it is bound).
+    fn local_addr(&self) -> Option<SocketAddr>;
+
+    /// Binds to the given address.
+    async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error>;
+
+    /// Connects to the given address, returning a future representing a pending outbound connection.
+    fn connect(&mut self, addr: SocketAddr) -> Self::Connect;
+
+    /// Poll for incoming connections. If an inbound connection is received, a future representing
+    /// a pending inbound connection is returned. The future will resolve to [`Transport::Output`].
+    fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept>;
 }
 
-#[async_trait::async_trait]
-pub trait ServerTransport: Unpin + Send + Sync + 'static {
-    type Io: AsyncRead + AsyncWrite + Unpin + Send + 'static;
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    fn local_addr(&self) -> Result<SocketAddr, Self::Error>;
-
-    async fn bind(&mut self, addr: &str) -> Result<(), Self::Error>;
-    async fn accept(&self) -> Result<(Self::Io, SocketAddr), Self::Error>;
-
-    #[allow(clippy::type_complexity)]
-    fn poll_accept(
-        &self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>>;
-}
-
-#[derive(Debug, Default)]
-pub struct TcpOptions {
-    pub blocking_connect: bool,
-}
-
-impl TcpOptions {
-    pub fn with_blocking_connect(mut self) -> Self {
-        self.blocking_connect = true;
-        self
+pub trait TransportExt: Transport {
+    /// Async-friendly interface for accepting inbound connections.
+    fn accept(&mut self) -> Acceptor<'_, Self>
+    where
+        Self: Sized + Unpin,
+    {
+        Acceptor::new(self)
     }
 }
 
-pub struct TcpConnectOptions {
-    pub set_nodelay: bool,
-    pub auth: Option<Bytes>,
+pub struct Acceptor<'a, T> {
+    inner: &'a mut T,
 }
 
-impl Default for TcpConnectOptions {
-    fn default() -> Self {
-        Self {
-            set_nodelay: true,
-            auth: None,
+impl<'a, T> Acceptor<'a, T> {
+    fn new(inner: &'a mut T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<'a, T> Future for Acceptor<'a, T>
+where
+    T: Transport + Unpin,
+{
+    type Output = Result<T::Io, T::Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match Pin::new(&mut *self.get_mut().inner).poll_accept(cx) {
+            Poll::Ready(mut accept) => match accept.poll_unpin(cx) {
+                Poll::Ready(Ok(output)) => Poll::Ready(Ok(output)),
+                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+                Poll::Pending => Poll::Pending,
+            },
+            Poll::Pending => Poll::Pending,
         }
     }
 }
 
-impl TcpConnectOptions {
-    pub fn with_auth(mut self, auth: Bytes) -> Self {
-        self.auth = Some(auth);
-        self
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct Tcp {
-    listener: Option<tokio::net::TcpListener>,
-    options: TcpOptions,
-}
-
-impl Tcp {
-    pub fn new() -> Self {
-        Self::new_with_options(TcpOptions::default())
-    }
-
-    pub fn new_with_options(options: TcpOptions) -> Self {
-        Self {
-            listener: None,
-            options,
-        }
-    }
+/// Trait for connection types that can return their peer address.
+pub trait PeerAddress {
+    fn peer_addr(&self) -> Result<SocketAddr, std::io::Error>;
 }
 
 pub struct AuthLayer {
     id: Bytes,
-}
-
-impl Layer<TcpStream> for AuthLayer {
-    fn process(&mut self, io: TcpStream) -> PendingIo<TcpStream> {
-        let id = self.id.clone();
-        Box::pin(async move {
-            let mut conn = Framed::new(io, auth::Codec::new_client());
-
-            tracing::debug!("Sending auth message: {:?}", id);
-            // Send the authentication message
-            conn.send(auth::Message::Auth(id)).await?;
-            conn.flush().await?;
-
-            tracing::debug!("Waiting for ACK from server...");
-
-            // Wait for the response
-            let ack = conn
-                .next()
-                .await
-                .ok_or(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "Connection closed",
-                ))?
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
-
-            if matches!(ack, auth::Message::Ack) {
-                Ok(conn.into_inner())
-            } else {
-                Err(std::io::ErrorKind::PermissionDenied.into())
-            }
-        })
-    }
-}
-
-#[async_trait::async_trait]
-impl ClientTransport for Tcp {
-    type Io = DurableSession<TcpStream>;
-    type Error = std::io::Error;
-
-    async fn connect_with_auth(
-        &self,
-        addr: SocketAddr,
-        auth: Option<Bytes>,
-    ) -> Result<Self::Io, Self::Error> {
-        let mut session = if let Some(ref id) = auth {
-            let layer = AuthLayer { id: id.clone() };
-
-            Self::Io::new(addr).with_layer(layer)
-        } else {
-            Self::Io::new(addr)
-        };
-
-        if self.options.blocking_connect {
-            session.blocking_connect().await?;
-        } else {
-            session.connect().await;
-        }
-        Ok(session)
-    }
-}
-
-#[async_trait::async_trait]
-impl ServerTransport for Tcp {
-    type Io = TcpStream;
-    type Error = std::io::Error;
-
-    async fn bind(&mut self, addr: &str) -> Result<(), Self::Error> {
-        let socket = TcpSocket::new_v4()?;
-        socket.set_nodelay(true)?;
-        socket.bind(addr.parse().unwrap())?;
-
-        let listener = socket.listen(128)?;
-        self.listener = Some(listener);
-        Ok(())
-    }
-
-    async fn accept(&self) -> Result<(Self::Io, SocketAddr), Self::Error> {
-        self.listener.as_ref().unwrap().accept().await
-    }
-
-    fn local_addr(&self) -> Result<SocketAddr, Self::Error> {
-        self.listener.as_ref().unwrap().local_addr()
-    }
-
-    fn poll_accept(
-        &self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(Self::Io, SocketAddr), Self::Error>> {
-        self.listener.as_ref().unwrap().poll_accept(cx)
-    }
 }
