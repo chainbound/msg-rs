@@ -1,5 +1,6 @@
 [workspace]
 members = ["msg", "msg-socket", "msg-wire", "msg-transport", "msg-common"]
+resolver = "2"
 
 [workspace.package]
 version = "0.1.1"
