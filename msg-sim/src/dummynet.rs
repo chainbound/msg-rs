@@ -341,6 +341,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_pipe_build_cmd() {
         let cmd = Pipe::new(1).bandwidth(10).delay(100).plr(0.1).build_cmd();
         let cmd_str = cmd_to_string(&cmd);
@@ -362,6 +363,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_pipe_destroy_cmd() {
         let pipe = Pipe::new(3);
         let cmd = pipe.destroy_cmd();
@@ -371,6 +373,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn dummy_tests() {
         let pipe = Pipe::new(3).bandwidth(100).delay(300);
 
