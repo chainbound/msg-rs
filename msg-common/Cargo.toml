@@ -14,3 +14,4 @@ repository.workspace = true
 
 [dependencies]
 futures.workspace = true
+tokio.workspace = true

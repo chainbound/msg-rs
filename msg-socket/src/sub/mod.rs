@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use thiserror::Error;
 
 mod driver;
+mod session;
 mod socket;
 mod stats;
 mod stream;
