@@ -114,7 +114,7 @@ where
             addr,
             PublisherState::Inactive {
                 addr,
-                backoff: ExponentialBackoff::new(Duration::from_millis(10), 256),
+                backoff: ExponentialBackoff::new(Duration::from_millis(10), 16),
             },
         );
     }

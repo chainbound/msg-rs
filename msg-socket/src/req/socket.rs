@@ -71,7 +71,7 @@ where
 
         tracing::info!("Connecting to {}", endpoint);
 
-        let mut backoff = ExponentialBackoff::new(Duration::from_millis(20), 256);
+        let mut backoff = ExponentialBackoff::new(Duration::from_millis(20), 16);
 
         let mut stream = loop {
             if let Some(duration) = backoff.next().await {
