@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use futures::{Future, FutureExt};
 use std::{
     net::SocketAddr,
@@ -7,7 +6,6 @@ use std::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub mod durable;
 pub mod quic;
 pub mod tcp;
 
@@ -24,7 +22,7 @@ pub trait Transport {
     type Io: AsyncRead + AsyncWrite + PeerAddress + Send + Unpin;
 
     /// An error that occurred when setting up the connection.
-    type Error: std::error::Error + Send + Sync;
+    type Error: std::error::Error + From<std::io::Error> + Send + Sync;
 
     /// A pending [`Transport::Output`] for an outbound connection,
     /// obtained when calling [`Transport::connect`].
@@ -89,8 +87,4 @@ where
 /// Trait for connection types that can return their peer address.
 pub trait PeerAddress {
     fn peer_addr(&self) -> Result<SocketAddr, std::io::Error>;
-}
-
-pub struct AuthLayer {
-    id: Bytes,
 }

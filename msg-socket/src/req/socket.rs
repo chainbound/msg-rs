@@ -1,15 +1,18 @@
 use bytes::Bytes;
+use futures::SinkExt;
 use rustc_hash::FxHashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{mpsc, oneshot};
+use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
 use msg_transport::Transport;
-use msg_wire::reqrep;
+use msg_wire::{auth, reqrep};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
+use crate::backoff::ExponentialBackoff;
 use crate::{req::stats::SocketStats, req::SocketState};
 
 #[derive(Debug)]
@@ -61,18 +64,39 @@ where
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
-    /// Connects to the target with the default options.
+    /// Connects to the target with the default options. WARN: this will block until the connection can be established.
     pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         tracing::info!("Connecting to {}", endpoint);
 
-        let stream = self
-            .transport
-            .connect(endpoint)
-            .await
-            .map_err(|e| ReqError::Transport(Box::new(e)))?;
+        let mut backoff = ExponentialBackoff::new(Duration::from_millis(20), 16);
+
+        let mut stream = loop {
+            if let Some(duration) = backoff.next().await {
+                match self
+                    .transport
+                    .connect(endpoint)
+                    .await
+                    .map_err(|e| ReqError::Transport(Box::new(e)))
+                {
+                    Ok(stream) => break stream,
+                    Err(e) => {
+                        tracing::warn!(backoff = ?duration, "Failed to connect to {}: {}, retrying...", endpoint, e);
+                    }
+                }
+            } else {
+                return Err(ReqError::Transport(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Connection timed out",
+                ))));
+            }
+        };
+
+        if let Some(token) = self.options.auth_token.clone() {
+            self.authenticate_stream(&mut stream, token).await?;
+        }
 
         let mut framed = Framed::new(stream, reqrep::Codec::new());
         framed.set_backpressure_boundary(self.options.backpressure_boundary);
@@ -102,114 +126,35 @@ where
 
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bytes::Bytes;
-    use msg_transport::tcp::Tcp;
-    use std::net::SocketAddr;
-    use std::time::Duration;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-    use tracing::Instrument;
+    async fn authenticate_stream(&self, io: &mut T::Io, token: Bytes) -> Result<(), ReqError> {
+        let mut conn = Framed::new(io, auth::Codec::new_client());
 
-    async fn spawn_listener(sleep_duration: Duration) -> SocketAddr {
-        let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+        tracing::debug!("Sending auth message: {:?}", token);
+        // Send the authentication message
+        conn.send(auth::Message::Auth(token)).await?;
+        conn.flush().await?;
 
-        let addr = listener.local_addr().unwrap();
+        tracing::debug!("Waiting for ACK from server...");
 
-        tokio::spawn(
-            async move {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                tracing::info!("Accepted connection");
+        // Wait for the response
+        let ack = conn
+            .next()
+            .await
+            .ok_or(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed",
+            ))?
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
 
-                let mut buf = [0u8; 1024];
-                let b = socket.read(&mut buf).await.unwrap();
-                let read = &buf[..b];
-
-                tokio::time::sleep(sleep_duration).await;
-
-                socket.write_all(read).await.unwrap();
-                tracing::info!("Sent bytes: {:?}", read);
-
-                socket.flush().await.unwrap();
-            }
-            .instrument(tracing::info_span!("listener")),
-        );
-
-        addr
-    }
-
-    #[tokio::test]
-    async fn test_req_socket_happy_path() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let addr = spawn_listener(Duration::from_secs(0)).await;
-
-        let mut socket = ReqSocket::with_options(
-            Tcp::default(),
-            ReqOptions {
-                timeout: Duration::from_secs(1),
-                blocking_connect: true,
-                backoff_duration: Duration::from_secs(1),
-                flush_interval: None,
-                backpressure_boundary: 8192,
-                retry_attempts: Some(3),
-            },
-        );
-
-        let connect_result = socket.connect(addr).await;
-        assert!(
-            connect_result.is_ok(),
-            "Failed to connect: {:?}",
-            connect_result.err()
-        );
-
-        let request = Bytes::from_static(b"test request");
-        let response = socket.request(request.clone()).await;
-
-        assert!(response.is_ok(), "Request failed: {:?}", response.err());
-        assert_eq!(
-            response.unwrap(),
-            request,
-            "Response does not match request"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_req_socket_timeout() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let addr = spawn_listener(Duration::from_secs(3)).await;
-
-        let mut socket = ReqSocket::with_options(
-            Tcp::default(),
-            ReqOptions {
-                timeout: Duration::from_secs(1),
-                blocking_connect: true,
-                backoff_duration: Duration::from_millis(200),
-                backpressure_boundary: 8192,
-                flush_interval: None,
-                retry_attempts: None,
-            },
-        );
-
-        let connect_result = socket.connect(addr).await;
-        assert!(
-            connect_result.is_ok(),
-            "Failed to connect: {:?}",
-            connect_result.err()
-        );
-
-        let request = Bytes::from_static(b"test request");
-        let response = socket.request(request.clone()).await;
-
-        assert!(
-            response.is_err(),
-            "Request succeeded when it should have timed out: {:?}",
-            response.ok()
-        );
+        if matches!(ack, auth::Message::Ack) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Publisher denied connection",
+            )
+            .into())
+        }
     }
 }

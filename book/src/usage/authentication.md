@@ -58,9 +58,7 @@ async fn main() {
         ReqOptions::default().auth_token(Bytes::from("client1")),
     );
 
-    // The auth token needs to be set on the transport layer for now.
-    let tcp_config = tcp::Config::default().auth_token(Bytes::from("client1"));
-    let mut req = ReqSocket::new(Tcp::new(tcp_config));
+    ...
 }
 ```
 

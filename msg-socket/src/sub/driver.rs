@@ -1,4 +1,4 @@
-use futures::Future;
+use futures::{Future, SinkExt, Stream, StreamExt};
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -6,10 +6,13 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
+
+use crate::backoff::ExponentialBackoff;
 
 use super::session::SessionCommand;
 use super::{
@@ -20,7 +23,7 @@ use super::{
 
 use msg_common::{channel, Channel};
 use msg_transport::Transport;
-use msg_wire::pubsub;
+use msg_wire::{auth, pubsub};
 
 type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
@@ -38,9 +41,26 @@ pub(crate) struct SubDriver<T: Transport> {
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All active publisher sessions for this subscriber socket.
-    pub(super) publishers: FxHashMap<SocketAddr, Channel<SessionCommand, TopicMessage>>,
+    pub(super) publishers: FxHashMap<SocketAddr, PublisherState<ExponentialBackoff>>,
     /// Socket state. This is shared with the backend task.
     pub(super) state: Arc<SocketState>,
+}
+
+/// Represents the state of a publisher.
+pub(crate) enum PublisherState<S>
+where
+    S: Stream<Item = Duration>,
+{
+    Active {
+        /// The channel to the publisher session.
+        channel: Channel<SessionCommand, TopicMessage>,
+    },
+    Inactive {
+        /// The address of the publisher.
+        addr: SocketAddr,
+        /// Exponential backoff for retrying connections.
+        backoff: S,
+    },
 }
 
 impl<T> Future for SubDriver<T>
@@ -87,6 +107,18 @@ impl<T> SubDriver<T>
 where
     T: Transport + Send + Sync + 'static,
 {
+    /// De-activates a publisher by setting it to [`PublisherState::Inactive`]. This will initialize
+    /// the backoff stream.
+    fn reset_publisher(&mut self, addr: SocketAddr) {
+        self.publishers.insert(
+            addr,
+            PublisherState::Inactive {
+                addr,
+                backoff: ExponentialBackoff::new(Duration::from_millis(10), 16),
+            },
+        );
+    }
+
     /// Subscribes to a topic on all publishers.
     fn subscribe(&mut self, topic: String) {
         let mut inactive = Vec::new();
@@ -94,19 +126,22 @@ where
         if self.subscribed_topics.insert(topic.clone()) {
             // Subscribe to the topic on all publishers
 
-            for (addr, publisher_channel) in self.publishers.iter_mut() {
-                // If the channel is closed on the other side, remove it from the list of publishers.
-                if let Err(TrySendError::Closed(_)) =
-                    publisher_channel.try_send(SessionCommand::Subscribe(topic.clone()))
-                {
-                    warn!(publisher = %addr, "Error trying to subscribe to topic {topic}: publisher channel closed");
-                    inactive.push(*addr);
+            for (addr, publisher_state) in self.publishers.iter_mut() {
+                if let PublisherState::Active { channel } = publisher_state {
+                    // If the channel is closed on the other side, deactivate the publisher
+                    if let Err(TrySendError::Closed(_)) =
+                        channel.try_send(SessionCommand::Subscribe(topic.clone()))
+                    {
+                        warn!(publisher = %addr, "Error trying to subscribe to topic {topic}: publisher channel closed");
+                        inactive.push(*addr);
+                    }
                 }
             }
 
             // Remove all inactive publishers
             for addr in inactive {
-                self.publishers.remove(&addr);
+                // Move publisher to inactive state
+                self.reset_publisher(addr);
             }
 
             info!(
@@ -125,19 +160,22 @@ where
 
         if self.subscribed_topics.remove(&topic) {
             // Unsubscribe from the topic on all publishers
-            for (addr, publisher_channel) in self.publishers.iter_mut() {
-                // If the channel is closed on the other side, remove it from the list of publishers.
-                if let Err(TrySendError::Closed(_)) =
-                    publisher_channel.try_send(SessionCommand::Unsubscribe(topic.clone()))
-                {
-                    warn!(publisher = %addr, "Error trying to unsubscribe from topic {topic}: publisher channel closed");
-                    inactive.push(*addr);
+            for (addr, publisher_state) in self.publishers.iter_mut() {
+                if let PublisherState::Active { channel } = publisher_state {
+                    // If the channel is closed on the other side, deactivate the publisher
+                    if let Err(TrySendError::Closed(_)) =
+                        channel.try_send(SessionCommand::Unsubscribe(topic.clone()))
+                    {
+                        warn!(publisher = %addr, "Error trying to unsubscribe from topic {topic}: publisher channel closed");
+                        inactive.push(*addr);
+                    }
                 }
             }
 
             // Remove all inactive publishers
             for addr in inactive {
-                self.publishers.remove(&addr);
+                // Move publisher to inactive state
+                self.reset_publisher(addr);
             }
 
             info!(
@@ -167,20 +205,18 @@ where
                     endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
                 }
 
-                let connect = self.transport.connect(endpoint);
+                self.connect(endpoint);
 
-                self.connection_tasks.spawn(async move {
-                    let io = connect.await?;
-
-                    Ok((endpoint, io))
-                });
+                // Also set the publisher to the disconnected state. This will make sure that if the
+                // initial connection attempt fails, it will be retried in `poll_publishers`.
+                self.reset_publisher(endpoint);
             }
             Command::Disconnect { endpoint } => {
                 if self.publishers.remove(&endpoint).is_some() {
-                    debug!(endpoint = %endpoint, "Disconnected from publisher");
+                    debug!(%endpoint, "Disconnected from publisher");
                     self.state.stats.remove(&endpoint);
                 } else {
-                    debug!(endpoint = %endpoint, "Not connected to publisher");
+                    debug!(%endpoint, "Not connected to publisher");
                 };
             }
             Command::Shutdown => {
@@ -188,6 +224,50 @@ where
                 tracing::debug!("shutting down");
             }
         }
+    }
+
+    fn connect(&mut self, addr: SocketAddr) {
+        let connect = self.transport.connect(addr);
+        let token = self.options.auth_token.clone();
+
+        self.connection_tasks.spawn(async move {
+            let io = connect.await?;
+
+            if let Some(token) = token {
+                let mut conn = Framed::new(io, auth::Codec::new_client());
+
+                tracing::debug!("Sending auth message: {:?}", token);
+                // Send the authentication message
+                conn.send(auth::Message::Auth(token))
+                    .await
+                    .map_err(T::Error::from)?;
+                conn.flush().await.map_err(T::Error::from)?;
+
+                tracing::debug!("Waiting for ACK from server...");
+
+                // Wait for the response
+                let ack = conn
+                    .next()
+                    .await
+                    .ok_or(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Connection closed",
+                    ))?
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
+
+                if matches!(ack, auth::Message::Ack) {
+                    Ok((addr, conn.into_inner()))
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Publisher denied connection",
+                    )
+                    .into())
+                }
+            } else {
+                Ok((addr, io))
+            }
+        });
     }
 
     fn on_connection(&mut self, addr: SocketAddr, io: T::Io) {
@@ -216,7 +296,13 @@ where
             }
         }
 
-        self.publishers.insert(addr, publisher_channel);
+        self.publishers.insert(
+            addr,
+            PublisherState::Active {
+                channel: publisher_channel,
+            },
+        );
+
         self.state.stats.insert(addr, session_stats);
     }
 
@@ -228,48 +314,79 @@ where
     fn poll_publishers(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         let mut progress = false;
 
+        // These should be fine as Vec::new() does not allocate
         let mut inactive = Vec::new();
+        let mut to_retry = Vec::new();
+        let mut to_terminate = Vec::new();
 
-        for (addr, rx) in self.publishers.iter_mut() {
-            match rx.poll_recv(cx) {
-                Poll::Ready(Some(mut msg)) => {
-                    match msg.try_decompress() {
-                        None => { /* No decompression necessary */ }
-                        Some(Ok(decompressed)) => msg.payload = decompressed,
-                        Some(Err(e)) => {
-                            error!(
-                                topic = msg.topic.as_str(),
-                                "Failed to decompress message payload: {:?}", e
-                            );
+        for (addr, state) in self.publishers.iter_mut() {
+            match state {
+                PublisherState::Active { channel } => {
+                    match channel.poll_recv(cx) {
+                        Poll::Ready(Some(mut msg)) => {
+                            match msg.try_decompress() {
+                                None => { /* No decompression necessary */ }
+                                Some(Ok(decompressed)) => msg.payload = decompressed,
+                                Some(Err(e)) => {
+                                    error!(
+                                        topic = msg.topic.as_str(),
+                                        "Failed to decompress message payload: {:?}", e
+                                    );
 
-                            continue;
+                                    continue;
+                                }
+                            }
+
+                            let msg = PubMessage::new(*addr, msg.topic, msg.payload);
+
+                            debug!(source = %msg.source, "New message: {:?}", msg);
+                            // TODO: queuing
+                            if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
+                                error!(
+                                    topic = msg.topic,
+                                    "Slow subscriber socket, dropping message"
+                                );
+                            }
+
+                            progress = true;
+                        }
+                        Poll::Ready(None) => {
+                            error!(source = %addr, "Publisher stream closed, removing channel");
+                            inactive.push(*addr);
+
+                            progress = true;
+                        }
+                        Poll::Pending => {}
+                    }
+                }
+                PublisherState::Inactive { addr, backoff } => {
+                    // Poll the backoff stream
+                    if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
+                        if let Some(duration) = item {
+                            progress = true;
+                            tracing::debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
+                            to_retry.push(*addr);
+                        } else {
+                            error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);
+                            to_terminate.push(*addr);
                         }
                     }
-
-                    let msg = PubMessage::new(*addr, msg.topic, msg.payload);
-
-                    debug!(source = %msg.source, "New message: {:?}", msg);
-                    // TODO: queuing
-                    if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
-                        error!(
-                            topic = msg.topic,
-                            "Slow subscriber socket, dropping message"
-                        );
-                    }
-
-                    progress = true;
                 }
-                Poll::Ready(None) => {
-                    error!(source = %addr, "Publisher stream closed, removing channel");
-                    inactive.push(*addr);
-
-                    progress = true;
-                }
-                Poll::Pending => {}
             }
         }
 
+        // Activate retries
+        for addr in to_retry {
+            self.connect(addr);
+        }
+
+        // Queue retries for all the inactive publishers.
         for addr in inactive {
+            self.reset_publisher(addr);
+        }
+
+        // Terminate publishers that are unreachable.
+        for addr in to_terminate {
             self.publishers.remove(&addr);
         }
 

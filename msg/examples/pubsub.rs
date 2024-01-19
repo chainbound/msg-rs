@@ -4,10 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg::{
-    tcp::{self, Tcp},
-    PubOptions, PubSocket, SubOptions, SubSocket,
-};
+use msg::{tcp::Tcp, PubOptions, PubSocket, SubOptions, SubSocket};
 
 #[tokio::main]
 async fn main() {
@@ -23,14 +20,13 @@ async fn main() {
 
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
-        // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
+        Tcp::default(),
         SubOptions::default().ingress_buffer_size(1024),
     );
 
     let mut sub2 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
+        Tcp::default(),
         SubOptions::default().ingress_buffer_size(1024),
     );
 

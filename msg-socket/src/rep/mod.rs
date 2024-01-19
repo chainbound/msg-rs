@@ -77,10 +77,10 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::tcp::{self, Tcp};
+    use msg_transport::tcp::Tcp;
     use rand::Rng;
 
-    use crate::{req::ReqSocket, Authenticator};
+    use crate::{req::ReqSocket, Authenticator, ReqOptions};
 
     use super::*;
 
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_req_rep_simple() {
+    async fn reqrep_simple() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::new(Tcp::default());
         rep.bind(localhost()).await.unwrap();
@@ -125,20 +125,27 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_req_rep_durable() {
+    async fn reqrep_durable() {
         let _ = tracing_subscriber::fmt::try_init();
         let random_port = rand::random::<u16>() + 10000;
         let addr = format!("0.0.0.0:{}", random_port);
 
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::default());
+        let endpoint = addr.parse().unwrap();
         // Try to connect even through the server isn't up yet
-        req.connect(addr.parse().unwrap()).await.unwrap();
+        let connection_attempt = tokio::spawn(async move {
+            req.connect(endpoint).await.unwrap();
+
+            req
+        });
 
         // Wait a moment to start the server
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let mut rep = RepSocket::new(Tcp::default());
         rep.bind(addr.parse().unwrap()).await.unwrap();
+
+        let req = connection_attempt.await.unwrap();
 
         tokio::spawn(async move {
             // Receive the request and respond with "world"
@@ -153,7 +160,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_req_rep_auth() {
+    async fn reqrep_auth() {
         struct Auth;
 
         impl Authenticator for Auth {
@@ -168,9 +175,10 @@ mod tests {
         rep.bind(localhost()).await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::new(Tcp::new(
-            tcp::Config::default().auth_token(Bytes::from("REQ")),
-        ));
+        let mut req = ReqSocket::with_options(
+            Tcp::default(),
+            ReqOptions::default().auth_token(Bytes::from("REQ")),
+        );
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
 
@@ -204,7 +212,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn test_rep_max_connections() {
+    async fn rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().max_clients(1));
         rep.bind("127.0.0.1:0".parse().unwrap()).await.unwrap();

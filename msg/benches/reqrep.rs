@@ -10,7 +10,7 @@ use pprof::criterion::Output;
 use rand::Rng;
 
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
-use msg_transport::tcp::{self, Tcp};
+use msg_transport::tcp::Tcp;
 use tokio::runtime::Runtime;
 
 const N_REQS: usize = 10_000;
@@ -119,7 +119,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
         .unwrap();
 
     let req = ReqSocket::with_options(
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
+        Tcp::default(),
         ReqOptions::default().flush_interval(Duration::from_micros(50)),
     );
 
