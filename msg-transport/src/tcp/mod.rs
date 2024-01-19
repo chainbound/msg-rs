@@ -57,7 +57,12 @@ impl Transport for Tcp {
     }
 
     fn connect(&mut self, addr: SocketAddr) -> Self::Connect {
-        Box::pin(TcpStream::connect(addr))
+        Box::pin(async move {
+            let stream = TcpStream::connect(addr).await?;
+            stream.set_nodelay(true)?;
+
+            Ok(stream)
+        })
     }
 
     fn poll_accept(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept> {
