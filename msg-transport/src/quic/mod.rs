@@ -19,7 +19,8 @@ mod config;
 mod stream;
 mod tls;
 
-use config::Config;
+pub use config::{Config, ConfigBuilder};
+pub use quinn::congestion;
 use stream::QuicStream;
 
 /// A QUIC error.
