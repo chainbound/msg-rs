@@ -64,7 +64,7 @@ where
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
-    /// Connects to the target with the default options. WARN: this will block until the connection can be established.
+    /// Connects to the target with the default options. WARN: this will wait until the connection can be established.
     pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
