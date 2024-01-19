@@ -76,7 +76,10 @@ impl Transport for Tcp {
             Poll::Ready(Ok((io, addr))) => {
                 tracing::debug!("Accepted connection from {}", addr);
 
-                Poll::Ready(Box::pin(async move { Ok(io) }))
+                Poll::Ready(Box::pin(async move {
+                    io.set_nodelay(true)?;
+                    Ok(io)
+                }))
             }
             Poll::Ready(Err(e)) => Poll::Ready(async_error(e)),
             Poll::Pending => Poll::Pending,
