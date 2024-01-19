@@ -7,6 +7,8 @@ mod rep;
 mod req;
 mod sub;
 
+mod backoff;
+
 use bytes::Bytes;
 pub use pubs::{PubError, PubOptions, PubSocket};
 pub use rep::*;

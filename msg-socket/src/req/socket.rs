@@ -151,6 +151,7 @@ mod tests {
         let mut socket = ReqSocket::with_options(
             Tcp::default(),
             ReqOptions {
+                auth_token: None,
                 timeout: Duration::from_secs(1),
                 blocking_connect: true,
                 backoff_duration: Duration::from_secs(1),
@@ -187,6 +188,7 @@ mod tests {
         let mut socket = ReqSocket::with_options(
             Tcp::default(),
             ReqOptions {
+                auth_token: None,
                 timeout: Duration::from_secs(1),
                 blocking_connect: true,
                 backoff_duration: Duration::from_millis(200),

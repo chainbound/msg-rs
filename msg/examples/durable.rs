@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use msg_transport::tcp;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
@@ -66,8 +65,10 @@ async fn main() {
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
     let mut req = ReqSocket::with_options(
-        Tcp::new(tcp::Config::default().auth_token(Bytes::from("client1"))),
-        ReqOptions::default().timeout(Duration::from_secs(4)),
+        Tcp::default(),
+        ReqOptions::default()
+            .timeout(Duration::from_secs(4))
+            .auth_token(Bytes::from("client1")),
     );
 
     let (tx, rx) = oneshot::channel();

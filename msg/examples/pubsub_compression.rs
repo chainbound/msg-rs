@@ -4,11 +4,7 @@ use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::Instrument;
 
-use msg::{
-    compression::GzipCompressor,
-    tcp::{self, Tcp},
-    PubSocket, SubSocket,
-};
+use msg::{compression::GzipCompressor, tcp::Tcp, PubSocket, SubSocket};
 
 #[tokio::main]
 async fn main() {
@@ -19,16 +15,10 @@ async fn main() {
         .with_compressor(GzipCompressor::new(6));
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(
-        // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
-    );
+    let mut sub1 = SubSocket::new(Tcp::default());
 
     // Configure the subscribers with options
-    let mut sub2 = SubSocket::new(
-        // TCP transport with blocking connect, usually connection happens in the background.
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
-    );
+    let mut sub2 = SubSocket::new(Tcp::default());
 
     tracing::info!("Setting up the sockets...");
     pub_socket

@@ -77,10 +77,10 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::tcp::{self, Tcp};
+    use msg_transport::tcp::Tcp;
     use rand::Rng;
 
-    use crate::{req::ReqSocket, Authenticator};
+    use crate::{req::ReqSocket, Authenticator, ReqOptions};
 
     use super::*;
 
@@ -168,9 +168,10 @@ mod tests {
         rep.bind(localhost()).await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::new(Tcp::new(
-            tcp::Config::default().auth_token(Bytes::from("REQ")),
-        ));
+        let mut req = ReqSocket::with_options(
+            Tcp::default(),
+            ReqOptions::default().auth_token(Bytes::from("REQ")),
+        );
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
 

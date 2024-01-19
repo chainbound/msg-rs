@@ -10,11 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
-use msg_transport::{
-    quic::Quic,
-    tcp::{self, Tcp},
-    Transport,
-};
+use msg_transport::{quic::Quic, tcp::Tcp, Transport};
 
 const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;
@@ -210,7 +206,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     );
 
     let subscriber = SubSocket::with_options(
-        Tcp::new(tcp::Config::default().blocking_connect(true)),
+        Tcp::default(),
         SubOptions::default()
             .read_buffer_size(buffer_size)
             .ingress_buffer_size(N_REQS * 2),

@@ -1,13 +1,11 @@
 use bytes::Bytes;
 use futures::StreamExt;
+use msg_socket::SubOptions;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use msg::{
-    tcp::{self, Tcp},
-    Authenticator, PubSocket, SubSocket,
-};
+use msg::{tcp::Tcp, Authenticator, PubSocket, SubSocket};
 
 #[derive(Default)]
 struct Auth;
@@ -34,21 +32,17 @@ async fn main() {
         .with_auth(Auth);
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::new(
-        // TCP transport with blocking connect, usually connection happens in the background.
-        // Set the auth token
-        Tcp::new(
-            tcp::Config::default()
-                .auth_token(Bytes::from("client1"))
-                .blocking_connect(true),
-        ),
+    let mut sub1 = SubSocket::with_options(
+        Tcp::default(),
+        // Set the authentication token
+        SubOptions::default().auth_token(Bytes::from("client1")),
     );
 
-    let mut sub2 = SubSocket::new(Tcp::new(
-        tcp::Config::default()
-            .auth_token(Bytes::from("client2"))
-            .blocking_connect(true),
-    ));
+    let mut sub2 = SubSocket::with_options(
+        Tcp::default(),
+        // Set the authentication token
+        SubOptions::default().auth_token(Bytes::from("client2")),
+    );
 
     tracing::info!("Setting up the sockets...");
     pub_socket
