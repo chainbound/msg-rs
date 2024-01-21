@@ -1,12 +1,14 @@
 use futures::{Future, SinkExt, Stream, StreamExt};
 use rustc_hash::FxHashMap;
-use std::collections::HashSet;
-use std::net::SocketAddr;
-use std::net::{IpAddr, Ipv4Addr};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::time::Duration;
+use std::{
+    collections::HashSet,
+    io,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::codec::Framed;
@@ -249,17 +251,17 @@ where
                 let ack = conn
                     .next()
                     .await
-                    .ok_or(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
+                    .ok_or(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
                         "Connection closed",
                     ))?
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
+                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
 
                 if matches!(ack, auth::Message::Ack) {
                     Ok((addr, conn.into_inner()))
                 } else {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
                         "Publisher denied connection",
                     )
                     .into())

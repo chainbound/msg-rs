@@ -30,10 +30,7 @@ async fn run_tcp() {
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket
-        .bind("127.0.0.1:0".parse().unwrap())
-        .await
-        .unwrap();
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
     tracing::info!("Publisher listening on: {}", pub_addr);
@@ -66,10 +63,7 @@ async fn run_quic() {
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket
-        .bind("127.0.0.1:0".parse().unwrap())
-        .await
-        .unwrap();
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
     tracing::info!("Publisher listening on: {}", pub_addr);

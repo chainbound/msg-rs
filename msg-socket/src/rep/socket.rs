@@ -1,11 +1,16 @@
 use futures::{stream::FuturesUnordered, Stream};
 use std::{
+    io,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    net::{lookup_host, ToSocketAddrs},
+    sync::mpsc,
+    task::JoinSet,
+};
 use tokio_stream::StreamMap;
 
 use crate::{
@@ -61,7 +66,7 @@ where
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind(&mut self, addr: SocketAddr) -> Result<(), PubError> {
+    pub async fn bind<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let mut transport = self
@@ -69,14 +74,23 @@ where
             .take()
             .expect("Transport has been moved already");
 
-        transport
-            .bind(addr)
-            .await
-            .map_err(|e| PubError::Transport(Box::new(e)))?;
+        let addrs = lookup_host(addr).await?;
+        for addr in addrs {
+            match transport.bind(addr).await {
+                Ok(_) => break,
+                Err(e) => {
+                    tracing::warn!("Failed to bind to {}, trying next address: {}", addr, e);
+                    continue;
+                }
+            }
+        }
 
-        let local_addr = transport
-            .local_addr()
-            .expect("Local address set after binding");
+        let Some(local_addr) = transport.local_addr() else {
+            return Err(PubError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not bind to any valid address",
+            )));
+        };
 
         tracing::debug!("Listening on {}", local_addr);
 

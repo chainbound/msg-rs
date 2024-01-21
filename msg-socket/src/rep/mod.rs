@@ -132,8 +132,8 @@ mod tests {
 
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::default());
-        let endpoint = addr.parse().unwrap();
         // Try to connect even through the server isn't up yet
+        let endpoint = addr.clone();
         let connection_attempt = tokio::spawn(async move {
             req.connect(endpoint).await.unwrap();
 
@@ -143,7 +143,7 @@ mod tests {
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_millis(500)).await;
         let mut rep = RepSocket::new(Tcp::default());
-        rep.bind(addr.parse().unwrap()).await.unwrap();
+        rep.bind(addr).await.unwrap();
 
         let req = connection_attempt.await.unwrap();
 
@@ -215,7 +215,7 @@ mod tests {
     async fn rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().max_clients(1));
-        rep.bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
+        rep.bind("127.0.0.1:0").await.unwrap();
 
         let mut req1 = ReqSocket::new(Tcp::default());
         req1.connect(rep.local_addr().unwrap()).await.unwrap();

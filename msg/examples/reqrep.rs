@@ -7,11 +7,11 @@ use msg::{tcp::Tcp, RepSocket, ReqSocket};
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     let mut rep = RepSocket::new(Tcp::default());
-    rep.bind("0.0.0.0:4444".parse().unwrap()).await.unwrap();
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     let mut req = ReqSocket::new(Tcp::default());
-    req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
+    req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

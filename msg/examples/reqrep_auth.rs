@@ -20,7 +20,7 @@ async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
     let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
-    rep.bind("0.0.0.0:4444".parse().unwrap()).await.unwrap();
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
@@ -29,7 +29,7 @@ async fn main() {
         ReqOptions::default().auth_token(Bytes::from("REQ")),
     );
 
-    req.connect("0.0.0.0:4444".parse().unwrap()).await.unwrap();
+    req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

@@ -2,12 +2,17 @@ use futures::Stream;
 use rustc_hash::FxHashMap;
 use std::{
     collections::HashSet,
+    io,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::{
+    net::{lookup_host, ToSocketAddrs},
+    sync::mpsc,
+    task::JoinSet,
+};
 
 use msg_transport::Transport;
 
@@ -73,8 +78,13 @@ where
     }
 
     /// Asynchronously connects to the endpoint.
-    pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), SubError> {
+    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), SubError> {
         self.ensure_active_driver();
+        let mut addrs = lookup_host(addr).await?;
+        let endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "could not find any valid address",
+        )))?;
 
         self.send_command(Command::Connect { endpoint }).await?;
 
@@ -84,7 +94,12 @@ where
     /// Immediately send a connect command to the driver.
     pub fn try_connect(&mut self, endpoint: &str) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().unwrap();
+        let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
+            SubError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            ))
+        })?;
 
         self.try_send_command(Command::Connect { endpoint })?;
 
@@ -94,7 +109,12 @@ where
     /// Asynchronously disconnects from the endpoint.
     pub async fn disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().unwrap();
+        let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
+            SubError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            ))
+        })?;
 
         self.send_command(Command::Disconnect { endpoint }).await?;
 
@@ -104,7 +124,12 @@ where
     /// Immediately send a disconnect command to the driver.
     pub fn try_disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().unwrap();
+        let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
+            SubError::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            ))
+        })?;
 
         self.try_send_command(Command::Disconnect { endpoint })?;
 

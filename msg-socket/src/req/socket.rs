@@ -1,9 +1,8 @@
 use bytes::Bytes;
 use futures::SinkExt;
 use rustc_hash::FxHashMap;
-use std::net::SocketAddr;
-use std::time::Duration;
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, io, sync::Arc, time::Duration};
+use tokio::net::{lookup_host, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
@@ -65,7 +64,15 @@ where
     }
 
     /// Connects to the target with the default options. WARN: this will wait until the connection can be established.
-    pub async fn connect(&mut self, endpoint: SocketAddr) -> Result<(), ReqError> {
+    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), ReqError> {
+        let mut addrs = lookup_host(addr).await?;
+        let endpoint = addrs.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            )
+        })?;
+
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -87,8 +94,8 @@ where
                     }
                 }
             } else {
-                return Err(ReqError::Transport(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
+                return Err(ReqError::Transport(Box::new(io::Error::new(
+                    io::ErrorKind::TimedOut,
                     "Connection timed out",
                 ))));
             }
@@ -141,17 +148,17 @@ where
         let ack = conn
             .next()
             .await
-            .ok_or(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
+            .ok_or(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
                 "Connection closed",
             ))?
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
+            .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
 
         if matches!(ack, auth::Message::Ack) {
             Ok(())
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
                 "Publisher denied connection",
             )
             .into())

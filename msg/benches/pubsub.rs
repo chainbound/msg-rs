@@ -34,10 +34,7 @@ impl<T: Transport + Send + Sync + Unpin + 'static> PairBenchmark<T> {
     fn init(&mut self) {
         // Set up the socket connections
         self.rt.block_on(async {
-            self.publisher
-                .bind("127.0.0.1:0".parse().unwrap())
-                .await
-                .unwrap();
+            self.publisher.bind("127.0.0.1:0").await.unwrap();
 
             let addr = self.publisher.local_addr().unwrap();
             self.subscriber.connect(addr).await.unwrap();
