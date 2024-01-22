@@ -36,7 +36,7 @@ impl PairBenchmark {
         let mut rep = self.rep.take().unwrap();
         // setup the socket connections
         self.rt.block_on(async {
-            rep.bind("127.0.0.1:0".parse().unwrap()).await.unwrap();
+            rep.bind("127.0.0.1:0").await.unwrap();
 
             self.req.connect(rep.local_addr().unwrap()).await.unwrap();
 
