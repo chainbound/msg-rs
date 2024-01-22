@@ -6,12 +6,12 @@ layers are supported:
 
 - [TCP](#tcp)
 - [QUIC](#quic)
+
 <!--
 - [IPC](#ipc)
 - [Inproc](#inproc)
 - [UDP](#udp)
 - [TLS](#tls)
-- [QUIC](#quic)
   -->
 
 ## TCP
@@ -38,10 +38,14 @@ use msg::{RepSocket, ReqSocket, Tcp};
 async fn main() {
     // Initialize the reply socket (server side) with default TCP
     let mut rep = RepSocket::new(Tcp::default());
+    // Bind the socket to the address. This will start listening for incoming connections.
+    // This method does DNS resolution internally, so you can use hostnames here.
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with default TCP
     let mut req = ReqSocket::new(Tcp::default());
+    // Connect the socket to the address. This will initiate a connection to the server.
+    // This method does DNS resolution internally, so you can use hostnames here.
     req.connect("0.0.0.0:4444").await.unwrap();
 
     // ...
@@ -75,10 +79,14 @@ use msg::{RepSocket, ReqSocket, Quic};
 async fn main() {
     // Initialize the reply socket (server side) with default QUIC
     let mut rep = RepSocket::new(Quic::default());
+    // Bind the socket to the address. This will start listening for incoming connections.
+    // This method does DNS resolution internally, so you can use hostnames here.
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with default QUIC
     let mut req = ReqSocket::new(Quic::default());
+    // Connect the socket to the address. This will initiate a connection to the server.
+    // This method does DNS resolution internally, so you can use hostnames here.
     req.connect("0.0.0.0:4444").await.unwrap();
 
     // ...
