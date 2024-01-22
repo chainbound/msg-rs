@@ -378,7 +378,7 @@ mod tests {
         // Try to connect and subscribe before the publisher is up
         sub_socket.connect("0.0.0.0:6662").await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         pub_socket.bind("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
