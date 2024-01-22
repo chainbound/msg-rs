@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use futures::{SinkExt, Stream, StreamExt};
 use std::{
-    io,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -10,12 +9,7 @@ use tokio_util::codec::Framed;
 use tracing::{debug, trace};
 
 use super::SubError;
-use msg_wire::{
-    compression::{
-        CompressionType, Decompressor, GzipDecompressor, SnappyDecompressor, ZstdDecompressor,
-    },
-    pubsub,
-};
+use msg_wire::pubsub;
 
 /// Wraps a framed connection to a publisher and exposes all the PUBSUB specific methods.
 pub(super) struct PublisherStream<Io> {
@@ -58,29 +52,6 @@ pub(super) struct TopicMessage {
     pub compression_type: u8,
     pub topic: String,
     pub payload: Bytes,
-}
-
-impl TopicMessage {
-    /// Tries to decompress the message payload if necessary.
-    ///
-    /// - Returns `Some(Ok(Bytes))` if the payload is compressed and decompression succeeded.
-    /// - Returns `Some(Err(..))` if the payload is compressed but could not be decompressed.
-    /// - Returns `None` if the payload is not compressed.
-    pub fn try_decompress(&self) -> Option<Result<Bytes, io::Error>> {
-        match CompressionType::try_from(self.compression_type) {
-            Ok(supported_compression_type) => match supported_compression_type {
-                CompressionType::None => None,
-                // NOTE: Decompressors are unit structs, so there is no allocation here
-                CompressionType::Gzip => Some(GzipDecompressor.decompress(&self.payload)),
-                CompressionType::Zstd => Some(ZstdDecompressor.decompress(&self.payload)),
-                CompressionType::Snappy => Some(SnappyDecompressor.decompress(&self.payload)),
-            },
-            Err(unsupported_compression_type) => Some(Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unsupported compression type: {unsupported_compression_type}"),
-            ))),
-        }
-    }
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {

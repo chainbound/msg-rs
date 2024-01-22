@@ -19,7 +19,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
 use msg_transport::{PeerAddress, Transport};
-use msg_wire::{auth, reqrep};
+use msg_wire::{auth, compression::try_decompress_payload, reqrep};
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     pending_requests: FuturesUnordered<PendingRequest>,
@@ -265,7 +265,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             if let Poll::Ready(Some(Some((id, payload)))) =
                 this.pending_requests.poll_next_unpin(cx)
             {
-                let msg = reqrep::Message::new(id, payload);
+                // TODO: compress the response payload.
+                let compression_type = 0;
+                let msg = reqrep::Message::new(id, compression_type, payload);
                 this.egress_queue.push_back(msg);
 
                 continue;
@@ -277,6 +279,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     tracing::trace!("Received message from peer {}: {:?}", this.addr, result);
                     let msg = result?;
                     let msg_id = msg.id();
+                    let compression_type = msg.header().compression_type();
+                    let mut payload = msg.into_payload();
+
+                    // decompress the message payload
+                    match try_decompress_payload(compression_type, payload) {
+                        Ok(decompressed) => payload = decompressed,
+                        Err(e) => {
+                            tracing::error!("Failed to decompress message: {:?}", e);
+                            continue;
+                        }
+                    };
 
                     let (tx, rx) = oneshot::channel();
 
@@ -289,7 +302,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     let request = Request {
                         source: this.addr,
                         response: tx,
-                        msg: msg.into_payload(),
+                        msg: payload,
                     };
 
                     return Poll::Ready(Some(Ok(request)));

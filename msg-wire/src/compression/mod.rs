@@ -49,6 +49,26 @@ pub trait Decompressor: Send + Sync + Unpin + 'static {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error>;
 }
 
+/// Tries to decompress a payload using the given compression type.
+/// If the compression type is `None`, the payload is returned as-is.
+///
+/// ## Errors
+/// - If the compression type is not supported
+/// - If the payload is invalid
+/// - If the decompression fails
+pub fn try_decompress_payload(compression_type: u8, data: Bytes) -> Result<Bytes, io::Error> {
+    match CompressionType::try_from(compression_type) {
+        Ok(CompressionType::None) => Ok(data),
+        Ok(CompressionType::Gzip) => GzipDecompressor.decompress(data.as_ref()),
+        Ok(CompressionType::Zstd) => ZstdDecompressor.decompress(data.as_ref()),
+        Ok(CompressionType::Snappy) => SnappyDecompressor.decompress(data.as_ref()),
+        Err(unsupported_compression_type) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported compression type: {unsupported_compression_type}"),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

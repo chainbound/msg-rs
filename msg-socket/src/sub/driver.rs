@@ -24,7 +24,7 @@ use super::{
 
 use msg_common::{channel, task::JoinMap, Channel};
 use msg_transport::Transport;
-use msg_wire::{auth, pubsub};
+use msg_wire::{auth, compression::try_decompress_payload, pubsub};
 
 pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
@@ -370,18 +370,13 @@ where
                 PublisherState::Active { channel } => {
                     match channel.poll_recv(cx) {
                         Poll::Ready(Some(mut msg)) => {
-                            match msg.try_decompress() {
-                                None => { /* No decompression necessary */ }
-                                Some(Ok(decompressed)) => msg.payload = decompressed,
-                                Some(Err(e)) => {
-                                    error!(
-                                        topic = msg.topic.as_str(),
-                                        "Failed to decompress message payload: {:?}", e
-                                    );
-
+                            match try_decompress_payload(msg.compression_type, msg.payload) {
+                                Ok(decompressed) => msg.payload = decompressed,
+                                Err(e) => {
+                                    tracing::error!("Failed to decompress message: {:?}", e);
                                     continue;
                                 }
-                            }
+                            };
 
                             let msg = PubMessage::new(*addr, msg.topic, msg.payload);
 

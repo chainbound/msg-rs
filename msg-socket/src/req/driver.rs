@@ -44,20 +44,15 @@ pub(crate) struct ReqDriver<T: Transport> {
     pub(crate) should_flush: bool,
 }
 
+/// A pending request that is waiting for a response.
 pub(crate) struct PendingRequest {
+    /// The timestamp when the request was sent.
     start: Instant,
+    /// The response sender.
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
 impl<T: Transport> ReqDriver<T> {
-    fn new_message(&mut self, payload: Bytes) -> reqrep::Message {
-        let id = self.id_counter;
-        // Wrap add here to avoid overflow
-        self.id_counter = id.wrapping_add(1);
-
-        reqrep::Message::new(id, payload)
-    }
-
     fn on_message(&mut self, msg: reqrep::Message) {
         if let Some(pending) = self.pending_requests.remove(&msg.id()) {
             let rtt = pending.start.elapsed().as_micros() as usize;
@@ -183,11 +178,12 @@ where
                 Poll::Ready(Some(Command::Send { message, response })) => {
                     // Queue the message for sending
                     let start = std::time::Instant::now();
-                    let msg = this.new_message(message);
-                    let id = msg.id();
+                    let msg = message.into_wire(this.id_counter);
+                    let msg_id = msg.id();
+                    this.id_counter = this.id_counter.wrapping_add(1);
                     this.egress_queue.push_back(msg);
                     this.pending_requests.insert(
-                        id,
+                        msg_id,
                         PendingRequest {
                             start,
                             sender: response,

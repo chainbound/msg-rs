@@ -3,7 +3,10 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-use msg_wire::reqrep;
+use msg_wire::{
+    compression::{CompressionType, Compressor},
+    reqrep,
+};
 
 mod driver;
 mod socket;
@@ -33,7 +36,7 @@ pub enum ReqError {
 
 pub enum Command {
     Send {
-        message: Bytes,
+        message: ReqMessage,
         response: oneshot::Sender<Result<Bytes, ReqError>>,
     },
 }
@@ -55,6 +58,9 @@ pub struct ReqOptions {
     backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
+    /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
+    /// this threshold, it will not be compressed.
+    min_compress_size: usize,
 }
 
 impl ReqOptions {
@@ -102,6 +108,13 @@ impl ReqOptions {
         self.retry_attempts = Some(retry_attempts);
         self
     }
+
+    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller than
+    /// this threshold, it will not be compressed.
+    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+        self.min_compress_size = min_compress_size;
+        self
+    }
 }
 
 impl Default for ReqOptions {
@@ -114,7 +127,50 @@ impl Default for ReqOptions {
             flush_interval: None,
             backpressure_boundary: 8192,
             retry_attempts: None,
+            min_compress_size: 8192,
         }
+    }
+}
+
+/// A message sent from a [`ReqSocket`] to the backend task.
+#[derive(Debug, Clone)]
+pub struct ReqMessage {
+    compression_type: CompressionType,
+    payload: Bytes,
+}
+
+#[allow(unused)]
+impl ReqMessage {
+    pub fn new(payload: Bytes) -> Self {
+        Self {
+            // Initialize the compression type to None.
+            // The actual compression type will be set in the `compress` method.
+            compression_type: CompressionType::None,
+            payload,
+        }
+    }
+
+    #[inline]
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
+    }
+
+    #[inline]
+    pub fn into_payload(self) -> Bytes {
+        self.payload
+    }
+
+    #[inline]
+    pub fn into_wire(self, id: u32) -> reqrep::Message {
+        reqrep::Message::new(id, self.compression_type as u8, self.payload)
+    }
+
+    #[inline]
+    pub fn compress(&mut self, compressor: &dyn Compressor) -> Result<(), ReqError> {
+        self.payload = compressor.compress(&self.payload)?;
+        self.compression_type = compressor.compression_type();
+
+        Ok(())
     }
 }
 

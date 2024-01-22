@@ -1,20 +1,23 @@
 use bytes::Bytes;
 use futures::SinkExt;
+use msg_wire::compression::Compressor;
 use rustc_hash::FxHashMap;
 use std::{collections::VecDeque, io, sync::Arc, time::Duration};
 use tokio::net::{lookup_host, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
+use tracing::debug;
 
 use msg_transport::Transport;
 use msg_wire::{auth, reqrep};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 use crate::backoff::ExponentialBackoff;
+use crate::ReqMessage;
 use crate::{req::stats::SocketStats, req::SocketState};
 
-#[derive(Debug)]
+/// The request socket.
 pub struct ReqSocket<T: Transport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
@@ -24,6 +27,10 @@ pub struct ReqSocket<T: Transport> {
     options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
     state: Arc<SocketState>,
+    /// Optional message compressor.
+    // NOTE: for now we're using dynamic dispatch, since using generics here
+    // complicates the API a lot. We can always change this later for perf reasons.
+    compressor: Option<Arc<dyn Compressor>>,
 }
 
 impl<T> ReqSocket<T>
@@ -40,7 +47,14 @@ where
             transport,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
+            compressor: None,
         }
+    }
+
+    /// Sets the message compressor for this socket.
+    pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
+        self.compressor = Some(Arc::new(compressor));
+        self
     }
 
     pub fn stats(&self) -> &SocketStats {
@@ -50,11 +64,26 @@ where
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
 
+        let mut msg = ReqMessage::new(message);
+
+        let len_before = msg.payload().len();
+        if len_before > self.options.min_compress_size {
+            if let Some(ref compressor) = self.compressor {
+                msg.compress(compressor.as_ref())?;
+
+                debug!(
+                    "Compressed message from {} to {} bytes",
+                    len_before,
+                    msg.payload().len()
+                );
+            }
+        }
+
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
             .send(Command::Send {
-                message,
+                message: msg,
                 response: response_tx,
             })
             .await
