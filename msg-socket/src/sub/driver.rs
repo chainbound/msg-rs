@@ -112,13 +112,23 @@ where
     /// De-activates a publisher by setting it to [`PublisherState::Inactive`]. This will initialize
     /// the backoff stream.
     fn reset_publisher(&mut self, addr: SocketAddr) {
+        tracing::debug!("Resetting publisher at {addr:?}");
         self.publishers.insert(
             addr,
             PublisherState::Inactive {
                 addr,
-                backoff: ExponentialBackoff::new(Duration::from_millis(10), 16),
+                backoff: ExponentialBackoff::new(Duration::from_millis(50), 16),
             },
         );
+    }
+
+    /// Returns true if we're already connected to the given publisher address.
+    fn is_connected(&self, addr: &SocketAddr) -> bool {
+        if let Some(PublisherState::Active { .. }) = self.publishers.get(addr) {
+            return true;
+        }
+
+        false
     }
 
     /// Subscribes to a topic on all publishers.
@@ -273,6 +283,12 @@ where
     }
 
     fn on_connection(&mut self, addr: SocketAddr, io: T::Io) {
+        if self.is_connected(&addr) {
+            // We're already connected to this publisher
+            warn!(%addr, "Already connected to publisher");
+            return;
+        }
+
         // This should spawn a new task tied to this connection, and
         debug!("Connection to {} established, spawning session", addr);
 
