@@ -61,11 +61,15 @@ pub(crate) struct SocketState {
     pub(crate) stats: SocketStats,
 }
 
-/// A request received by the socket. It contains the source address, the message,
-/// and a oneshot channel to respond to the request.
+/// A request received by the socket.
 pub struct Request {
+    /// The source address of the request.
     source: SocketAddr,
+    /// The compression type used for the request payload
+    compression_type: u8,
+    /// The oneshot channel to respond to the request.
     response: oneshot::Sender<Bytes>,
+    /// The message payload.
     msg: Bytes,
 }
 

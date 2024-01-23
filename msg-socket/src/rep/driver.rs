@@ -70,9 +70,21 @@ where
         loop {
             if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
                 match msg {
-                    Some(Ok(request)) => {
+                    Some(Ok(mut request)) => {
                         debug!("Received request from peer {}", peer);
-                        this.state.stats.increment_rx(request.msg().len());
+
+                        let size = request.msg().len();
+
+                        // decompress the payload
+                        match try_decompress_payload(request.compression_type, request.msg) {
+                            Ok(decompressed) => request.msg = decompressed,
+                            Err(e) => {
+                                error!("Failed to decompress message: {:?}", e);
+                                continue;
+                            }
+                        }
+
+                        this.state.stats.increment_rx(size);
                         let _ = this.to_socket.try_send(request);
                     }
                     Some(Err(e)) => {
@@ -308,31 +320,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                 Poll::Ready(Some(result)) => {
                     tracing::trace!("Received message from peer {}: {:?}", this.addr, result);
                     let msg = result?;
-                    let msg_id = msg.id();
-                    let compression_type = msg.header().compression_type();
-                    let mut payload = msg.into_payload();
-
-                    // decompress the message payload
-                    match try_decompress_payload(compression_type, payload) {
-                        Ok(decompressed) => payload = decompressed,
-                        Err(e) => {
-                            tracing::error!("Failed to decompress message: {:?}", e);
-                            continue;
-                        }
-                    };
 
                     let (tx, rx) = oneshot::channel();
 
                     // Add the pending request to the list
                     this.pending_requests.push(PendingRequest {
-                        msg_id,
+                        msg_id: msg.id(),
                         response: rx,
                     });
 
                     let request = Request {
                         source: this.addr,
                         response: tx,
-                        msg: payload,
+                        compression_type: msg.header().compression_type(),
+                        msg: msg.into_payload(),
                     };
 
                     return Poll::Ready(Some(Ok(request)));

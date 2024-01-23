@@ -8,7 +8,7 @@ use msg::{tcp::Tcp, RepSocket, ReqSocket};
 #[tokio::main]
 async fn main() {
     // Initialize the reply socket (server side) with a transport
-    // and a minimum compresion size of 0 bytes for responses
+    // and a minimum compresion size of 0 bytes to compress all responses
     let mut rep =
         RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
             // Enable Gzip compression (compression level 6)
@@ -16,7 +16,7 @@ async fn main() {
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
-    // and a minimum compresion size of 0 bytes for requests
+    // and a minimum compresion size of 0 bytes to compress all requests
     let mut req =
         ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
             // Enable Gzip compression (compression level 6).
