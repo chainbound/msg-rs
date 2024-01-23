@@ -6,7 +6,7 @@ use tokio::{
     sync::broadcast,
     task::JoinSet,
 };
-use tracing::debug;
+use tracing::{debug, trace};
 
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
@@ -132,7 +132,7 @@ where
             if let Some(ref compressor) = self.compressor {
                 msg.compress(compressor.as_ref())?;
 
-                debug!(
+                trace!(
                     "Compressed message from {} to {} bytes",
                     len_before,
                     msg.payload().len(),

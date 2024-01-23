@@ -27,7 +27,7 @@ use msg_common::{channel, Channel};
 use msg_transport::Transport;
 use msg_wire::{auth, pubsub};
 
-type ConnectionResult<Io, E> = Result<(SocketAddr, Io), (SocketAddr, E)>;
+type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
 pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
@@ -92,13 +92,8 @@ where
                     Ok((addr, io)) => {
                         this.on_connection(addr, io);
                     }
-                    // If the initial connection failed, reset the publisher to try again later.
-                    Err((addr, e)) => {
-                        this.reset_publisher(addr);
-                        error!(
-                            "Error connecting to publisher, scheduling reconnect: {:?}",
-                            e
-                        );
+                    Err(e) => {
+                        error!("Error connecting to publisher: {:?}", e);
                     }
                 }
 
@@ -223,6 +218,10 @@ where
                 }
 
                 self.connect(endpoint);
+
+                // Also set the publisher to the disconnected state. This will make sure that if the
+                // initial connection attempt fails, it will be retried in `poll_publishers`.
+                self.reset_publisher(endpoint);
             }
             Command::Disconnect { endpoint } => {
                 if self.publishers.remove(&endpoint).is_some() {
@@ -244,7 +243,7 @@ where
         let token = self.options.auth_token.clone();
 
         self.connection_tasks.spawn(async move {
-            let io = connect.await.map_err(|e| (addr, e))?;
+            let io = connect.await?;
 
             if let Some(token) = token {
                 let mut conn = Framed::new(io, auth::Codec::new_client());
@@ -253,8 +252,8 @@ where
                 // Send the authentication message
                 conn.send(auth::Message::Auth(token))
                     .await
-                    .map_err(|e| (addr, T::Error::from(e)))?;
-                conn.flush().await.map_err(|e| (addr, T::Error::from(e)))?;
+                    .map_err(T::Error::from)?;
+                conn.flush().await.map_err(T::Error::from)?;
 
                 tracing::debug!("Waiting for ACK from server...");
 
@@ -262,28 +261,20 @@ where
                 let ack = conn
                     .next()
                     .await
-                    .ok_or((
-                        addr,
-                        io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed").into(),
+                    .ok_or(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "Connection closed",
                     ))?
-                    .map_err(|e| {
-                        (
-                            addr,
-                            io::Error::new(io::ErrorKind::PermissionDenied, e).into(),
-                        )
-                    })?;
+                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
 
                 if matches!(ack, auth::Message::Ack) {
                     Ok((addr, conn.into_inner()))
                 } else {
-                    Err((
-                        addr,
-                        io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            "Publisher denied connection",
-                        )
-                        .into(),
-                    ))
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "Publisher denied connection",
+                    )
+                    .into())
                 }
             } else {
                 Ok((addr, io))
