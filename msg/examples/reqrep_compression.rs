@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use msg_socket::ReqOptions;
+use msg_socket::{RepOptions, ReqOptions};
 use msg_wire::compression::GzipCompressor;
 use tokio_stream::StreamExt;
 
@@ -8,13 +8,20 @@ use msg::{tcp::Tcp, RepSocket, ReqSocket};
 #[tokio::main]
 async fn main() {
     // Initialize the reply socket (server side) with a transport
-    let mut rep = RepSocket::new(Tcp::default());
+    // and a minimum compresion size of 0 bytes for responses
+    let mut rep =
+        RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
+            // Enable Gzip compression (compression level 6)
+            .with_compressor(GzipCompressor::new(6));
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
+    // and a minimum compresion size of 0 bytes for requests
     let mut req =
         ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
-            // Enable Gzip compression (compression level 6)
+            // Enable Gzip compression (compression level 6).
+            // The request and response sockets *don't have to*
+            // use the same compression algorithm or level.
             .with_compressor(GzipCompressor::new(6));
 
     req.connect("0.0.0.0:4444").await.unwrap();

@@ -25,16 +25,32 @@ pub enum PubError {
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Default)]
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
+    min_compress_size: usize,
+}
+
+impl Default for RepOptions {
+    fn default() -> Self {
+        Self {
+            max_clients: None,
+            min_compress_size: 8192,
+        }
+    }
 }
 
 impl RepOptions {
     /// Sets the number of maximum concurrent clients.
     pub fn max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
+        self
+    }
+
+    /// Sets the minimum payload size for compression.
+    /// If the payload is smaller than this value, it will not be compressed.
+    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+        self.min_compress_size = min_compress_size;
         self
     }
 }

@@ -19,7 +19,11 @@ use tracing::{debug, error, info, warn};
 
 use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
 use msg_transport::{PeerAddress, Transport};
-use msg_wire::{auth, compression::try_decompress_payload, reqrep};
+use msg_wire::{
+    auth,
+    compression::{try_decompress_payload, Compressor},
+    reqrep,
+};
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     pending_requests: FuturesUnordered<PendingRequest>,
@@ -28,6 +32,7 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
     egress_queue: VecDeque<reqrep::Message>,
     state: Arc<SocketState>,
     should_flush: bool,
+    compressor: Option<Arc<dyn Compressor>>,
 }
 
 pub(crate) struct RepDriver<T: Transport> {
@@ -44,6 +49,9 @@ pub(crate) struct RepDriver<T: Transport> {
     pub(crate) to_socket: mpsc::Sender<Request>,
     /// Optional connection authenticator.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
+    /// Optional message compressor. This is shared with the socket to keep
+    /// the API consistent with other socket types (e.g. `PubSocket`)
+    pub(crate) compressor: Option<Arc<dyn Compressor>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
@@ -94,6 +102,7 @@ where
                                 egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),
                                 should_flush: false,
+                                compressor: this.compressor.clone(),
                             }),
                         );
                     }
@@ -216,6 +225,7 @@ where
                     egress_queue: VecDeque::with_capacity(128),
                     state: Arc::clone(&self.state),
                     should_flush: false,
+                    compressor: self.compressor.clone(),
                 }),
             );
         }
@@ -262,11 +272,31 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             }
 
             // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(Some((id, payload)))) =
+            if let Poll::Ready(Some(Some((id, mut payload)))) =
                 this.pending_requests.poll_next_unpin(cx)
             {
-                // TODO: compress the response payload.
-                let compression_type = 0;
+                let mut compression_type = 0;
+                let len_before = payload.len();
+                if let Some(ref compressor) = this.compressor {
+                    match compressor.compress(&payload) {
+                        Ok(compressed) => {
+                            payload = compressed;
+                            compression_type = compressor.compression_type() as u8;
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to compress message: {:?}", e);
+                            continue;
+                        }
+                    }
+
+                    tracing::debug!(
+                        "Compressed message {} from {} to {} bytes",
+                        id,
+                        len_before,
+                        payload.len()
+                    )
+                }
+
                 let msg = reqrep::Message::new(id, compression_type, payload);
                 this.egress_queue.push_back(msg);
 

@@ -36,7 +36,7 @@ pub enum ReqError {
 
 pub enum Command {
     Send {
-        message: ReqMessage,
+        message: Bytes,
         response: oneshot::Sender<Result<Bytes, ReqError>>,
     },
 }

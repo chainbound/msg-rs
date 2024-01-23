@@ -58,10 +58,12 @@ pub trait Decompressor: Send + Sync + Unpin + 'static {
 /// - If the decompression fails
 pub fn try_decompress_payload(compression_type: u8, data: Bytes) -> Result<Bytes, io::Error> {
     match CompressionType::try_from(compression_type) {
-        Ok(CompressionType::None) => Ok(data),
-        Ok(CompressionType::Gzip) => GzipDecompressor.decompress(data.as_ref()),
-        Ok(CompressionType::Zstd) => ZstdDecompressor.decompress(data.as_ref()),
-        Ok(CompressionType::Snappy) => SnappyDecompressor.decompress(data.as_ref()),
+        Ok(supported_compression_type) => match supported_compression_type {
+            CompressionType::None => Ok(data),
+            CompressionType::Gzip => GzipDecompressor.decompress(data.as_ref()),
+            CompressionType::Zstd => ZstdDecompressor.decompress(data.as_ref()),
+            CompressionType::Snappy => SnappyDecompressor.decompress(data.as_ref()),
+        },
         Err(unsupported_compression_type) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unsupported compression type: {unsupported_compression_type}"),

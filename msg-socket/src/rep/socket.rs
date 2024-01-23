@@ -1,4 +1,5 @@
 use futures::{stream::FuturesUnordered, Stream};
+use msg_wire::compression::Compressor;
 use std::{
     io,
     net::SocketAddr,
@@ -36,6 +37,8 @@ pub struct RepSocket<T: Transport> {
     auth: Option<Arc<dyn Authenticator>>,
     /// The local address this socket is bound to.
     local_addr: Option<SocketAddr>,
+    /// Optional message compressor.
+    compressor: Option<Arc<dyn Compressor>>,
 }
 
 impl<T> RepSocket<T>
@@ -56,12 +59,19 @@ where
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
             auth: None,
+            compressor: None,
         }
     }
 
     /// Sets the connection authenticator for this socket.
     pub fn with_auth<A: Authenticator>(mut self, authenticator: A) -> Self {
         self.auth = Some(Arc::new(authenticator));
+        self
+    }
+
+    /// Sets the message compressor for this socket.
+    pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
+        self.compressor = Some(Arc::new(compressor));
         self
     }
 
@@ -103,6 +113,7 @@ where
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
             conn_tasks: FuturesUnordered::new(),
+            compressor: self.compressor.take(),
         };
 
         tokio::spawn(backend);
