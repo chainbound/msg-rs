@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use core::fmt;
 use msg_wire::pubsub;
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 use thiserror::Error;
 
 mod driver;
@@ -55,6 +55,8 @@ pub struct SubOptions {
     ingress_buffer_size: usize,
     /// The read buffer size for each session.
     read_buffer_size: usize,
+    /// The initial backoff for reconnecting to a publisher.
+    initial_backoff: Duration,
 }
 
 impl SubOptions {
@@ -77,6 +79,12 @@ impl SubOptions {
         self.read_buffer_size = read_buffer_size;
         self
     }
+
+    /// Set the initial backoff for reconnecting to a publisher.
+    pub fn initial_backoff(mut self, initial_backoff: Duration) -> Self {
+        self.initial_backoff = initial_backoff;
+        self
+    }
 }
 
 impl Default for SubOptions {
@@ -85,6 +93,7 @@ impl Default for SubOptions {
             auth_token: None,
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
+            initial_backoff: Duration::from_millis(100),
         }
     }
 }
