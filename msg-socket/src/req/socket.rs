@@ -13,6 +13,7 @@ use msg_wire::{auth, reqrep};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 use crate::backoff::ExponentialBackoff;
+use crate::ReqMessage;
 use crate::{req::stats::SocketStats, req::SocketState};
 
 /// The request socket.
@@ -62,11 +63,13 @@ where
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
 
+        let msg = ReqMessage::new(message);
+
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
             .send(Command::Send {
-                message,
+                message: msg,
                 response: response_tx,
             })
             .await

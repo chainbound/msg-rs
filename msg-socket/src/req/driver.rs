@@ -12,7 +12,7 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
-use crate::{req::SocketState, ReqMessage};
+use crate::req::SocketState;
 
 use super::{Command, ReqError, ReqOptions};
 use msg_wire::{
@@ -197,28 +197,28 @@ where
 
             // Check for outgoing messages from the socket handle
             match this.from_socket.poll_recv(cx) {
-                Poll::Ready(Some(Command::Send { message, response })) => {
-                    // Queue the message for sending
+                Poll::Ready(Some(Command::Send {
+                    mut message,
+                    response,
+                })) => {
                     let start = std::time::Instant::now();
 
-                    let mut msg = ReqMessage::new(message);
-
-                    let len_before = msg.payload().len();
+                    let len_before = message.payload().len();
                     if len_before > this.options.min_compress_size {
                         if let Some(ref compressor) = this.compressor {
-                            if let Err(e) = msg.compress(compressor.as_ref()) {
+                            if let Err(e) = message.compress(compressor.as_ref()) {
                                 tracing::error!("Failed to compress message: {:?}", e);
                             }
 
                             tracing::debug!(
                                 "Compressed message from {} to {} bytes",
                                 len_before,
-                                msg.payload().len()
+                                message.payload().len()
                             );
                         }
                     }
 
-                    let msg = msg.into_wire(this.id_counter);
+                    let msg = message.into_wire(this.id_counter);
                     let msg_id = msg.id();
                     this.id_counter = this.id_counter.wrapping_add(1);
                     this.egress_queue.push_back(msg);
