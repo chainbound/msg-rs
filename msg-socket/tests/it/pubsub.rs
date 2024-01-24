@@ -6,11 +6,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
 
 use msg_socket::{PubSocket, SubSocket};
-use msg_transport::{
-    quic::{self, Quic},
-    tcp::{self, Tcp},
-    Transport,
-};
+use msg_transport::{quic::Quic, tcp::Tcp, Transport};
 
 const TOPIC: &str = "test";
 
