@@ -12,7 +12,7 @@ use msg_transport::Transport;
 use msg_wire::{auth, reqrep};
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
-use crate::backoff::ExponentialBackoff;
+use crate::connection::{ConnectionState, ExponentialBackoff};
 use crate::ReqMessage;
 use crate::{req::stats::SocketStats, req::SocketState};
 
@@ -122,13 +122,14 @@ where
 
         let mut framed = Framed::new(stream, reqrep::Codec::new());
         framed.set_backpressure_boundary(self.options.backpressure_boundary);
+        let conn = ConnectionState::Active { channel: framed };
 
         // Create the socket backend
         let driver: ReqDriver<T> = ReqDriver {
             options: Arc::clone(&self.options),
             id_counter: 0,
             from_socket,
-            conn: framed,
+            conn_state: conn,
             egress_queue: VecDeque::new(),
             // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
             // If we do this, we'll never have to re-allocate.

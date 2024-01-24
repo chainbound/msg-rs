@@ -22,6 +22,15 @@ async fn main() {
         req.respond(Bytes::from("world")).unwrap();
     });
 
-    let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
+    let res: Bytes = req.request(Bytes::from("helloooo!")).await.unwrap();
     println!("Response: {:?}", res);
+
+    // Access the socket statistics
+    let stats = req.stats();
+    println!(
+        "Sent: {}B, Received: {}B | time: {}μs",
+        stats.bytes_tx(),
+        stats.bytes_rx(),
+        stats.rtt()
+    );
 }
