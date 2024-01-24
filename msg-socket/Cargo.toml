@@ -29,4 +29,6 @@ rand.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]
+msg-sim.workspace = true
+
 tracing-subscriber = "0.3"

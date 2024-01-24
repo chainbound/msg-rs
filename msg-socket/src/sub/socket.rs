@@ -11,9 +11,9 @@ use std::{
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::mpsc,
-    task::JoinSet,
 };
 
+use msg_common::task::JoinMap;
 use msg_transport::Transport;
 
 use super::{
@@ -61,7 +61,7 @@ where
             transport,
             from_socket,
             to_socket,
-            connection_tasks: JoinSet::new(),
+            connection_tasks: JoinMap::new(),
             publishers,
             subscribed_topics: HashSet::with_capacity(32),
             state: Arc::clone(&state),
@@ -78,9 +78,10 @@ where
     }
 
     /// Asynchronously connects to the endpoint.
-    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), SubError> {
+    pub async fn connect<A: ToSocketAddrs>(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let mut addrs = lookup_host(addr).await?;
+
+        let mut addrs = lookup_host(endpoint).await?;
         let endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "could not find any valid address",
@@ -92,8 +93,10 @@ where
     }
 
     /// Immediately send a connect command to the driver.
-    pub fn try_connect(&mut self, endpoint: &str) -> Result<(), SubError> {
+    pub fn try_connect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let endpoint = endpoint.into();
         let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
             SubError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -107,14 +110,14 @@ where
     }
 
     /// Asynchronously disconnects from the endpoint.
-    pub async fn disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
+    pub async fn disconnect<A: ToSocketAddrs>(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
-        let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
-            SubError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            ))
-        })?;
+
+        let mut addrs = lookup_host(endpoint).await?;
+        let endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "could not find any valid address",
+        )))?;
 
         self.send_command(Command::Disconnect { endpoint }).await?;
 
@@ -122,8 +125,10 @@ where
     }
 
     /// Immediately send a disconnect command to the driver.
-    pub fn try_disconnect(&mut self, endpoint: &str) -> Result<(), SubError> {
+    pub fn try_disconnect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let endpoint = endpoint.into();
         let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
             SubError::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -139,34 +144,48 @@ where
     /// Subscribes to the given topic. This will subscribe to all connected publishers.
     /// If the topic does not exist on a publisher, this will not return any data.
     /// Any publishers that are connected after this call will also be subscribed to.
-    pub async fn subscribe(&mut self, topic: String) -> Result<(), SubError> {
+    pub async fn subscribe(&mut self, topic: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let topic = topic.into();
         assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+
         self.send_command(Command::Subscribe { topic }).await?;
 
         Ok(())
     }
 
     /// Immediately send a subscribe command to the driver.
-    pub fn try_subscribe(&mut self, topic: String) -> Result<(), SubError> {
+    pub fn try_subscribe(&mut self, topic: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let topic = topic.into();
         assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+
         self.try_send_command(Command::Subscribe { topic })?;
 
         Ok(())
     }
 
     /// Unsubscribe from the given topic. This will unsubscribe from all connected publishers.
-    pub async fn unsubscribe(&mut self, topic: String) -> Result<(), SubError> {
+    pub async fn unsubscribe(&mut self, topic: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let topic = topic.into();
+        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+
         self.send_command(Command::Unsubscribe { topic }).await?;
 
         Ok(())
     }
 
     /// Immediately send an unsubscribe command to the driver.
-    pub fn try_unsubscribe(&mut self, topic: String) -> Result<(), SubError> {
+    pub fn try_unsubscribe(&mut self, topic: impl Into<String>) -> Result<(), SubError> {
         self.ensure_active_driver();
+
+        let topic = topic.into();
+        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+
         self.try_send_command(Command::Unsubscribe { topic })?;
 
         Ok(())
