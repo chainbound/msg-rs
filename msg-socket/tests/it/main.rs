@@ -1,0 +1,3 @@
+mod pubsub;
+
+fn main() {}

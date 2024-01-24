@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io, net::IpAddr, time::Duration};
 
-use protocol::Protocol;
+pub use protocol::Protocol;
 
 mod protocol;
 
@@ -13,13 +13,13 @@ use dummynet::{PacketFilter, Pipe};
 #[allow(unused)]
 pub struct SimulationConfig {
     /// The latency of the connection.
-    latency: Option<Duration>,
+    pub latency: Option<Duration>,
     /// The bandwidth in Kbps.
-    bw: Option<u64>,
+    pub bw: Option<u64>,
     /// The packet loss rate in percent.
-    plr: Option<f64>,
+    pub plr: Option<f64>,
     /// The supported protocols.
-    protocols: Vec<Protocol>,
+    pub protocols: Vec<Protocol>,
 }
 
 #[derive(Default)]
@@ -34,7 +34,7 @@ impl Simulator {
     pub fn new() -> Self {
         Self {
             active_sims: HashMap::new(),
-            sim_id: 0,
+            sim_id: 1,
         }
     }
 
