@@ -121,7 +121,8 @@ where
     }
 
     /// Publishes a message to the given topic. If the topic doesn't exist, this is a no-op.
-    pub async fn publish(&self, topic: String, message: Bytes) -> Result<(), PubError> {
+    pub async fn publish(&self, topic: impl Into<String>, message: Bytes) -> Result<(), PubError> {
+        let topic = topic.into();
         let mut msg = PubMessage::new(topic, message);
 
         // We compress here since that way we only have to do it once.
