@@ -98,6 +98,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::tcp::Tcp;
+    use msg_wire::compression::{GzipCompressor, SnappyCompressor};
     use rand::Rng;
 
     use crate::{req::ReqSocket, Authenticator, ReqOptions};
@@ -245,5 +246,30 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_basic_reqrep_with_compression() {
+        let mut rep =
+            RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
+                .with_compressor(SnappyCompressor);
+
+        rep.bind("0.0.0.0:4445").await.unwrap();
+
+        let mut req =
+            ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
+                .with_compressor(GzipCompressor::new(6));
+
+        req.connect("0.0.0.0:4445").await.unwrap();
+
+        tokio::spawn(async move {
+            let req = rep.next().await.unwrap();
+
+            assert_eq!(req.msg(), &Bytes::from("hello"));
+            req.respond(Bytes::from("world")).unwrap();
+        });
+
+        let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
+        assert_eq!(res, Bytes::from("world"));
     }
 }
