@@ -9,8 +9,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
@@ -23,11 +22,9 @@ use super::{
     Command, PubMessage, SocketState, SubOptions,
 };
 
-use msg_common::{channel, Channel};
+use msg_common::{channel, task::JoinMap, Channel};
 use msg_transport::Transport;
 use msg_wire::{auth, pubsub};
-
-type ConnectionResult<Io, E> = Result<(SocketAddr, Io), E>;
 
 pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
@@ -39,7 +36,7 @@ pub(crate) struct SubDriver<T: Transport> {
     /// Messages to the socket.
     pub(super) to_socket: mpsc::Sender<PubMessage>,
     /// A joinset of authentication tasks.
-    pub(super) connection_tasks: JoinSet<ConnectionResult<T::Io, T::Error>>,
+    pub(super) connection_tasks: JoinMap<SocketAddr, Result<T::Io, T::Error>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All active publisher sessions for this subscriber socket.
@@ -87,13 +84,14 @@ where
                 continue;
             }
 
-            if let Poll::Ready(Some(Ok(result))) = this.connection_tasks.poll_join_next(cx) {
+            if let Poll::Ready(Some(Ok((addr, result)))) = this.connection_tasks.poll_join_next(cx)
+            {
                 match result {
-                    Ok((addr, io)) => {
+                    Ok(io) => {
                         this.on_connection(addr, io);
                     }
                     Err(e) => {
-                        error!("Error connecting to publisher: {:?}", e);
+                        error!(%addr, "Error connecting to publisher: {:?}", e);
                     }
                 }
 
@@ -129,6 +127,10 @@ where
         }
 
         false
+    }
+
+    fn is_known(&self, addr: &SocketAddr) -> bool {
+        self.publishers.contains_key(addr)
     }
 
     /// Subscribes to a topic on all publishers.
@@ -217,6 +219,11 @@ where
                     endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
                 }
 
+                if self.is_known(&endpoint) {
+                    debug!(%endpoint, "Publisher already known, ignoring connect command");
+                    return;
+                }
+
                 self.connect(endpoint);
 
                 // Also set the publisher to the disconnected state. This will make sure that if the
@@ -242,42 +249,63 @@ where
         let connect = self.transport.connect(addr);
         let token = self.options.auth_token.clone();
 
-        self.connection_tasks.spawn(async move {
-            let io = connect.await?;
+        self.connection_tasks.spawn(addr, async move {
+            let io = match connect.await {
+                Ok(io) => io,
+                Err(e) => {
+                    return (addr, Err(e));
+                }
+            };
 
             if let Some(token) = token {
                 let mut conn = Framed::new(io, auth::Codec::new_client());
 
                 tracing::debug!("Sending auth message: {:?}", token);
                 // Send the authentication message
-                conn.send(auth::Message::Auth(token))
-                    .await
-                    .map_err(T::Error::from)?;
-                conn.flush().await.map_err(T::Error::from)?;
+                if let Err(e) = conn.send(auth::Message::Auth(token)).await {
+                    return (addr, Err(e.into()));
+                }
+
+                if let Err(e) = conn.flush().await {
+                    return (addr, Err(e.into()));
+                }
 
                 tracing::debug!("Waiting for ACK from server...");
 
                 // Wait for the response
-                let ack = conn
-                    .next()
-                    .await
-                    .ok_or(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "Connection closed",
-                    ))?
-                    .map_err(|e| io::Error::new(io::ErrorKind::PermissionDenied, e))?;
+                let ack = match conn.next().await {
+                    Some(Ok(ack)) => ack,
+                    Some(Err(e)) => {
+                        return (
+                            addr,
+                            Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
+                        )
+                    }
+                    None => {
+                        return (
+                            addr,
+                            Err(
+                                io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
+                                    .into(),
+                            ),
+                        )
+                    }
+                };
 
                 if matches!(ack, auth::Message::Ack) {
-                    Ok((addr, conn.into_inner()))
+                    (addr, Ok(conn.into_inner()))
                 } else {
-                    Err(io::Error::new(
-                        io::ErrorKind::PermissionDenied,
-                        "Publisher denied connection",
+                    (
+                        addr,
+                        Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "Publisher denied connection",
+                        )
+                        .into()),
                     )
-                    .into())
                 }
             } else {
-                Ok((addr, io))
+                (addr, Ok(io))
             }
         });
     }
@@ -382,8 +410,14 @@ where
                     if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
                         if let Some(duration) = item {
                             progress = true;
-                            tracing::debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
-                            to_retry.push(*addr);
+
+                            // Only retry if there are no active connection tasks
+                            if !self.connection_tasks.contains_key(addr) {
+                                tracing::debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
+                                to_retry.push(*addr);
+                            } else {
+                                tracing::debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
+                            }
                         } else {
                             error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);
                             to_terminate.push(*addr);

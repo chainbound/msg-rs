@@ -11,9 +11,9 @@ use std::{
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::mpsc,
-    task::JoinSet,
 };
 
+use msg_common::task::JoinMap;
 use msg_transport::Transport;
 
 use super::{
@@ -61,7 +61,7 @@ where
             transport,
             from_socket,
             to_socket,
-            connection_tasks: JoinSet::new(),
+            connection_tasks: JoinMap::new(),
             publishers,
             subscribed_topics: HashSet::with_capacity(32),
             state: Arc::clone(&state),
