@@ -25,16 +25,32 @@ pub enum PubError {
     Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-#[derive(Default)]
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
+    min_compress_size: usize,
+}
+
+impl Default for RepOptions {
+    fn default() -> Self {
+        Self {
+            max_clients: None,
+            min_compress_size: 8192,
+        }
+    }
 }
 
 impl RepOptions {
     /// Sets the number of maximum concurrent clients.
     pub fn max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
+        self
+    }
+
+    /// Sets the minimum payload size for compression.
+    /// If the payload is smaller than this value, it will not be compressed.
+    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+        self.min_compress_size = min_compress_size;
         self
     }
 }
@@ -45,11 +61,15 @@ pub(crate) struct SocketState {
     pub(crate) stats: SocketStats,
 }
 
-/// A request received by the socket. It contains the source address, the message,
-/// and a oneshot channel to respond to the request.
+/// A request received by the socket.
 pub struct Request {
+    /// The source address of the request.
     source: SocketAddr,
+    /// The compression type used for the request payload
+    compression_type: u8,
+    /// The oneshot channel to respond to the request.
     response: oneshot::Sender<Bytes>,
+    /// The message payload.
     msg: Bytes,
 }
 
@@ -78,6 +98,7 @@ mod tests {
 
     use futures::StreamExt;
     use msg_transport::tcp::Tcp;
+    use msg_wire::compression::{GzipCompressor, SnappyCompressor};
     use rand::Rng;
 
     use crate::{req::ReqSocket, Authenticator, ReqOptions};
@@ -225,5 +246,30 @@ mod tests {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_basic_reqrep_with_compression() {
+        let mut rep =
+            RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
+                .with_compressor(SnappyCompressor);
+
+        rep.bind("0.0.0.0:4445").await.unwrap();
+
+        let mut req =
+            ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
+                .with_compressor(GzipCompressor::new(6));
+
+        req.connect("0.0.0.0:4445").await.unwrap();
+
+        tokio::spawn(async move {
+            let req = rep.next().await.unwrap();
+
+            assert_eq!(req.msg(), &Bytes::from("hello"));
+            req.respond(Bytes::from("world")).unwrap();
+        });
+
+        let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
+        assert_eq!(res, Bytes::from("world"));
     }
 }

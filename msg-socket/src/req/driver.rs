@@ -4,6 +4,7 @@ use msg_transport::Transport;
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
+    io,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -11,10 +12,13 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::codec::Framed;
 
-use crate::req::SocketState;
+use crate::{req::SocketState, ReqMessage};
 
 use super::{Command, ReqError, ReqOptions};
-use msg_wire::reqrep;
+use msg_wire::{
+    compression::{try_decompress_payload, Compressor},
+    reqrep,
+};
 use std::time::Instant;
 use tokio::time::Interval;
 
@@ -42,27 +46,40 @@ pub(crate) struct ReqDriver<T: Transport> {
     pub(crate) flush_interval: Option<tokio::time::Interval>,
     /// Whether or not the connection should be flushed
     pub(crate) should_flush: bool,
+    /// Optional message compressor. This is shared with the socket to keep
+    /// the API consistent with other socket types (e.g. `PubSocket`)
+    pub(crate) compressor: Option<Arc<dyn Compressor>>,
 }
 
+/// A pending request that is waiting for a response.
 pub(crate) struct PendingRequest {
+    /// The timestamp when the request was sent.
     start: Instant,
+    /// The response sender.
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
 impl<T: Transport> ReqDriver<T> {
-    fn new_message(&mut self, payload: Bytes) -> reqrep::Message {
-        let id = self.id_counter;
-        // Wrap add here to avoid overflow
-        self.id_counter = id.wrapping_add(1);
-
-        reqrep::Message::new(id, payload)
-    }
-
     fn on_message(&mut self, msg: reqrep::Message) {
         if let Some(pending) = self.pending_requests.remove(&msg.id()) {
             let rtt = pending.start.elapsed().as_micros() as usize;
             let size = msg.size();
-            let _ = pending.sender.send(Ok(msg.into_payload()));
+            let compression_type = msg.header().compression_type();
+            let mut payload = msg.into_payload();
+
+            // decompress the response
+            match try_decompress_payload(compression_type, payload) {
+                Ok(decompressed) => payload = decompressed,
+                Err(e) => {
+                    tracing::error!("Failed to decompress response payload: {:?}", e);
+                    let _ = pending.sender.send(Err(ReqError::Wire(reqrep::Error::Io(
+                        io::Error::new(io::ErrorKind::Other, "Failed to decompress response"),
+                    ))));
+                    return;
+                }
+            }
+
+            let _ = pending.sender.send(Ok(payload));
 
             // Update stats
             self.socket_state.stats.update_rtt(rtt);
@@ -183,11 +200,30 @@ where
                 Poll::Ready(Some(Command::Send { message, response })) => {
                     // Queue the message for sending
                     let start = std::time::Instant::now();
-                    let msg = this.new_message(message);
-                    let id = msg.id();
+
+                    let mut msg = ReqMessage::new(message);
+
+                    let len_before = msg.payload().len();
+                    if len_before > this.options.min_compress_size {
+                        if let Some(ref compressor) = this.compressor {
+                            if let Err(e) = msg.compress(compressor.as_ref()) {
+                                tracing::error!("Failed to compress message: {:?}", e);
+                            }
+
+                            tracing::debug!(
+                                "Compressed message from {} to {} bytes",
+                                len_before,
+                                msg.payload().len()
+                            );
+                        }
+                    }
+
+                    let msg = msg.into_wire(this.id_counter);
+                    let msg_id = msg.id();
+                    this.id_counter = this.id_counter.wrapping_add(1);
                     this.egress_queue.push_back(msg);
                     this.pending_requests.insert(
-                        id,
+                        msg_id,
                         PendingRequest {
                             start,
                             sender: response,

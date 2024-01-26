@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::SinkExt;
+use msg_wire::compression::Compressor;
 use rustc_hash::FxHashMap;
 use std::{collections::VecDeque, io, sync::Arc, time::Duration};
 use tokio::net::{lookup_host, ToSocketAddrs};
@@ -14,7 +15,7 @@ use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 use crate::backoff::ExponentialBackoff;
 use crate::{req::stats::SocketStats, req::SocketState};
 
-#[derive(Debug)]
+/// The request socket.
 pub struct ReqSocket<T: Transport> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
@@ -24,6 +25,10 @@ pub struct ReqSocket<T: Transport> {
     options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
     state: Arc<SocketState>,
+    /// Optional message compressor. This is shared with the backend task.
+    // NOTE: for now we're using dynamic dispatch, since using generics here
+    // complicates the API a lot. We can always change this later for perf reasons.
+    compressor: Option<Arc<dyn Compressor>>,
 }
 
 impl<T> ReqSocket<T>
@@ -40,7 +45,14 @@ where
             transport,
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
+            compressor: None,
         }
+    }
+
+    /// Sets the message compressor for this socket.
+    pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
+        self.compressor = Some(Arc::new(compressor));
+        self
     }
 
     pub fn stats(&self) -> &SocketStats {
@@ -124,6 +136,7 @@ where
             )),
             flush_interval: self.options.flush_interval.map(tokio::time::interval),
             should_flush: false,
+            compressor: self.compressor.clone(),
         };
 
         // Spawn the backend task

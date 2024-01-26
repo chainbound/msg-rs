@@ -13,6 +13,7 @@
 [new-issue]: https://github.com/chainbound/msg-rs/issues/new
 [license]: https://github.com/chainbound/msg-rs/blob/main/LICENSE
 [contributing]: https://github.com/chainbound/msg-rs/tree/main/CONTRIBUTING.md
+[examples]: https://github.com/chainboudn/msg-rs/tree/main/msg/examples
 
 <!-- Chainbound links -->
 
