@@ -98,7 +98,7 @@ where
     /// De-activates a publisher by setting it to [`ConnectionState::Inactive`].
     /// This will initialize the backoff stream.
     fn reset_publisher(&mut self, addr: SocketAddr) {
-        tracing::debug!("Resetting publisher at {addr:?}");
+        debug!("Resetting publisher at {addr:?}");
         self.publishers.insert(
             addr,
             ConnectionState::Inactive {
@@ -228,7 +228,7 @@ where
             }
             Command::Shutdown => {
                 // TODO: graceful shutdown?
-                tracing::debug!("shutting down");
+                debug!("shutting down");
             }
         }
     }
@@ -248,7 +248,7 @@ where
             if let Some(token) = token {
                 let mut conn = Framed::new(io, auth::Codec::new_client());
 
-                tracing::debug!("Sending auth message: {:?}", token);
+                debug!("Sending auth message: {:?}", token);
                 // Send the authentication message
                 if let Err(e) = conn.send(auth::Message::Auth(token)).await {
                     return (addr, Err(e.into()));
@@ -258,7 +258,7 @@ where
                     return (addr, Err(e.into()));
                 }
 
-                tracing::debug!("Waiting for ACK from server...");
+                debug!("Waiting for ACK from server...");
 
                 // Wait for the response
                 let ack = match conn.next().await {
@@ -305,7 +305,6 @@ where
             return;
         }
 
-        // This should spawn a new task tied to this connection, and
         debug!("Connection to {} established, spawning session", addr);
 
         let framed = Framed::with_capacity(io, pubsub::Codec::new(), self.options.read_buffer_size);
@@ -361,7 +360,7 @@ where
                             match try_decompress_payload(msg.compression_type, msg.payload) {
                                 Ok(decompressed) => msg.payload = decompressed,
                                 Err(e) => {
-                                    tracing::error!("Failed to decompress message: {:?}", e);
+                                    error!("Failed to decompress message: {:?}", e);
                                     continue;
                                 }
                             };
@@ -396,10 +395,10 @@ where
 
                             // Only retry if there are no active connection tasks
                             if !self.connection_tasks.contains_key(addr) {
-                                tracing::debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
+                                debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
                                 to_retry.push(*addr);
                             } else {
-                                tracing::debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
+                                debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                             }
                         } else {
                             error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);

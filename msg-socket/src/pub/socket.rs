@@ -114,7 +114,6 @@ where
         tokio::spawn(backend);
 
         self.local_addr = Some(local_addr);
-        // self.to_driver = Some(to_driver);
         self.to_sessions_bcast = Some(to_sessions_bcast);
 
         Ok(())
