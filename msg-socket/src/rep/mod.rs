@@ -237,13 +237,15 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().max_clients(1));
         rep.bind("127.0.0.1:0").await.unwrap();
+        let addr = rep.local_addr().unwrap();
 
         let mut req1 = ReqSocket::new(Tcp::default());
-        req1.connect(rep.local_addr().unwrap()).await.unwrap();
+        req1.connect(addr).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(rep.stats().active_clients(), 1);
 
         let mut req2 = ReqSocket::new(Tcp::default());
-        req2.connect(rep.local_addr().unwrap()).await.unwrap();
-
+        req2.connect(addr).await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);
     }

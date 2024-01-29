@@ -93,8 +93,8 @@ where
             .take()
             .expect("Transport has been moved already");
 
-        // We initialize the connection as inactive, and let it be activated by the backend task
-        // as soon as the driver is spawned.
+        // We initialize the connection as inactive, and let it be activated
+        // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
             addr: endpoint,
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
@@ -112,6 +112,7 @@ where
 
         // Create the socket backend
         let driver: ReqDriver<T> = ReqDriver {
+            addr: endpoint,
             options: Arc::clone(&self.options),
             socket_state: Arc::clone(&self.state),
             id_counter: 0,

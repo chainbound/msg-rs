@@ -1,6 +1,5 @@
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_transport::{PeerAddress, Transport};
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
@@ -9,14 +8,14 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     sync::{mpsc, oneshot},
-    task::JoinHandle,
+    time::Interval,
 };
 use tokio_util::codec::Framed;
-use tracing::{debug, error};
+use tracing::{debug, error, trace};
 
 use crate::{
     connection::{ConnectionState, ExponentialBackoff},
@@ -24,13 +23,14 @@ use crate::{
 };
 
 use super::{Command, ReqError, ReqOptions};
+use msg_transport::Transport;
 use msg_wire::{
     auth,
     compression::{try_decompress_payload, Compressor},
     reqrep,
 };
-use std::time::Instant;
-use tokio::time::Interval;
+
+type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
@@ -46,8 +46,10 @@ pub(crate) struct ReqDriver<T: Transport> {
     pub(crate) from_socket: mpsc::Receiver<Command>,
     /// The transport for this socket.
     pub(crate) transport: T,
+    /// The address of the server.
+    pub(crate) addr: SocketAddr,
     /// The connection task which handles the connection to the server.
-    pub(crate) conn_task: Option<JoinHandle<Result<T::Io, T::Error>>>,
+    pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     pub(crate) conn_state: ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff>,
@@ -81,12 +83,12 @@ where
     /// Start the connection task to the server, handling authentication if necessary.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
     fn try_connect(&mut self, addr: SocketAddr) {
-        tracing::trace!("try_connect");
+        trace!("Trying to connect to {}", addr);
+
         let connect = self.transport.connect(addr);
         let token = self.options.auth_token.clone();
 
-        self.conn_task = Some(tokio::spawn(async move {
-            tracing::trace!("conn_task start");
+        self.conn_task = Some(Box::pin(async move {
             let mut io = match connect.await {
                 Ok(io) => io,
                 Err(e) => {
@@ -94,8 +96,6 @@ where
                     return Err(e);
                 }
             };
-
-            tracing::trace!("io got");
 
             // Perform the authentication handshake
             if let Some(token) = token {
@@ -244,13 +244,8 @@ where
 
     #[inline]
     fn reset_connection(&mut self) {
-        let addr = match self.conn_state {
-            ConnectionState::Active { ref channel } => channel.get_ref().peer_addr().unwrap(),
-            ConnectionState::Inactive { addr, .. } => addr,
-        };
-
         self.conn_state = ConnectionState::Inactive {
-            addr,
+            addr: self.addr,
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
     }
@@ -277,27 +272,17 @@ where
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
-                match conn_task.poll_unpin(cx) {
-                    Poll::Ready(Ok(result)) => {
-                        tracing::trace!("conn_task ready");
+                if let Poll::Ready(result) = conn_task.poll_unpin(cx) {
+                    // As soon as the connection task finishes, set it to `None`.
+                    // - If it was successful, set the connection to active
+                    // - If it failed,  it will be re-tried until the backoff limit is reached.
+                    this.conn_task = None;
 
-                        // As soon as the connection task finishes, set it to `None`.
-                        // If it succeeds, the connection will be active, otherwise it will be
-                        // re-tried until the backoff limit is reached.
-                        this.conn_task = None;
-
-                        if let Ok(io) = result {
-                            let mut framed = Framed::new(io, reqrep::Codec::new());
-                            framed.set_backpressure_boundary(this.options.backpressure_boundary);
-                            this.conn_state = ConnectionState::Active { channel: framed };
-
-                            continue;
-                        }
+                    if let Ok(io) = result {
+                        let mut framed = Framed::new(io, reqrep::Codec::new());
+                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
+                        this.conn_state = ConnectionState::Active { channel: framed };
                     }
-                    Poll::Ready(Err(e)) => {
-                        error!("Connection task failed: {:?}", e);
-                    }
-                    Poll::Pending => {}
                 }
             }
 
