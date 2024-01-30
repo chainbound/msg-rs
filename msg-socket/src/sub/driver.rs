@@ -1,4 +1,4 @@
-use futures::{Future, SinkExt, Stream, StreamExt};
+use futures::{Future, SinkExt, StreamExt};
 use rustc_hash::FxHashMap;
 use std::{
     collections::HashSet,
@@ -7,13 +7,12 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
-use crate::backoff::ExponentialBackoff;
+use crate::connection::{ConnectionState, ExponentialBackoff};
 
 use super::session::SessionCommand;
 use super::{
@@ -25,6 +24,10 @@ use super::{
 use msg_common::{channel, task::JoinMap, Channel};
 use msg_transport::Transport;
 use msg_wire::{auth, compression::try_decompress_payload, pubsub};
+
+/// Publisher channel type, used to send messages to the publisher session
+/// and receive messages to forward to the socket frontend.
+type PubChannel = Channel<SessionCommand, TopicMessage>;
 
 pub(crate) struct SubDriver<T: Transport> {
     /// Options shared with the socket.
@@ -39,27 +42,10 @@ pub(crate) struct SubDriver<T: Transport> {
     pub(super) connection_tasks: JoinMap<SocketAddr, Result<T::Io, T::Error>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
-    /// All active publisher sessions for this subscriber socket.
-    pub(super) publishers: FxHashMap<SocketAddr, PublisherState<ExponentialBackoff>>,
+    /// All publisher sessions for this subscriber socket, keyed by address.
+    pub(super) publishers: FxHashMap<SocketAddr, ConnectionState<PubChannel, ExponentialBackoff>>,
     /// Socket state. This is shared with the backend task.
     pub(super) state: Arc<SocketState>,
-}
-
-/// Represents the state of a publisher.
-pub(crate) enum PublisherState<S>
-where
-    S: Stream<Item = Duration>,
-{
-    Active {
-        /// The channel to the publisher session.
-        channel: Channel<SessionCommand, TopicMessage>,
-    },
-    Inactive {
-        /// The address of the publisher.
-        addr: SocketAddr,
-        /// Exponential backoff for retrying connections.
-        backoff: S,
-    },
 }
 
 impl<T> Future for SubDriver<T>
@@ -78,12 +64,14 @@ where
                 continue;
             }
 
+            // Then, poll the socket for new commands.
             if let Poll::Ready(Some(cmd)) = this.from_socket.poll_recv(cx) {
                 this.on_command(cmd);
 
                 continue;
             }
 
+            // Finally, poll the connection tasks for new connections.
             if let Poll::Ready(Some(Ok((addr, result)))) = this.connection_tasks.poll_join_next(cx)
             {
                 match result {
@@ -107,13 +95,13 @@ impl<T> SubDriver<T>
 where
     T: Transport + Send + Sync + 'static,
 {
-    /// De-activates a publisher by setting it to [`PublisherState::Inactive`]. This will initialize
-    /// the backoff stream.
+    /// De-activates a publisher by setting it to [`ConnectionState::Inactive`].
+    /// This will initialize the backoff stream.
     fn reset_publisher(&mut self, addr: SocketAddr) {
-        tracing::debug!("Resetting publisher at {addr:?}");
+        debug!("Resetting publisher at {addr:?}");
         self.publishers.insert(
             addr,
-            PublisherState::Inactive {
+            ConnectionState::Inactive {
                 addr,
                 backoff: ExponentialBackoff::new(self.options.initial_backoff, 16),
             },
@@ -122,7 +110,7 @@ where
 
     /// Returns true if we're already connected to the given publisher address.
     fn is_connected(&self, addr: &SocketAddr) -> bool {
-        if let Some(PublisherState::Active { .. }) = self.publishers.get(addr) {
+        if self.publishers.get(addr).is_some_and(|s| s.is_active()) {
             return true;
         }
 
@@ -141,7 +129,7 @@ where
             // Subscribe to the topic on all publishers
 
             for (addr, publisher_state) in self.publishers.iter_mut() {
-                if let PublisherState::Active { channel } = publisher_state {
+                if let ConnectionState::Active { channel } = publisher_state {
                     // If the channel is closed on the other side, deactivate the publisher
                     if let Err(TrySendError::Closed(_)) =
                         channel.try_send(SessionCommand::Subscribe(topic.clone()))
@@ -175,7 +163,7 @@ where
         if self.subscribed_topics.remove(&topic) {
             // Unsubscribe from the topic on all publishers
             for (addr, publisher_state) in self.publishers.iter_mut() {
-                if let PublisherState::Active { channel } = publisher_state {
+                if let ConnectionState::Active { channel } = publisher_state {
                     // If the channel is closed on the other side, deactivate the publisher
                     if let Err(TrySendError::Closed(_)) =
                         channel.try_send(SessionCommand::Unsubscribe(topic.clone()))
@@ -240,7 +228,7 @@ where
             }
             Command::Shutdown => {
                 // TODO: graceful shutdown?
-                tracing::debug!("shutting down");
+                debug!("shutting down");
             }
         }
     }
@@ -260,7 +248,7 @@ where
             if let Some(token) = token {
                 let mut conn = Framed::new(io, auth::Codec::new_client());
 
-                tracing::debug!("Sending auth message: {:?}", token);
+                debug!("Sending auth message: {:?}", token);
                 // Send the authentication message
                 if let Err(e) = conn.send(auth::Message::Auth(token)).await {
                     return (addr, Err(e.into()));
@@ -270,7 +258,7 @@ where
                     return (addr, Err(e.into()));
                 }
 
-                tracing::debug!("Waiting for ACK from server...");
+                debug!("Waiting for ACK from server...");
 
                 // Wait for the response
                 let ack = match conn.next().await {
@@ -317,7 +305,6 @@ where
             return;
         }
 
-        // This should spawn a new task tied to this connection, and
         debug!("Connection to {} established, spawning session", addr);
 
         let framed = Framed::with_capacity(io, pubsub::Codec::new(), self.options.read_buffer_size);
@@ -325,7 +312,7 @@ where
         let (driver_channel, mut publisher_channel) = channel(1024, 64);
 
         let publisher_session =
-            PublisherSession::new(addr, PublisherStream::new(framed), driver_channel);
+            PublisherSession::new(addr, PublisherStream::from(framed), driver_channel);
 
         // Get the shared session stats.
         let session_stats = publisher_session.stats();
@@ -344,7 +331,7 @@ where
 
         self.publishers.insert(
             addr,
-            PublisherState::Active {
+            ConnectionState::Active {
                 channel: publisher_channel,
             },
         );
@@ -367,13 +354,13 @@ where
 
         for (addr, state) in self.publishers.iter_mut() {
             match state {
-                PublisherState::Active { channel } => {
+                ConnectionState::Active { channel } => {
                     match channel.poll_recv(cx) {
                         Poll::Ready(Some(mut msg)) => {
                             match try_decompress_payload(msg.compression_type, msg.payload) {
                                 Ok(decompressed) => msg.payload = decompressed,
                                 Err(e) => {
-                                    tracing::error!("Failed to decompress message: {:?}", e);
+                                    error!("Failed to decompress message: {:?}", e);
                                     continue;
                                 }
                             };
@@ -400,7 +387,7 @@ where
                         Poll::Pending => {}
                     }
                 }
-                PublisherState::Inactive { addr, backoff } => {
+                ConnectionState::Inactive { addr, backoff } => {
                     // Poll the backoff stream
                     if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
                         if let Some(duration) = item {
@@ -408,10 +395,10 @@ where
 
                             // Only retry if there are no active connection tasks
                             if !self.connection_tasks.contains_key(addr) {
-                                tracing::debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
+                                debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
                                 to_retry.push(*addr);
                             } else {
-                                tracing::debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
+                                debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                             }
                         } else {
                             error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);

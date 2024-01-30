@@ -18,11 +18,6 @@ pub(super) struct PublisherStream<Io> {
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherStream<Io> {
-    /// Cretes a new publisher stream from the given framed connection.
-    pub fn new(conn: Framed<Io, pubsub::Codec>) -> Self {
-        Self { conn, flush: false }
-    }
-
     /// Queues a message to be sent to the publisher. If the connection
     /// is ready, this will register the waker
     /// and flush on the next poll.
@@ -44,6 +39,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherStream<Io> {
         cx.waker().wake_by_ref();
 
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<Io: AsyncRead + AsyncWrite + Unpin> From<Framed<Io, pubsub::Codec>> for PublisherStream<Io> {
+    fn from(conn: Framed<Io, pubsub::Codec>) -> Self {
+        Self { conn, flush: false }
     }
 }
 

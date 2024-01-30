@@ -2,6 +2,13 @@ use futures::{FutureExt, Stream};
 use std::{pin::Pin, task::Poll, time::Duration};
 use tokio::time::sleep;
 
+/// Helper trait alias for backoff streams.
+/// We define any stream that yields `Duration`s as a backoff
+pub trait Backoff: Stream<Item = Duration> + Unpin {}
+
+/// Blanket implementation of `Backoff` for any stream that yields `Duration`s.
+impl<T> Backoff for T where T: Stream<Item = Duration> + Unpin {}
+
 /// A stream that yields exponentially increasing backoff durations.
 pub struct ExponentialBackoff {
     /// Current number of retries.

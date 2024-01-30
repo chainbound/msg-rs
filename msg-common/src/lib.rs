@@ -1,13 +1,17 @@
 use futures::future::BoxFuture;
 use std::{
+    pin::Pin,
     task::{Context, Poll},
     time::SystemTime,
 };
+
+use futures::{Sink, SinkExt, Stream};
 use tokio::sync::mpsc::{
     self,
-    error::{SendError, TryRecvError, TrySendError},
-    Receiver, Sender,
+    error::{TryRecvError, TrySendError},
+    Receiver,
 };
+use tokio_util::sync::{PollSendError, PollSender};
 
 pub mod task;
 
@@ -36,8 +40,10 @@ pub mod constants {
 
 /// A bounded, bi-directional channel for sending and receiving messages.
 /// Relies on Tokio's [`mpsc`] channel.
+///
+/// Channel also implements the [`Stream`] and [`Sink`] traits for convenience.
 pub struct Channel<S, R> {
-    tx: Sender<S>,
+    tx: PollSender<S>,
     rx: Receiver<R>,
 }
 
@@ -49,14 +55,21 @@ pub struct Channel<S, R> {
 /// the tuple can be used to send messages of type `S` and receive messages of
 /// type `R`. The second channel can be used to send messages of type `R` and
 /// receive messages of type `S`.
-pub fn channel<S, R>(tx_buffer: usize, rx_buffer: usize) -> (Channel<S, R>, Channel<R, S>) {
+pub fn channel<S, R>(tx_buffer: usize, rx_buffer: usize) -> (Channel<S, R>, Channel<R, S>)
+where
+    S: Send,
+    R: Send,
+{
     let (tx1, rx1) = mpsc::channel(tx_buffer);
     let (tx2, rx2) = mpsc::channel(rx_buffer);
+
+    let tx1 = PollSender::new(tx1);
+    let tx2 = PollSender::new(tx2);
 
     (Channel { tx: tx1, rx: rx2 }, Channel { tx: tx2, rx: rx1 })
 }
 
-impl<S, R> Channel<S, R> {
+impl<S: Send + 'static, R> Channel<S, R> {
     /// Sends a value, waiting until there is capacity.
     ///
     /// A successful send occurs when it is determined that the other end of the
@@ -66,7 +79,7 @@ impl<S, R> Channel<S, R> {
     /// value of `Ok` does not mean that the data will be received. It is
     /// possible for the corresponding receiver to hang up immediately after
     /// this function returns `Ok`.
-    pub async fn send(&mut self, msg: S) -> Result<(), SendError<S>> {
+    pub async fn send(&mut self, msg: S) -> Result<(), PollSendError<S>> {
         self.tx.send(msg).await
     }
 
@@ -77,7 +90,11 @@ impl<S, R> Channel<S, R> {
     /// with [`send`], this function has two failure cases instead of one (one for
     /// disconnection, one for a full buffer).
     pub fn try_send(&mut self, msg: S) -> Result<(), TrySendError<S>> {
-        self.tx.try_send(msg)
+        if let Some(tx) = self.tx.get_ref() {
+            tx.try_send(msg)
+        } else {
+            Err(TrySendError::Closed(msg))
+        }
     }
 
     /// Receives the next value for this receiver.
@@ -133,5 +150,33 @@ impl<S, R> Channel<S, R> {
     /// spurious failure.
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<R>> {
         self.rx.poll_recv(cx)
+    }
+}
+
+impl<S, R> Stream for Channel<S, R> {
+    type Item = R;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+impl<S: Send + 'static, R> Sink<S> for Channel<S, R> {
+    type Error = PollSendError<S>;
+
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.tx.poll_ready_unpin(cx)
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: S) -> Result<(), Self::Error> {
+        self.tx.start_send_unpin(item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.tx.poll_flush_unpin(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.tx.poll_close_unpin(cx)
     }
 }
