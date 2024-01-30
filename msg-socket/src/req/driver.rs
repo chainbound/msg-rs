@@ -340,10 +340,7 @@ where
                     continue;
                 }
                 Poll::Ready(None) => {
-                    debug!(
-                        "Connection to {:? } closed, shutting down driver",
-                        this.addr
-                    );
+                    debug!("Connection to {:?} closed, shutting down driver", this.addr);
 
                     return Poll::Ready(());
                 }
@@ -366,7 +363,6 @@ where
                             error!("Failed to send message to socket: {:?}", e);
 
                             // set the connection to inactive, so that it will be re-tried
-                            dbg!("2222");
                             this.reset_connection();
                         }
                     }
