@@ -275,7 +275,7 @@ where
                 if let Poll::Ready(result) = conn_task.poll_unpin(cx) {
                     // As soon as the connection task finishes, set it to `None`.
                     // - If it was successful, set the connection to active
-                    // - If it failed,  it will be re-tried until the backoff limit is reached.
+                    // - If it failed, it will be re-tried until the backoff limit is reached.
                     this.conn_task = None;
 
                     if let Ok(io) = result {
@@ -286,44 +286,48 @@ where
                 }
             }
 
-            // Until the connection is active, try to connect to the server
-            let connection = match this.conn_state {
-                ConnectionState::Active { ref mut channel } => channel,
-                ConnectionState::Inactive {
-                    addr,
-                    ref mut backoff,
-                } => {
-                    // Try to connect to the server if we're not already connected
-                    if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
-                        if let Some(duration) = item {
-                            if this.conn_task.is_none() {
-                                debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
-                                this.try_connect(addr);
-                            } else {
-                                debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
-                            }
+            // If the connection is inactive, try to connect to the server
+            // or poll the backoff timer if we're already trying to connect.
+            if let ConnectionState::Inactive {
+                ref mut backoff,
+                addr,
+            } = this.conn_state
+            {
+                if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
+                    if let Some(duration) = item {
+                        if this.conn_task.is_none() {
+                            debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
+                            this.try_connect(addr);
                         } else {
-                            error!(
-                                "Exceeded maximum number of retries for {:?}, terminating connection",
-                                addr
-                            );
-                            return Poll::Ready(());
+                            debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                         }
-                    }
+                    } else {
+                        error!(
+                            "Exceeded maximum number of retries for {:?}, terminating connection",
+                            addr
+                        );
 
-                    continue;
+                        return Poll::Ready(());
+                    }
                 }
+
+                return Poll::Pending;
+            }
+
+            // If there is no active connection, continue polling the backoff
+            let ConnectionState::Active { ref mut channel } = this.conn_state else {
+                continue;
             };
 
             // Check for incoming messages from the socket
-            match connection.poll_next_unpin(cx) {
+            match channel.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(msg))) => {
                     this.on_message(msg);
 
                     continue;
                 }
-                Poll::Ready(other) => {
-                    if let Some(Err(reqrep::Error::Io(e))) = other {
+                Poll::Ready(Some(Err(err))) => {
+                    if let reqrep::Error::Io(e) = err {
                         error!("Socket error: {:?}", e);
                         if e.kind() == std::io::ErrorKind::Other {
                             error!("Other error: {:?}", e);
@@ -335,17 +339,25 @@ where
 
                     continue;
                 }
+                Poll::Ready(None) => {
+                    debug!(
+                        "Connection to {:? } closed, shutting down driver",
+                        this.addr
+                    );
+
+                    return Poll::Ready(());
+                }
                 Poll::Pending => {}
             }
 
             // Check for outgoing messages to the socket
-            if connection.poll_ready_unpin(cx).is_ready() {
+            if channel.poll_ready_unpin(cx).is_ready() {
                 // Drain the egress queue
                 if let Some(msg) = this.egress_queue.pop_front() {
                     // Generate the new message
                     let size = msg.size();
                     debug!("Sending msg {}", msg.id());
-                    match connection.start_send_unpin(msg) {
+                    match channel.start_send_unpin(msg) {
                         Ok(_) => {
                             this.socket_state.stats.increment_tx(size);
                             this.should_flush = true;
@@ -354,6 +366,7 @@ where
                             error!("Failed to send message to socket: {:?}", e);
 
                             // set the connection to inactive, so that it will be re-tried
+                            dbg!("2222");
                             this.reset_connection();
                         }
                     }

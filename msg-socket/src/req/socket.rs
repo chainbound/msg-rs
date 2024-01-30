@@ -100,9 +100,7 @@ where
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
 
-        let timeout_check_interval = tokio::time::interval(Duration::from_millis(
-            self.options.timeout.as_millis() as u64 / 10,
-        ));
+        let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 
         let flush_interval = self.options.flush_interval.map(tokio::time::interval);
 
