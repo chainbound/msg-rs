@@ -2,9 +2,11 @@ use bytes::Bytes;
 use std::io;
 
 mod gzip;
+mod lz4;
 mod snappy;
 mod zstd;
 pub use gzip::*;
+pub use lz4::*;
 pub use snappy::*;
 pub use zstd::*;
 
@@ -16,6 +18,7 @@ pub enum CompressionType {
     Gzip = 1,
     Zstd = 2,
     Snappy = 3,
+    Lz4 = 4,
 }
 
 impl TryFrom<u8> for CompressionType {
@@ -27,6 +30,7 @@ impl TryFrom<u8> for CompressionType {
             1 => Ok(CompressionType::Gzip),
             2 => Ok(CompressionType::Zstd),
             3 => Ok(CompressionType::Snappy),
+            4 => Ok(CompressionType::Lz4),
             _ => Err(value),
         }
     }
@@ -63,6 +67,7 @@ pub fn try_decompress_payload(compression_type: u8, data: Bytes) -> Result<Bytes
             CompressionType::Gzip => GzipDecompressor.decompress(data.as_ref()),
             CompressionType::Zstd => ZstdDecompressor.decompress(data.as_ref()),
             CompressionType::Snappy => SnappyDecompressor.decompress(data.as_ref()),
+            CompressionType::Lz4 => Lz4Decompressor.decompress(data.as_ref()),
         },
         Err(unsupported_compression_type) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -109,6 +114,21 @@ mod tests {
     fn test_snappy_compression() {
         let compressor = SnappyCompressor;
         let decompressor = SnappyDecompressor;
+
+        let data =
+            Bytes::from("hellooooooooooooooooo wwwwwoooooooooooooooooooooooooooooooooooooorld");
+        println!("Before: {:?}", data.len());
+        let compressed = compressor.compress(&data).unwrap();
+        println!("After: {:?}", compressed.len());
+        let decompressed = decompressor.decompress(&compressed).unwrap();
+
+        assert_eq!(data, decompressed);
+    }
+
+    #[test]
+    fn test_lz4_compression() {
+        let compressor = Lz4Compressor;
+        let decompressor = Lz4Decompressor;
 
         let data =
             Bytes::from("hellooooooooooooooooo wwwwwoooooooooooooooooooooooooooooooooooooorld");
@@ -169,6 +189,13 @@ mod tests {
             snappy_perf, snappy_time
         );
 
+        let lz4 = Lz4Compressor;
+        let (lz4_time, lz4_perf, lz4_comp) = compression_test(&data, lz4);
+        println!(
+            "lz4 compression shrank the data by {:.2}% in {:?}",
+            lz4_perf, lz4_time
+        );
+
         println!("------");
 
         let gzip = GzipDecompressor;
@@ -182,5 +209,9 @@ mod tests {
         let snappy = SnappyDecompressor;
         let snappy_time = decompression_test(&snappy_comp, snappy);
         println!("snappy decompression took {:?}", snappy_time);
+
+        let lz4 = Lz4Decompressor;
+        let lz4_time = decompression_test(&lz4_comp, lz4);
+        println!("lz4 decompression took {:?}", lz4_time);
     }
 }
