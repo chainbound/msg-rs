@@ -1,10 +1,10 @@
 use std::{
     io::{self, Read},
     net::IpAddr,
-    process::{Command, ExitStatus, Stdio},
+    process::{Command, Stdio},
 };
 
-use crate::protocol::Protocol;
+use crate::{protocol::Protocol, utils::assert_status};
 
 /// Pipe represents a dummynet pipe.
 pub struct Pipe {
@@ -309,19 +309,6 @@ fn get_loopback_name() -> String {
     let loopback = interfaces.into_iter().find(|iface| iface.is_loopback());
 
     loopback.expect("No loopback interface").name
-}
-
-/// Assert that the given status is successful, otherwise return an error with the given message.
-/// The type of the error will be `io::ErrorKind::Other`.
-fn assert_status<E>(status: ExitStatus, error: E) -> io::Result<()>
-where
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, error));
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
