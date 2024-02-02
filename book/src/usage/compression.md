@@ -77,6 +77,7 @@ with the default compression methods:
 - Gzip
 - Zstd
 - Snappy
+- LZ4
 
 If you wish to use a custom compression algorithm, this is not exposed with a public API yet.
 If you need this, please [open an issue][new-issue] on Github and we will prioritize it!

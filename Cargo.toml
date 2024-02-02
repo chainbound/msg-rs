@@ -48,9 +48,6 @@ quinn = "0.10"
 # rustls needs to be the same version as the one used by quinn
 rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
 rcgen = "0.12"
-flate2 = "1"
-zstd = "0.13"
-snap = "1"
 
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }

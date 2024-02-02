@@ -17,6 +17,8 @@ bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-flate2.workspace = true
-zstd.workspace = true
-snap.workspace = true
+
+flate2 = "1"
+zstd = "0.13"
+snap = "1"
+lz4_flex = "0.11"

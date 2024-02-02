@@ -17,12 +17,9 @@ use tokio::{
 use tokio_util::codec::Framed;
 use tracing::{debug, error, trace};
 
-use crate::{
-    connection::{ConnectionState, ExponentialBackoff},
-    req::SocketState,
-};
-
 use super::{Command, ReqError, ReqOptions};
+use crate::{req::SocketState, ConnectionState, ExponentialBackoff};
+
 use msg_transport::Transport;
 use msg_wire::{
     auth,

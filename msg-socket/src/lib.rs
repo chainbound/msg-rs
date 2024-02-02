@@ -8,6 +8,7 @@ mod req;
 mod sub;
 
 mod connection;
+pub use connection::*;
 
 use bytes::Bytes;
 pub use pubs::{PubError, PubOptions, PubSocket};

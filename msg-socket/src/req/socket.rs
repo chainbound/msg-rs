@@ -8,9 +8,10 @@ use tokio::sync::{mpsc, oneshot};
 use msg_transport::Transport;
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
-use crate::connection::{ConnectionState, ExponentialBackoff};
-use crate::ReqMessage;
-use crate::{req::stats::SocketStats, req::SocketState};
+use crate::{
+    req::{stats::SocketStats, SocketState},
+    ConnectionState, ExponentialBackoff, ReqMessage,
+};
 
 /// The request socket.
 pub struct ReqSocket<T: Transport> {

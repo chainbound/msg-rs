@@ -12,14 +12,13 @@ use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
-use crate::connection::{ConnectionState, ExponentialBackoff};
-
 use super::session::SessionCommand;
 use super::{
     session::PublisherSession,
     stream::{PublisherStream, TopicMessage},
     Command, PubMessage, SocketState, SubOptions,
 };
+use crate::{ConnectionState, ExponentialBackoff};
 
 use msg_common::{channel, task::JoinMap, Channel};
 use msg_transport::Transport;
