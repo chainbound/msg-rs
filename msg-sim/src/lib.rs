@@ -195,6 +195,22 @@ impl Simulation {
             .status()?;
         assert_status(status, "Failed to set up the namespaced veth device")?;
 
+        // Spin up also the loopback interface on namespaced environment
+        let status = Command::new("sudo")
+            .args([
+                "ip",
+                "netns",
+                "exec",
+                &network_namespace,
+                "ip",
+                "link",
+                "set",
+                "lo",
+                "up",
+            ])
+            .status()?;
+        assert_status(status, "Failed to set up the namespaced loopback device")?;
+
         // Add network emulation parameters (delay, loss) on namespaced veth device
         //
         // The behaviour is specified on the top-level ("root"),
@@ -348,11 +364,11 @@ mod test {
     #[test]
     fn start_simulation() {
         let config = SimulationConfig {
-            latency: Some(Duration::new(3, 0)),
+            latency: Some(Duration::new(0, 5_000_000)),
             bw: Some(1_000),
             burst: Some(32),
             limit: None,
-            plr: Some(50_f64),
+            plr: Some(10_f64),
             protocols: vec![Protocol::TCP],
         };
         let simulation = Simulation::new(1, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), config);
