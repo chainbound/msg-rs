@@ -30,6 +30,8 @@ async fn pubsub_channel() {
         SimulationConfig {
             latency: Some(Duration::from_millis(50)),
             bw: None,
+            burst: None,
+            limit: None,
             plr: None,
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },
@@ -91,6 +93,8 @@ async fn pubsub_fan_out() {
         SimulationConfig {
             latency: Some(Duration::from_millis(150)),
             bw: None,
+            burst: None,
+            limit: None,
             plr: None,
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },
@@ -172,6 +176,8 @@ async fn pubsub_fan_in() {
         SimulationConfig {
             latency: Some(Duration::from_millis(150)),
             bw: None,
+            burst: None,
+            limit: None,
             plr: None,
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },

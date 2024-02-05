@@ -8,8 +8,8 @@ pub mod dummynet;
 #[cfg(target_os = "macos")]
 use dummynet::{PacketFilter, Pipe};
 
-pub mod utils;
-use utils::assert_status;
+pub mod assert;
+use assert::assert_status;
 
 #[derive(Debug)]
 #[allow(unused)]
@@ -18,6 +18,12 @@ pub struct SimulationConfig {
     pub latency: Option<Duration>,
     /// The bandwidth in Kbps.
     pub bw: Option<u64>,
+    /// The maximum burst size in kbit.
+    #[cfg(target_os = "linux")]
+    pub burst: Option<u64>,
+    /// The buffer size in bytes.
+    #[cfg(target_os = "linux")]
+    pub limit: Option<u64>,
     /// The packet loss rate in percent.
     pub plr: Option<f64>,
     /// The supported protocols.
@@ -155,8 +161,6 @@ impl Simulation {
             .status()?;
         assert_status(status, "Failed to set up the host veth device")?;
 
-        // sudo ip netns exec msg-sim-1 ip addr add 192.168.1.1 dev vn-msg-sim-1
-
         // Associate IP address to namespaced veth device and spin it up
         let status = Command::new("sudo")
             .args([
@@ -191,7 +195,10 @@ impl Simulation {
             .status()?;
         assert_status(status, "Failed to set up the namespaced veth device")?;
 
-        // Add network emulation parameters on namespaced veth device
+        // Add network emulation parameters (delay, loss) on namespaced veth device
+        //
+        // The behaviour is specified on the top-level ("root"),
+        // with a custom handle for identification
         let mut args = vec![
             "ip",
             "netns",
@@ -203,25 +210,25 @@ impl Simulation {
             "dev",
             &veth_namespace,
             "root",
+            "handle",
+            "1:",
             "netem",
         ];
 
-        let delay = if let Some(delay) = self.config.latency {
-            format!("{}ms", delay.as_millis())
-        } else {
-            "0ms".to_string()
-        };
+        let delay = format!(
+            "{}ms",
+            self.config
+                .latency
+                .unwrap_or(Duration::new(0, 0))
+                .as_millis()
+        );
 
         if self.config.latency.is_some() {
             args.push("delay");
             args.push(&delay);
         }
 
-        let loss = if let Some(loss) = self.config.plr {
-            format!("{}%", loss)
-        } else {
-            "0%".to_string()
-        };
+        let loss = format!("{}%", self.config.plr.unwrap_or(0_f64));
 
         if (self.config.plr).is_some() {
             args.push("loss");
@@ -230,7 +237,47 @@ impl Simulation {
 
         let status = Command::new("sudo").args(args).status()?;
 
-        assert_status(status, "Failed to set network emulation paramteres")?;
+        assert_status(
+            status,
+            "Failed to set delay and loss network emulation parameters",
+        )?;
+
+        // Add bandwidth paramteres on namespaced veth device
+        //
+        // The behaviour is specified on top of the root queue discipline,
+        // as parent. It uses "Hierarchical Token Bucket" (HBT) discipline
+        if let Some(bandwidth) = self.config.bw {
+            let bandwidth = format!("{}kbit", bandwidth);
+            let burst = format!("{}kbit", self.config.burst.unwrap_or(32));
+            let limit = format!("{}", self.config.limit.unwrap_or(10_000));
+
+            let status = Command::new("sudo")
+                .args([
+                    "ip",
+                    "netns",
+                    "exec",
+                    &network_namespace,
+                    "tc",
+                    "qdisc",
+                    "add",
+                    "dev",
+                    &veth_namespace,
+                    "parent",
+                    "1:",
+                    "handle",
+                    "2:",
+                    "tbf",
+                    "rate",
+                    &bandwidth,
+                    "burst",
+                    &burst,
+                    "limit",
+                    &limit,
+                ])
+                .status()?;
+
+            assert_status(status, "Failed to set bandwidth parameter")?;
+        }
 
         Ok(())
     }
@@ -271,7 +318,14 @@ impl Simulation {
 
 impl Drop for Simulation {
     #[cfg(target_os = "linux")]
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        // Deleting the network namespace where the simulated endpoint lives
+        // drops everything in cascade
+        let network_namespace = format!("msg-sim-{}", self.id);
+        let _ = Command::new("sudo")
+            .args(["ip", "netns", "del", &network_namespace])
+            .status();
+    }
 
     #[cfg(target_os = "macos")]
     fn drop(&mut self) {
@@ -290,17 +344,20 @@ mod test {
 
     use crate::{Protocol, Simulation, SimulationConfig};
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn start_on_linux() {
+    fn start_simulation() {
         let config = SimulationConfig {
             latency: Some(Duration::new(3, 0)),
             bw: Some(1_000),
+            burst: Some(32),
+            limit: None,
             plr: Some(50_f64),
             protocols: vec![Protocol::TCP],
         };
         let simulation = Simulation::new(1, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), config);
 
         let res = simulation.start();
-        println!("res = {:?}", res);
+        assert!(res.is_ok());
     }
 }
