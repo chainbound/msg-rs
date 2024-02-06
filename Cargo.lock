@@ -714,6 +714,7 @@ dependencies = [
  "msg-socket",
  "msg-transport",
  "msg-wire",
+ "nix 0.27.1",
  "pprof",
  "rand",
  "tokio",
@@ -735,6 +736,7 @@ dependencies = [
 name = "msg-sim"
 version = "0.1.1"
 dependencies = [
+ "nix 0.27.1",
  "pnet",
 ]
 
@@ -801,6 +803,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
 dependencies = [
  "bitflags 1.3.2",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
+dependencies = [
+ "bitflags 2.4.1",
  "cfg-if",
  "libc",
 ]
@@ -1072,7 +1085,7 @@ dependencies = [
  "inferno",
  "libc",
  "log",
- "nix",
+ "nix 0.26.4",
  "once_cell",
  "parking_lot",
  "smallvec",

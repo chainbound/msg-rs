@@ -1,5 +1,11 @@
 pub use protocol::Protocol;
-use std::{collections::HashMap, io, net::IpAddr, process::Command, time::Duration};
+use std::{
+    collections::HashMap,
+    io,
+    net::{IpAddr, Ipv4Addr},
+    process::Command,
+    time::Duration,
+};
 
 mod protocol;
 
@@ -7,6 +13,9 @@ mod protocol;
 pub mod dummynet;
 #[cfg(target_os = "macos")]
 use dummynet::{PacketFilter, Pipe};
+
+#[cfg(target_os = "linux")]
+pub mod namespace;
 
 pub mod assert;
 use assert::assert_status;
@@ -121,7 +130,7 @@ impl Simulation {
             ])
             .status()?;
 
-        assert_status(status, "Failed to veth devices")?;
+        assert_status(status, "Failed add veth devices")?;
 
         // Move veth namespace device to its namespace
         let status = Command::new("sudo")
@@ -338,9 +347,15 @@ impl Drop for Simulation {
         // Deleting the network namespace where the simulated endpoint lives
         // drops everything in cascade
         let network_namespace = format!("msg-sim-{}", self.id);
+        let veth_host = format!("vh-msg-sim-{}", self.id);
         let _ = Command::new("sudo")
             .args(["ip", "netns", "del", &network_namespace])
             .status();
+        let _ = Command::new("sudo")
+            .args(["ip", "link", "del", &veth_host])
+            .status();
+
+        // sometimes I have to drop also vh link manually
     }
 
     #[cfg(target_os = "macos")]
@@ -348,6 +363,15 @@ impl Drop for Simulation {
         if let Some(pf) = self.active_pf.take() {
             pf.destroy().unwrap();
         }
+    }
+}
+
+#[inline]
+pub fn test_ip_addr() -> IpAddr {
+    if cfg!(target_os = "linux") {
+        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
+    } else {
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
     }
 }
 
@@ -364,11 +388,11 @@ mod test {
     #[test]
     fn start_simulation() {
         let config = SimulationConfig {
-            latency: Some(Duration::new(0, 5_000_000)),
+            latency: Some(Duration::new(2, 0)),
             bw: Some(1_000),
             burst: Some(32),
             limit: None,
-            plr: Some(10_f64),
+            plr: Some(30_f64),
             protocols: vec![Protocol::TCP],
         };
         let simulation = Simulation::new(1, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), config);

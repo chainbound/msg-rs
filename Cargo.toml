@@ -1,24 +1,38 @@
 [workspace]
 members = [
-    "msg",
-    "msg-socket",
-    "msg-wire",
-    "msg-transport",
-    "msg-common",
-    "msg-sim",
+  "msg",
+  "msg-socket",
+  "msg-wire",
+  "msg-transport",
+  "msg-common",
+  "msg-sim",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.70"                                                                # Remember to update .clippy.toml and README.md
+rust-version = "1.70" # Remember to update .clippy.toml and README.md
 license = "MIT"
 description = "A flexible and lightweight messaging library for distributed systems"
 authors = ["Jonas Bostoen", "Nicolas Racchi"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
-keywords = ["messaging", "distributed", "systems", "networking", "quic", "quinn", "tokio", "async", "simulation", "pnet", "udp", "tcp", "socket"]
+keywords = [
+  "messaging",
+  "distributed",
+  "systems",
+  "networking",
+  "quic",
+  "quinn",
+  "tokio",
+  "async",
+  "simulation",
+  "pnet",
+  "udp",
+  "tcp",
+  "socket",
+]
 
 [workspace.dependencies]
 msg-wire = { path = "./msg-wire" }
@@ -58,6 +72,9 @@ pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 
 # simulation
 pnet = "0.34"
+
+# *nix APIs
+nix = { version = "0.27.1", features = ["sched"] }
 
 [profile.dev]
 opt-level = 1

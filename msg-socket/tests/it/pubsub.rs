@@ -1,7 +1,11 @@
 use bytes::Bytes;
-use msg_sim::{Protocol, SimulationConfig, Simulator};
+use msg_sim::{namespace::run_on_namespace, test_ip_addr, Protocol, SimulationConfig, Simulator};
 use rand::Rng;
-use std::{collections::HashSet, net::IpAddr, time::Duration};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, SocketAddr},
+    time::Duration,
+};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
 
@@ -19,29 +23,28 @@ fn init_simulation(addr: IpAddr, config: SimulationConfig) -> Simulator {
 
 /// Single publisher, single subscriber
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
 async fn pubsub_channel() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = "127.0.0.1".parse().unwrap();
+    let addr = test_ip_addr();
 
     let mut simulator = init_simulation(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(50)),
+            latency: Some(Duration::from_millis(2000)),
             bw: None,
             burst: None,
             limit: None,
-            plr: None,
+            plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },
     );
 
-    let result = pubsub_channel_transport(build_tcp).await;
+    let result = pubsub_channel_transport(build_tcp, addr).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_channel_transport(build_quic).await;
+    let result = pubsub_channel_transport(build_quic, addr).await;
 
     assert!(result.is_ok());
 
@@ -50,16 +53,29 @@ async fn pubsub_channel() {
 
 async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unpin + 'static>(
     new_transport: F,
+    addr: IpAddr,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
+    let socket_addr = SocketAddr::new(addr, 0);
+
+    #[cfg(target_os = "linux")]
+    let publisher = {
+        run_on_namespace("msg-sim-1", || {
+            Box::pin(async move {
+                let _ = publisher.bind(socket_addr).await;
+                Ok(publisher)
+            })
+        })
+        .await?
+    };
+    #[cfg(target_os = "macos")]
+    publisher.bind(test_socket_addr).await?;
 
     let mut subscriber = SubSocket::new(new_transport());
-    subscriber.connect("127.0.0.1:9879").await?;
+    subscriber.connect(publisher.local_addr().unwrap()).await?;
     subscriber.subscribe(TOPIC).await?;
 
     inject_delay(400).await;
-
-    publisher.bind("127.0.0.1:9879").await?;
 
     // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
     tokio::spawn(async move {
@@ -82,11 +98,10 @@ async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unp
 
 /// Single publisher, multiple subscribers
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
 async fn pubsub_fan_out() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = "127.0.0.1".parse().unwrap();
+    let addr = test_ip_addr();
 
     let mut simulator = init_simulation(
         addr,
@@ -100,11 +115,11 @@ async fn pubsub_fan_out() {
         },
     );
 
-    let result = pubsub_fan_out_transport(build_tcp, 10).await;
+    let result = pubsub_fan_out_transport(build_tcp, addr, 20).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_out_transport(build_quic, 10).await;
+    let result = pubsub_fan_out_transport(build_quic, addr, 20).await;
 
     assert!(result.is_ok());
 
@@ -116,21 +131,38 @@ async fn pubsub_fan_out_transport<
     T: Transport + Send + Sync + Unpin + 'static,
 >(
     new_transport: F,
+    addr: IpAddr,
     subscibers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
 
     let mut sub_tasks = JoinSet::new();
 
-    let addr = "127.0.0.1:9880";
+    let socket_addr = SocketAddr::new(addr, 0);
+
+    #[cfg(target_os = "linux")]
+    let publisher = {
+        run_on_namespace("msg-sim-1", || {
+            Box::pin(async move {
+                let _ = publisher.bind(socket_addr).await;
+                Ok(publisher)
+            })
+        })
+        .await?
+    };
+    #[cfg(target_os = "macos")]
+    publisher.bind(test_socket_addr).await?;
+
+    inject_delay(400).await;
+
+    let sub_addr = publisher.local_addr().unwrap();
 
     for i in 0..subscibers {
-        let cloned = addr.to_string();
         sub_tasks.spawn(async move {
             let mut subscriber = SubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
 
-            subscriber.connect(cloned).await.unwrap();
+            subscriber.connect(sub_addr).await.unwrap();
             inject_delay((1000 / (i + 1)) as u64).await;
             subscriber.subscribe(TOPIC).await.unwrap();
 
@@ -140,10 +172,6 @@ async fn pubsub_fan_out_transport<
             assert_eq!("WORLD", msg.payload());
         });
     }
-
-    inject_delay(400).await;
-
-    publisher.bind(addr).await?;
 
     // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
     tokio::spawn(async move {
@@ -165,11 +193,10 @@ async fn pubsub_fan_out_transport<
 
 /// Multiple publishers, single subscriber
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
 async fn pubsub_fan_in() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = "127.0.0.1".parse().unwrap();
+    let addr = test_ip_addr();
 
     let mut simulator = init_simulation(
         addr,
@@ -183,11 +210,11 @@ async fn pubsub_fan_in() {
         },
     );
 
-    let result = pubsub_fan_in_transport(build_tcp, 20).await;
+    let result = pubsub_fan_in_transport(build_tcp, addr, 5).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_in_transport(build_quic, 20).await;
+    let result = pubsub_fan_in_transport(build_quic, addr, 5).await;
 
     assert!(result.is_ok());
 
@@ -199,6 +226,7 @@ async fn pubsub_fan_in_transport<
     T: Transport + Send + Sync + Unpin + 'static,
 >(
     new_transport: F,
+    addr: IpAddr,
     publishers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sub_tasks = JoinSet::new();
@@ -211,7 +239,21 @@ async fn pubsub_fan_in_transport<
             let mut publisher = PubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
 
-            publisher.bind("127.0.0.1:0").await.unwrap();
+            let socket_addr = SocketAddr::new(addr, 0);
+
+            #[cfg(target_os = "linux")]
+            let publisher = {
+                run_on_namespace("msg-sim-1", || {
+                    Box::pin(async move {
+                        let _ = publisher.bind(socket_addr).await;
+                        Ok(publisher)
+                    })
+                })
+                .await
+                .unwrap()
+            };
+            #[cfg(target_os = "macos")]
+            publisher.bind(test_socket_addr).await?;
 
             let addr = publisher.local_addr().unwrap();
             tx.send(addr).await.unwrap();
