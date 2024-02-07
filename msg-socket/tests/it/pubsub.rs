@@ -28,9 +28,11 @@ async fn pubsub_channel() {
     let result = simulator.start(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(2000)),
+            latency: Some(Duration::from_millis(500)),
             bw: None,
+            #[cfg(target_os = "linux")]
             burst: None,
+            #[cfg(target_os = "linux")]
             limit: None,
             plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],
@@ -111,9 +113,11 @@ async fn pubsub_fan_out() {
     let result = simulator.start(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(1000)),
+            latency: Some(Duration::from_millis(500)),
             bw: None,
+            #[cfg(target_os = "linux")]
             burst: None,
+            #[cfg(target_os = "linux")]
             limit: None,
             plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],
@@ -214,9 +218,11 @@ async fn pubsub_fan_in() {
     let result = simulator.start(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(1000)),
+            latency: Some(Duration::from_millis(500)),
             bw: None,
+            #[cfg(target_os = "linux")]
             burst: None,
+            #[cfg(target_os = "linux")]
             limit: None,
             plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],

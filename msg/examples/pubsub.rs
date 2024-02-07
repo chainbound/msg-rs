@@ -1,12 +1,6 @@
 use bytes::Bytes;
 use futures::StreamExt;
-use nix::sched::{setns, CloneFlags};
-use std::{
-    fs::File,
-    process::{self, Command},
-    thread,
-    time::Duration,
-};
+use std::time::Duration;
 use tokio::time::timeout;
 use tracing::Instrument;
 
@@ -36,31 +30,9 @@ async fn main() {
         SubOptions::default().ingress_buffer_size(1024),
     );
 
-    let ns_fd = File::open("/var/run/netns/msg-sim-1").unwrap();
-
-    println!("current thread id {:?}", thread::current().id());
-
-    if setns(ns_fd, CloneFlags::CLONE_NEWNET).is_ok() {
-        println!("Done changing network namespace");
-        let _ = Command::new("sudo")
-            .args(["ls", "-l", &format!("/proc/{}/ns/net", process::id())])
-            .status();
-    }
-
     tracing::info!("Setting up the sockets...");
-
-    println!("current thread id {:?}", thread::current().id());
-    let _ = Command::new("sudo")
-        .args(["ls", "-l", &format!("/proc/{}/ns/net", process::id())])
-        .status();
-    pub_socket.bind("192.168.1.1:0").await.unwrap();
-
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
-
-    let host_ns_fd = File::open("/proc/1/ns/net");
-    if setns(host_ns_fd.unwrap(), CloneFlags::CLONE_NEWNET).is_ok() {
-        println!("done changing back to host namespace")
-    }
 
     tracing::info!("Publisher listening on: {}", pub_addr);
 
@@ -79,8 +51,7 @@ async fn main() {
             loop {
                 // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription was succesful,
                 // we should time out after the 10th message.
-                let Ok(Some(recv)) = timeout(Duration::from_millis(20000), sub1.next()).await
-                else {
+                let Ok(Some(recv)) = timeout(Duration::from_millis(2000), sub1.next()).await else {
                     tracing::warn!("Timeout waiting for message, stopping sub1");
                     break;
                 };
@@ -99,8 +70,7 @@ async fn main() {
     let t2 = tokio::spawn(
         async move {
             loop {
-                let Ok(Some(recv)) = timeout(Duration::from_millis(10000), sub2.next()).await
-                else {
+                let Ok(Some(recv)) = timeout(Duration::from_millis(1000), sub2.next()).await else {
                     tracing::warn!("Timeout waiting for message, stopping sub2");
                     break;
                 };

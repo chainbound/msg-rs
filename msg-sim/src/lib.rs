@@ -11,7 +11,7 @@ use dummynet::{PacketFilter, Pipe};
 pub mod namespace;
 
 pub mod assert;
-use assert::assert_status;
+pub mod ip_tc;
 
 #[derive(Debug)]
 pub struct SimulationConfig {
@@ -129,142 +129,24 @@ impl Simulation {
     #[cfg(target_os = "linux")]
     fn start(&self) -> io::Result<()> {
         // Create network namespace
+
         let network_namespace = self.namespace_name();
-
-        let status = Command::new("sudo")
-            .args(["ip", "netns", "add", &network_namespace])
-            .status()?;
-
-        assert_status(status, "Failed to create namespace")?;
-
-        // Create Virtual Ethernet (veth) devices and link them
-        //
-        // Note: device name length can be max 15 chars long
         let veth_host = self.veth_host_name();
         let veth_namespace = self.veth_namespace_name();
-        let status = Command::new("sudo")
-            .args([
-                "ip",
-                "link",
-                "add",
-                &veth_host,
-                "type",
-                "veth",
-                "peer",
-                "name",
-                &veth_namespace,
-            ])
-            .status()?;
-
-        assert_status(status, "Failed add veth devices")?;
-
-        // Move veth namespace device to its namespace
-        let status = Command::new("sudo")
-            .args([
-                "ip",
-                "link",
-                "set",
-                &veth_namespace,
-                "netns",
-                &network_namespace,
-            ])
-            .status()?;
-
-        assert_status(status, "Failed move veth device to network namespace")?;
-
         let ip_namespace = format!("{}/24", self.endpoint);
 
-        let mut ip_host: Vec<u64> = self
-            .endpoint
-            .to_string()
-            .split('.')
-            .map(|octect| octect.parse::<u64>().unwrap())
-            .collect();
-        ip_host[3] += 1;
-        let ip_host = format!(
-            "{}.{}.{}.{}/24",
-            ip_host[0], ip_host[1], ip_host[2], ip_host[3]
-        );
+        ip_tc::create_namespace(&network_namespace)?;
+        ip_tc::create_veth_pair(&veth_host, &veth_namespace)?;
+        ip_tc::move_device_to_namespace(&veth_namespace, &network_namespace)?;
 
-        // Associate IP address to host veth device and spin it up
-        let status = Command::new("sudo")
-            .args(["ip", "addr", "add", &ip_host, "dev", &veth_host])
-            .status()?;
-        assert_status(status, "Failed to associate IP address to host veth device")?;
-        let status = Command::new("sudo")
-            .args(["ip", "link", "set", &veth_host, "up"])
-            .status()?;
-        assert_status(status, "Failed to set up the host veth device")?;
+        let ip_host = ip_tc::gen_host_ip_address(&self.endpoint);
 
-        // Associate IP address to namespaced veth device and spin it up
-        let status = Command::new("sudo")
-            .args([
-                "ip",
-                "netns",
-                "exec",
-                &network_namespace,
-                "ip",
-                "addr",
-                "add",
-                &ip_namespace,
-                "dev",
-                &veth_namespace,
-            ])
-            .status()?;
-        assert_status(
-            status,
-            "Failed to associate IP address to namespaced veth device",
-        )?;
-        let status = Command::new("sudo")
-            .args([
-                "ip",
-                "netns",
-                "exec",
-                &network_namespace,
-                "ip",
-                "link",
-                "set",
-                &veth_namespace,
-                "up",
-            ])
-            .status()?;
-        assert_status(status, "Failed to set up the namespaced veth device")?;
+        ip_tc::add_ip_addr_to_device(&veth_host, &ip_host, None)?;
+        ip_tc::spin_up_device(&veth_host, None)?;
 
-        // Spin up also the loopback interface on namespaced environment
-        let status = Command::new("sudo")
-            .args([
-                "ip",
-                "netns",
-                "exec",
-                &network_namespace,
-                "ip",
-                "link",
-                "set",
-                "lo",
-                "up",
-            ])
-            .status()?;
-        assert_status(status, "Failed to set up the namespaced loopback device")?;
-
-        // Add network emulation parameters (delay, loss) on namespaced veth device
-        //
-        // The behaviour is specified on the top-level ("root"),
-        // with a custom handle for identification
-        let mut args = vec![
-            "ip",
-            "netns",
-            "exec",
-            &network_namespace,
-            "tc",
-            "qdisc",
-            "add",
-            "dev",
-            &veth_namespace,
-            "root",
-            "handle",
-            "1:",
-            "netem",
-        ];
+        ip_tc::add_ip_addr_to_device(&veth_namespace, &ip_namespace, Some(&network_namespace))?;
+        ip_tc::spin_up_device(&veth_namespace, Some(&network_namespace))?;
+        ip_tc::spin_up_device("lo", Some(&network_namespace))?;
 
         let delay = format!(
             "{}ms",
@@ -274,34 +156,30 @@ impl Simulation {
                 .as_millis()
         );
 
+        let loss = format!("{}%", self.config.plr.unwrap_or(0_f64));
+
+        // Add delay to the host veth device to match MacOS symmetric behaviour
+        //
+        // The behaviour is specified on the top-level ("root"),
+        // with a custom handle for identification
+        let mut args = vec!["root", "handle", "1:", "netem"];
         if self.config.latency.is_some() {
             args.push("delay");
             args.push(&delay);
         }
+        ip_tc::add_network_emulation_parameters(&veth_host, args, None)?;
 
-        let loss = format!("{}%", self.config.plr.unwrap_or(0_f64));
-
+        // Add network emulation parameters (delay, loss) on namespaced veth device
+        let mut args = vec!["root", "handle", "1:", "netem"];
+        if self.config.latency.is_some() {
+            args.push("delay");
+            args.push(&delay);
+        }
         if (self.config.plr).is_some() {
             args.push("loss");
             args.push(&loss);
         }
-
-        let status = Command::new("sudo").args(args).status()?;
-
-        assert_status(
-            status,
-            "Failed to set delay and loss network emulation parameters to namespaced device",
-        )?;
-
-        // Add delay to the host veth device to match MacOS symmetric behaviour
-        let status = Command::new("sudo")
-            .args([
-                "tc", "qdisc", "add", "dev", &veth_host, "root", "handle", "1:", "netem", "delay",
-                &delay,
-            ])
-            .status()?;
-
-        assert_status(status, "Failed to set delay to the host veth device")?;
+        ip_tc::add_network_emulation_parameters(&veth_namespace, args, Some(&network_namespace))?;
 
         // Add bandwidth paramteres on namespaced veth device
         //
@@ -312,47 +190,16 @@ impl Simulation {
             let burst = format!("{}kbit", self.config.burst.unwrap_or(32));
             let limit = format!("{}", self.config.limit.unwrap_or(10_000));
 
-            let status = Command::new("sudo")
-                .args([
-                    "ip",
-                    "netns",
-                    "exec",
-                    &network_namespace,
-                    "tc",
-                    "qdisc",
-                    "add",
-                    "dev",
-                    &veth_namespace,
-                    "parent",
-                    "1:",
-                    "handle",
-                    "2:",
-                    "tbf",
-                    "rate",
-                    &bandwidth,
-                    "burst",
-                    &burst,
-                    "limit",
-                    &limit,
-                ])
-                .status()?;
+            let args = vec![
+                "parent", "1:", "handle", "2:", "tbf", "rate", &bandwidth, "burst", &burst,
+                "limit", &limit,
+            ];
 
-            assert_status(
-                status,
-                "Failed to set bandwidth parameter to the namespaced device",
-            )?;
-
-            // Add bandwidth paramteres on host veth device
-            let status = Command::new("sudo")
-                .args([
-                    "tc", "qdisc", "add", "dev", &veth_host, "parent", "1:", "handle", "2:", "tbf",
-                    "rate", &bandwidth, "burst", &burst, "limit", &limit,
-                ])
-                .status()?;
-
-            assert_status(
-                status,
-                "Failed to set bandwidth parameter to the host veth device",
+            ip_tc::add_network_emulation_parameters(&veth_host, args.clone(), None)?;
+            ip_tc::add_network_emulation_parameters(
+                &veth_namespace,
+                args,
+                Some(&network_namespace),
             )?;
         }
         Ok(())
