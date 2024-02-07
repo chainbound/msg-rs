@@ -14,7 +14,6 @@ pub mod assert;
 use assert::assert_status;
 
 #[derive(Debug)]
-#[allow(unused)]
 pub struct SimulationConfig {
     /// The latency of the connection.
     pub latency: Option<Duration>,
@@ -291,8 +290,18 @@ impl Simulation {
 
         assert_status(
             status,
-            "Failed to set delay and loss network emulation parameters",
+            "Failed to set delay and loss network emulation parameters to namespaced device",
         )?;
+
+        // Add delay to the host veth device to match MacOS symmetric behaviour
+        let status = Command::new("sudo")
+            .args([
+                "tc", "qdisc", "add", "dev", &veth_host, "root", "handle", "1:", "netem", "delay",
+                &delay,
+            ])
+            .status()?;
+
+        assert_status(status, "Failed to set delay to the host veth device")?;
 
         // Add bandwidth paramteres on namespaced veth device
         //
@@ -328,9 +337,24 @@ impl Simulation {
                 ])
                 .status()?;
 
-            assert_status(status, "Failed to set bandwidth parameter")?;
-        }
+            assert_status(
+                status,
+                "Failed to set bandwidth parameter to the namespaced device",
+            )?;
 
+            // Add bandwidth paramteres on host veth device
+            let status = Command::new("sudo")
+                .args([
+                    "tc", "qdisc", "add", "dev", &veth_host, "parent", "1:", "handle", "2:", "tbf",
+                    "rate", &bandwidth, "burst", &burst, "limit", &limit,
+                ])
+                .status()?;
+
+            assert_status(
+                status,
+                "Failed to set bandwidth parameter to the host veth device",
+            )?;
+        }
         Ok(())
     }
 
@@ -372,13 +396,14 @@ impl Drop for Simulation {
     #[cfg(target_os = "linux")]
     fn drop(&mut self) {
         let veth_host = self.veth_host_name();
-        // Deleting the network namespace where the simulated endpoint lives
-        // drops everything in there
         let network_namespace = self.namespace_name();
 
+        // The only thing we have to do in the host to delete the veth device
         let _ = Command::new("sudo")
             .args(["ip", "link", "del", &veth_host])
             .status();
+        // Deleting the network namespace where the simulated endpoint lives
+        // drops everything in there
         let _ = Command::new("sudo")
             .args(["ip", "netns", "del", &network_namespace])
             .status();
@@ -417,6 +442,9 @@ mod test {
         };
 
         let res = simulator.start(addr, config);
+        if let Err(e) = &res {
+            eprintln!("{}", e);
+        }
         assert!(res.is_ok());
     }
 }
