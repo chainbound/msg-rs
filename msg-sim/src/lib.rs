@@ -1,12 +1,5 @@
 pub use protocol::Protocol;
-use std::{
-    collections::HashMap,
-    io,
-    net::{IpAddr, Ipv4Addr},
-    process::Command,
-    time::Duration,
-};
-
+use std::{collections::HashMap, io, net::IpAddr, process::Command, time::Duration};
 mod protocol;
 
 #[cfg(target_os = "macos")]
@@ -42,28 +35,39 @@ pub struct SimulationConfig {
 #[derive(Default)]
 pub struct Simulator {
     /// A map of active simulations.
-    active_sims: HashMap<IpAddr, Simulation>,
+    pub active_sims: HashMap<IpAddr, Simulation>,
     /// Simulation ID counter.
-    sim_id: usize,
+    pub active_sim_count: u8,
+    /// A unique simulator identifier.
+    pub id: u8,
 }
 
 impl Simulator {
-    pub fn new() -> Self {
+    pub fn new(id: u8) -> Self {
         Self {
             active_sims: HashMap::new(),
-            sim_id: 1,
+            active_sim_count: 1,
+            id,
         }
     }
 
     /// Starts a new simulation on the given endpoint according to the config.
-    pub fn start(&mut self, endpoint: IpAddr, config: SimulationConfig) -> io::Result<usize> {
-        let id = self.sim_id;
+    ///
+    /// ### Linux
+    /// The simulation is done using network namespaces where multiple
+    /// IP addresses are needed. Make sure that the endpoint IP address is not alreay in use,
+    /// and that the "next one" is available.
+    ///
+    /// #### Example
+    /// If `endpoint` is 192.168.1.1, then both 192.168.1.1 and 192.168.1.2 will be used
+    pub fn start(&mut self, endpoint: IpAddr, config: SimulationConfig) -> io::Result<u8> {
+        let id = self.active_sim_count;
 
-        let simulation = Simulation::new(id, endpoint, config);
+        let simulation = Simulation::new(id, self.id, endpoint, config);
 
         simulation.start()?;
 
-        self.sim_id += 1;
+        self.active_sim_count += 1;
 
         self.active_sims.insert(endpoint, simulation);
 
@@ -77,21 +81,23 @@ impl Simulator {
     }
 }
 
-/// An active simulation.
+/// An active simulation spawned by the simulator.
 #[allow(unused)]
-struct Simulation {
-    id: usize,
-    endpoint: IpAddr,
-    config: SimulationConfig,
+pub struct Simulation {
+    pub id: u8,
+    pub simulator_id: u8,
+    pub endpoint: IpAddr,
+    pub config: SimulationConfig,
 
     #[cfg(target_os = "macos")]
     active_pf: Option<PacketFilter>,
 }
 
 impl Simulation {
-    fn new(id: usize, endpoint: IpAddr, config: SimulationConfig) -> Self {
+    fn new(id: u8, simulator_id: u8, endpoint: IpAddr, config: SimulationConfig) -> Self {
         Self {
             id,
+            simulator_id,
             endpoint,
             config,
             #[cfg(target_os = "macos")]
@@ -99,11 +105,32 @@ impl Simulation {
         }
     }
 
+    #[inline]
+    #[cfg(target_os = "linux")]
+    /// Get the namespace name used for the simulation.
+    pub fn namespace_name(&self) -> String {
+        format!("msg-{}-{}", self.simulator_id, self.id)
+    }
+
+    #[inline]
+    #[cfg(target_os = "linux")]
+    /// Get the host veth device used name for the simulation.
+    pub fn veth_host_name(&self) -> String {
+        format!("vh-msg-{}-{}", self.simulator_id, self.id)
+    }
+
+    #[inline]
+    #[cfg(target_os = "linux")]
+    /// Get the namespaced veth device name used for the simulation.
+    pub fn veth_namespace_name(&self) -> String {
+        format!("vn-msg-{}-{}", self.simulator_id, self.id)
+    }
+
     /// Starts the simulation.
     #[cfg(target_os = "linux")]
     fn start(&self) -> io::Result<()> {
         // Create network namespace
-        let network_namespace = format!("msg-sim-{}", self.id);
+        let network_namespace = self.namespace_name();
 
         let status = Command::new("sudo")
             .args(["ip", "netns", "add", &network_namespace])
@@ -114,8 +141,8 @@ impl Simulation {
         // Create Virtual Ethernet (veth) devices and link them
         //
         // Note: device name length can be max 15 chars long
-        let veth_host = format!("vh-msg-sim-{}", self.id);
-        let veth_namespace = format!("vn-msg-sim-{}", self.id);
+        let veth_host = self.veth_host_name();
+        let veth_namespace = self.veth_namespace_name();
         let status = Command::new("sudo")
             .args([
                 "ip",
@@ -344,18 +371,17 @@ impl Simulation {
 impl Drop for Simulation {
     #[cfg(target_os = "linux")]
     fn drop(&mut self) {
+        let veth_host = self.veth_host_name();
         // Deleting the network namespace where the simulated endpoint lives
-        // drops everything in cascade
-        let network_namespace = format!("msg-sim-{}", self.id);
-        let veth_host = format!("vh-msg-sim-{}", self.id);
-        let _ = Command::new("sudo")
-            .args(["ip", "netns", "del", &network_namespace])
-            .status();
+        // drops everything in there
+        let network_namespace = self.namespace_name();
+
         let _ = Command::new("sudo")
             .args(["ip", "link", "del", &veth_host])
             .status();
-
-        // sometimes I have to drop also vh link manually
+        let _ = Command::new("sudo")
+            .args(["ip", "netns", "del", &network_namespace])
+            .status();
     }
 
     #[cfg(target_os = "macos")]
@@ -366,15 +392,6 @@ impl Drop for Simulation {
     }
 }
 
-#[inline]
-pub fn test_ip_addr() -> IpAddr {
-    if cfg!(target_os = "linux") {
-        IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))
-    } else {
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::{
@@ -382,22 +399,24 @@ mod test {
         time::Duration,
     };
 
-    use crate::{Protocol, Simulation, SimulationConfig};
+    use super::*;
 
     #[cfg(target_os = "linux")]
     #[test]
     fn start_simulation() {
+        let mut simulator = Simulator::new(1);
+
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
         let config = SimulationConfig {
-            latency: Some(Duration::new(2, 0)),
+            latency: Some(Duration::from_millis(2000)),
             bw: Some(1_000),
             burst: Some(32),
             limit: None,
             plr: Some(30_f64),
             protocols: vec![Protocol::TCP],
         };
-        let simulation = Simulation::new(1, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), config);
 
-        let res = simulation.start();
+        let res = simulator.start(addr, config);
         assert!(res.is_ok());
     }
 }

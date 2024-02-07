@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use msg_sim::{namespace::run_on_namespace, test_ip_addr, Protocol, SimulationConfig, Simulator};
+use msg_sim::{namespace::run_on_namespace, Protocol, Simulation, SimulationConfig, Simulator};
 use rand::Rng;
 use std::{
     collections::HashSet,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     time::Duration,
 };
 use tokio::{sync::mpsc, task::JoinSet};
@@ -14,21 +14,18 @@ use msg_transport::{quic::Quic, tcp::Tcp, Transport};
 
 const TOPIC: &str = "test";
 
-fn init_simulation(addr: IpAddr, config: SimulationConfig) -> Simulator {
-    let mut simulator = Simulator::new();
-    simulator.start(addr, config).unwrap();
-
-    simulator
-}
-
 /// Single publisher, single subscriber
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pubsub_channel() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = test_ip_addr();
+    #[cfg(target_os = "linux")]
+    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+    #[cfg(target_os = "macos")]
+    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
-    let mut simulator = init_simulation(
+    let mut simulator = Simulator::new(1);
+    let result = simulator.start(
         addr,
         SimulationConfig {
             latency: Some(Duration::from_millis(2000)),
@@ -40,11 +37,15 @@ async fn pubsub_channel() {
         },
     );
 
-    let result = pubsub_channel_transport(build_tcp, addr).await;
+    assert!(result.is_ok());
+
+    let simulation = simulator.active_sims.get(&addr).unwrap();
+
+    let result = pubsub_channel_transport(build_tcp, simulation).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_channel_transport(build_quic, addr).await;
+    let result = pubsub_channel_transport(build_quic, simulation).await;
 
     assert!(result.is_ok());
 
@@ -53,14 +54,14 @@ async fn pubsub_channel() {
 
 async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unpin + 'static>(
     new_transport: F,
-    addr: IpAddr,
+    simulation: &Simulation,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
-    let socket_addr = SocketAddr::new(addr, 0);
+    let socket_addr = SocketAddr::new(simulation.endpoint, 0);
 
     #[cfg(target_os = "linux")]
     let publisher = {
-        run_on_namespace("msg-sim-1", || {
+        run_on_namespace(&simulation.namespace_name(), || {
             Box::pin(async move {
                 let _ = publisher.bind(socket_addr).await;
                 Ok(publisher)
@@ -101,25 +102,33 @@ async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unp
 async fn pubsub_fan_out() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = test_ip_addr();
+    #[cfg(target_os = "linux")]
+    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1));
+    #[cfg(target_os = "macos")]
+    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
-    let mut simulator = init_simulation(
+    let mut simulator = Simulator::new(2);
+    let result = simulator.start(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(150)),
+            latency: Some(Duration::from_millis(1000)),
             bw: None,
             burst: None,
             limit: None,
-            plr: None,
+            plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },
     );
 
-    let result = pubsub_fan_out_transport(build_tcp, addr, 20).await;
+    assert!(result.is_ok());
+
+    let simulation = simulator.active_sims.get(&addr).unwrap();
+
+    let result = pubsub_fan_out_transport(build_tcp, simulation, 20).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_out_transport(build_quic, addr, 20).await;
+    let result = pubsub_fan_out_transport(build_quic, simulation, 20).await;
 
     assert!(result.is_ok());
 
@@ -131,18 +140,18 @@ async fn pubsub_fan_out_transport<
     T: Transport + Send + Sync + Unpin + 'static,
 >(
     new_transport: F,
-    addr: IpAddr,
+    simulation: &Simulation,
     subscibers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
 
     let mut sub_tasks = JoinSet::new();
 
-    let socket_addr = SocketAddr::new(addr, 0);
+    let socket_addr = SocketAddr::new(simulation.endpoint, 0);
 
     #[cfg(target_os = "linux")]
     let publisher = {
-        run_on_namespace("msg-sim-1", || {
+        run_on_namespace(&simulation.namespace_name(), || {
             Box::pin(async move {
                 let _ = publisher.bind(socket_addr).await;
                 Ok(publisher)
@@ -196,25 +205,33 @@ async fn pubsub_fan_out_transport<
 async fn pubsub_fan_in() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = test_ip_addr();
+    #[cfg(target_os = "linux")]
+    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 3, 1));
+    #[cfg(target_os = "macos")]
+    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
-    let mut simulator = init_simulation(
+    let mut simulator = Simulator::new(3);
+    let result = simulator.start(
         addr,
         SimulationConfig {
-            latency: Some(Duration::from_millis(150)),
+            latency: Some(Duration::from_millis(1000)),
             bw: None,
             burst: None,
             limit: None,
-            plr: None,
+            plr: Some(20_f64),
             protocols: vec![Protocol::UDP, Protocol::TCP],
         },
     );
 
-    let result = pubsub_fan_in_transport(build_tcp, addr, 5).await;
+    assert!(result.is_ok());
+
+    let simulation = simulator.active_sims.get(&addr).unwrap();
+
+    let result = pubsub_fan_in_transport(build_tcp, simulation, 5).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_in_transport(build_quic, addr, 5).await;
+    let result = pubsub_fan_in_transport(build_quic, simulation, 5).await;
 
     assert!(result.is_ok());
 
@@ -226,24 +243,26 @@ async fn pubsub_fan_in_transport<
     T: Transport + Send + Sync + Unpin + 'static,
 >(
     new_transport: F,
-    addr: IpAddr,
+    simulation: &Simulation,
     publishers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sub_tasks = JoinSet::new();
 
     let (tx, mut rx) = mpsc::channel(publishers);
 
+    let namespace = simulation.namespace_name();
+    let socket_addr = SocketAddr::new(simulation.endpoint, 0);
+
     for i in 0..publishers {
         let tx = tx.clone();
+        let namespace = namespace.clone();
         sub_tasks.spawn(async move {
             let mut publisher = PubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
 
-            let socket_addr = SocketAddr::new(addr, 0);
-
             #[cfg(target_os = "linux")]
             let publisher = {
-                run_on_namespace("msg-sim-1", || {
+                run_on_namespace(&namespace, || {
                     Box::pin(async move {
                         let _ = publisher.bind(socket_addr).await;
                         Ok(publisher)
