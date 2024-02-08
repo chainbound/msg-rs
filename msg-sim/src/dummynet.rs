@@ -122,9 +122,10 @@ pub struct PacketFilter {
 impl PacketFilter {
     /// Creates a new default packet filter from the given [`Pipe`].
     pub fn new(pipe: Pipe) -> Self {
+        let id = pipe.id();
         Self {
             pipe,
-            anchor: "msg-sim".to_string(),
+            anchor: format!("msg-sim-{}", id),
             protocols: vec![Protocol::TCP, Protocol::UDP, Protocol::ICMP],
             endpoint: None,
             loopback: get_loopback_name(),

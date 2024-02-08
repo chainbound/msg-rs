@@ -45,7 +45,7 @@ Example:
 
 # Create a rule to match traffic from any to the alias and send it through the
 
-pipe echo 'dummynet in from any to 127.0.0.3 pipe 1' | sudo pfctl -a msg-sim -f
+echo 'dummynet in from any to 127.0.0.3 pipe 1' | sudo pfctl -a msg-sim -f -
 
 # Enable the packet filter
 
@@ -64,12 +64,11 @@ sudo pfctl -f /etc/pf.conf
 sudo pfctl -d
 
 # Remove the alias & reset the MTU
-
-sudo ifconfig lo0 -alias 127.0.0.3 sudo ifconfig lo0 mtu 16384
+sudo ifconfig lo0 -alias 127.0.0.3
+sudo ifconfig lo0 mtu 16384
 
 # Remove the dummynet
-
-pipes sudo dnctl pipe delete 1
+sudo dnctl pipe delete 1
 ```
 
 ### Questions
