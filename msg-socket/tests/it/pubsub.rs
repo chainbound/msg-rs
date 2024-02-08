@@ -1,16 +1,15 @@
 use bytes::Bytes;
-use msg_sim::{namespace::run_on_namespace, Protocol, Simulation, SimulationConfig, Simulator};
 use rand::Rng;
-use std::{
-    collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::{collections::HashSet, net::SocketAddr, time::Duration};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
 
+use msg_sim::{Protocol, Simulation, SimulationConfig, Simulator};
 use msg_socket::{PubSocket, SubSocket};
 use msg_transport::{quic::Quic, tcp::Tcp, Transport};
+
+#[cfg(target_os = "linux")]
+use msg_sim::namepsace::run_on_namespace;
 
 const TOPIC: &str = "test";
 
@@ -20,9 +19,10 @@ async fn pubsub_channel() {
     let _ = tracing_subscriber::fmt::try_init();
 
     #[cfg(target_os = "linux")]
-    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+    let addr = "192.168.1.1".parse().unwrap();
+
     #[cfg(target_os = "macos")]
-    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+    let addr = "127.0.0.2".parse().unwrap();
 
     let mut simulator = Simulator::new(1);
     let result = simulator.start(
@@ -71,8 +71,9 @@ async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unp
         })
         .await?
     };
+
     #[cfg(target_os = "macos")]
-    publisher.bind(test_socket_addr).await?;
+    publisher.bind(socket_addr).await?;
 
     let mut subscriber = SubSocket::new(new_transport());
     subscriber.connect(publisher.local_addr().unwrap()).await?;
@@ -105,9 +106,10 @@ async fn pubsub_fan_out() {
     let _ = tracing_subscriber::fmt::try_init();
 
     #[cfg(target_os = "linux")]
-    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 2, 1));
+    let addr = "192.168.2.1".parse().unwrap();
+
     #[cfg(target_os = "macos")]
-    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+    let addr = "127.0.0.3".parse().unwrap();
 
     let mut simulator = Simulator::new(2);
     let result = simulator.start(
@@ -163,8 +165,9 @@ async fn pubsub_fan_out_transport<
         })
         .await?
     };
+
     #[cfg(target_os = "macos")]
-    publisher.bind(test_socket_addr).await?;
+    publisher.bind(socket_addr).await?;
 
     inject_delay(400).await;
 
@@ -210,9 +213,10 @@ async fn pubsub_fan_in() {
     let _ = tracing_subscriber::fmt::try_init();
 
     #[cfg(target_os = "linux")]
-    let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 3, 1));
+    let addr = "192.168.3.1".parse().unwrap();
+
     #[cfg(target_os = "macos")]
-    let addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+    let addr = "127.0.0.4".parse().unwrap();
 
     let mut simulator = Simulator::new(3);
     let result = simulator.start(
@@ -256,11 +260,13 @@ async fn pubsub_fan_in_transport<
 
     let (tx, mut rx) = mpsc::channel(publishers);
 
+    #[cfg(target_os = "linux")]
     let namespace = simulation.namespace_name();
     let socket_addr = SocketAddr::new(simulation.endpoint, 0);
 
     for i in 0..publishers {
         let tx = tx.clone();
+        #[cfg(target_os = "linux")]
         let namespace = namespace.clone();
         sub_tasks.spawn(async move {
             let mut publisher = PubSocket::new(new_transport());
@@ -270,15 +276,16 @@ async fn pubsub_fan_in_transport<
             let publisher = {
                 run_on_namespace(&namespace, || {
                     Box::pin(async move {
-                        let _ = publisher.bind(socket_addr).await;
+                        publisher.bind(socket_addr).await.unwrap();
                         Ok(publisher)
                     })
                 })
                 .await
                 .unwrap()
             };
+
             #[cfg(target_os = "macos")]
-            publisher.bind(test_socket_addr).await?;
+            publisher.bind(socket_addr).await.unwrap();
 
             let addr = publisher.local_addr().unwrap();
             tx.send(addr).await.unwrap();

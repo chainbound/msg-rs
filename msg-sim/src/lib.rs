@@ -1,5 +1,5 @@
 pub use protocol::Protocol;
-use std::{collections::HashMap, io, net::IpAddr, process::Command, time::Duration};
+use std::{collections::HashMap, io, net::IpAddr, time::Duration};
 mod protocol;
 
 #[cfg(target_os = "macos")]
@@ -9,6 +9,8 @@ use dummynet::{PacketFilter, Pipe};
 
 #[cfg(target_os = "linux")]
 pub mod namespace;
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 pub mod assert;
 pub mod ip_tc;
@@ -62,7 +64,7 @@ impl Simulator {
     pub fn start(&mut self, endpoint: IpAddr, config: SimulationConfig) -> io::Result<u8> {
         let id = self.active_sim_count;
 
-        let simulation = Simulation::new(id, self.id, endpoint, config);
+        let mut simulation = Simulation::new(id, self.id, endpoint, config);
 
         simulation.start()?;
 
@@ -127,7 +129,7 @@ impl Simulation {
 
     /// Starts the simulation.
     #[cfg(target_os = "linux")]
-    fn start(&self) -> io::Result<()> {
+    fn start(&mut self) -> io::Result<()> {
         // Create network namespace
 
         let network_namespace = self.namespace_name();
@@ -266,16 +268,16 @@ impl Drop for Simulation {
 
 #[cfg(test)]
 mod test {
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        time::Duration,
-    };
-
-    use super::*;
-
     #[cfg(target_os = "linux")]
     #[test]
     fn start_simulation() {
+        use std::{
+            net::{IpAddr, Ipv4Addr},
+            time::Duration,
+        };
+
+        use super::*;
+
         let mut simulator = Simulator::new(1);
 
         let addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));

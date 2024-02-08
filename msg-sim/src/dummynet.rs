@@ -4,12 +4,12 @@ use std::{
     process::{Command, Stdio},
 };
 
-use crate::{protocol::Protocol, utils::assert_status};
+use crate::{assert::assert_status, protocol::Protocol};
 
 /// Pipe represents a dummynet pipe.
 pub struct Pipe {
     /// The ID of the pipe.
-    pub id: usize,
+    pub id: u8,
     /// Optional bandwidth cap in Kbps.
     pub bandwidth: Option<u64>,
     /// Optional propagation delay in ms.
@@ -20,7 +20,7 @@ pub struct Pipe {
 
 impl Pipe {
     /// Creates a new pipe with the given ID. The ID must be unique.
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: u8) -> Self {
         Self {
             id,
             bandwidth: None,
@@ -47,7 +47,7 @@ impl Pipe {
         self
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(&self) -> u8 {
         self.id
     }
 
