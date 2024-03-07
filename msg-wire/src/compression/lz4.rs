@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use lz4_flex::{compress, decompress};
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use std::io;
 
 use super::{CompressionType, Compressor, Decompressor};
@@ -14,7 +14,7 @@ impl Compressor for Lz4Compressor {
     }
 
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
-        let bytes = compress(data);
+        let bytes = compress_prepend_size(data);
 
         Ok(Bytes::from(bytes))
     }
@@ -25,9 +25,7 @@ pub struct Lz4Decompressor;
 
 impl Decompressor for Lz4Decompressor {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
-        // Usually the Lz4 compression ratio is 2.1x. So 4x should be plenty.
-        let min_uncompressed_size = data.len() * 4;
-        let bytes = decompress(data, min_uncompressed_size).map_err(|e| {
+        let bytes = decompress_size_prepended(data).map_err(|e| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("Lz4 decompression failed: {}", e),

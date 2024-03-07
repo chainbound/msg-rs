@@ -1,5 +1,4 @@
 use futures::future::BoxFuture;
-use quinn::{self, Endpoint};
 use std::{
     io,
     net::{SocketAddr, UdpSocket},
@@ -69,7 +68,7 @@ impl Quic {
         &self,
         addr: Option<SocketAddr>,
         server_config: Option<quinn::ServerConfig>,
-    ) -> Result<Endpoint, Error> {
+    ) -> Result<quinn::Endpoint, Error> {
         let socket = UdpSocket::bind(addr.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))))?;
 
         let endpoint = quinn::Endpoint::new(
@@ -99,7 +98,7 @@ impl Transport for Quic {
 
     /// Binds a QUIC endpoint to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
-        let endpoint = Endpoint::server(self.config.server_config.clone(), addr)?;
+        let endpoint = quinn::Endpoint::server(self.config.server_config.clone(), addr)?;
 
         self.endpoint = Some(endpoint);
 
