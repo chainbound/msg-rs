@@ -48,6 +48,11 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
             // Generate the wire message and increment the sequence number
             self.pending_egress = Some(msg.into_wire(self.seq));
             self.seq = self.seq.wrapping_add(1);
+        } else {
+            trace!(
+                topic = msg.topic(),
+                "Message does not match topic filter, discarding"
+            );
         }
     }
 
