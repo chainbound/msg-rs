@@ -1,15 +1,15 @@
 use std::{
     io::{self, Read},
     net::IpAddr,
-    process::{Command, ExitStatus, Stdio},
+    process::{Command, Stdio},
 };
 
-use crate::protocol::Protocol;
+use crate::{assert::assert_status, protocol::Protocol};
 
 /// Pipe represents a dummynet pipe.
 pub struct Pipe {
     /// The ID of the pipe.
-    pub id: usize,
+    pub id: u8,
     /// Optional bandwidth cap in Kbps.
     pub bandwidth: Option<u64>,
     /// Optional propagation delay in ms.
@@ -20,7 +20,7 @@ pub struct Pipe {
 
 impl Pipe {
     /// Creates a new pipe with the given ID. The ID must be unique.
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: u8) -> Self {
         Self {
             id,
             bandwidth: None,
@@ -47,7 +47,7 @@ impl Pipe {
         self
     }
 
-    pub fn id(&self) -> usize {
+    pub fn id(&self) -> u8 {
         self.id
     }
 
@@ -122,9 +122,10 @@ pub struct PacketFilter {
 impl PacketFilter {
     /// Creates a new default packet filter from the given [`Pipe`].
     pub fn new(pipe: Pipe) -> Self {
+        let id = pipe.id();
         Self {
             pipe,
-            anchor: "msg-sim".to_string(),
+            anchor: format!("msg-sim-{}", id),
             protocols: vec![Protocol::TCP, Protocol::UDP, Protocol::ICMP],
             endpoint: None,
             loopback: get_loopback_name(),
@@ -309,19 +310,6 @@ fn get_loopback_name() -> String {
     let loopback = interfaces.into_iter().find(|iface| iface.is_loopback());
 
     loopback.expect("No loopback interface").name
-}
-
-/// Assert that the given status is successful, otherwise return an error with the given message.
-/// The type of the error will be `io::ErrorKind::Other`.
-fn assert_status<E>(status: ExitStatus, error: E) -> io::Result<()>
-where
-    E: Into<Box<dyn std::error::Error + Send + Sync>>,
-{
-    if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, error));
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

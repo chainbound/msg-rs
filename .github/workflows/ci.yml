@@ -19,9 +19,9 @@ jobs:
         with:
           cache-on-failure: true
       - name: cargo test
-        run: cargo test --all
+        run: sudo HOME=$HOME $(which cargo) test --all
       - name: cargo test all features
-        run: cargo test --all --all-features
+        run: sudo HOME=$HOME $(which cargo) test --all --all-features
 
   cargo-lint:
     runs-on: ubuntu-latest
