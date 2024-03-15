@@ -160,6 +160,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
+                            tracing::warn!("Sent message to socket");
                             this.state.stats.increment_tx(msg_len);
 
                             this.should_flush = true;
