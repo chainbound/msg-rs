@@ -1,5 +1,3 @@
-use futures::Stream;
-use rustc_hash::FxHashMap;
 use std::{
     collections::HashSet,
     io,
@@ -9,12 +7,15 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::Stream;
+use rustc_hash::FxHashMap;
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::mpsc,
 };
 
-use msg_common::task::JoinMap;
+use msg_common::JoinMap;
 use msg_transport::{Address, Transport};
 
 use super::{

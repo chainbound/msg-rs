@@ -1,9 +1,11 @@
+use std::{collections::HashSet, net::IpAddr, time::Duration};
+
 use bytes::Bytes;
 use msg_sim::{Protocol, SimulationConfig, Simulator};
 use rand::Rng;
-use std::{collections::HashSet, net::IpAddr, time::Duration};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
+use tracing::info;
 
 use msg_socket::{PubSocket, SubSocket};
 use msg_transport::{quic::Quic, tcp::Tcp, Address, Transport};
@@ -77,7 +79,7 @@ where
     });
 
     let msg = subscriber.next().await.unwrap();
-    tracing::info!("Received message: {:?}", msg);
+    info!("Received message: {:?}", msg);
     assert_eq!(TOPIC, msg.topic());
     assert_eq!("WORLD", msg.payload());
 
@@ -137,7 +139,7 @@ async fn pubsub_fan_out_transport<
             subscriber.subscribe(TOPIC).await.unwrap();
 
             let msg = subscriber.next().await.unwrap();
-            tracing::info!("Received message: {:?}", msg);
+            info!("Received message: {:?}", msg);
             assert_eq!(TOPIC, msg.topic());
             assert_eq!("WORLD", msg.payload());
         });
@@ -254,7 +256,7 @@ async fn pubsub_fan_in_transport<
         }
 
         let msg = subscriber.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!(TOPIC, msg.topic());
         assert_eq!("WORLD", msg.payload());
 

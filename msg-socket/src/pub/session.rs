@@ -1,10 +1,11 @@
-use futures::{Future, SinkExt, StreamExt};
 use std::{
     borrow::Cow,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{Future, SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::codec::Framed;
@@ -22,8 +23,7 @@ pub(super) struct SubscriberSession<Io> {
     pub(super) from_socket_bcast: BroadcastStream<PubMessage>,
     /// Messages queued to be sent on the connection
     pub(super) pending_egress: Option<pubsub::Message>,
-    /// Session request sender.
-    // to_driver: mpsc::Sender<SessionRequest>,
+    /// The socket state, shared between the backend task and the socket.
     pub(super) state: Arc<SocketState>,
     /// The framed connection.
     pub(super) conn: Framed<Io, pubsub::Codec>,
@@ -127,7 +127,7 @@ fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
             ControlMsg::Close
         }
     } else {
-        tracing::warn!(
+        warn!(
             "Unkown control message topic, closing session: {:?}",
             msg.topic()
         );
@@ -155,7 +155,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.pending_egress.take() {
-                    tracing::debug!("Sending message: {:?}", msg);
+                    debug!("Sending message: {:?}", msg);
                     let msg_len = msg.size();
 
                     match this.conn.start_send_unpin(msg) {
@@ -167,7 +167,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                             continue;
                         }
                         Err(e) => {
-                            tracing::error!("Failed to send message to socket: {:?}", e);
+                            error!("Failed to send message to socket: {:?}", e);
                             let _ = this.conn.poll_close_unpin(cx);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(());

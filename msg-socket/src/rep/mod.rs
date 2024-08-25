@@ -100,6 +100,7 @@ mod tests {
     use msg_transport::tcp::Tcp;
     use msg_wire::compression::{GzipCompressor, SnappyCompressor};
     use rand::Rng;
+    use tracing::{debug, info};
 
     use crate::{req::ReqSocket, Authenticator, ReqOptions};
 
@@ -142,7 +143,7 @@ mod tests {
             // println!("Response: {:?} {:?}", _res, req_start.elapsed());
         }
         let elapsed = start.elapsed();
-        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+        info!("{} reqs in {:?}", n_reqs, elapsed);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -186,7 +187,7 @@ mod tests {
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
-                tracing::info!("{:?}", _id);
+                info!("{:?}", _id);
                 true
             }
         }
@@ -203,12 +204,12 @@ mod tests {
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
 
-        tracing::info!("Connected to rep");
+        info!("Connected to rep");
 
         tokio::spawn(async move {
             loop {
                 let req = rep.next().await.unwrap();
-                tracing::debug!("Received request");
+                debug!("Received request");
 
                 req.respond(Bytes::from("hello")).unwrap();
             }
@@ -229,7 +230,7 @@ mod tests {
             let _res = req.request(msg).await.unwrap();
         }
         let elapsed = start.elapsed();
-        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+        info!("{} reqs in {:?}", n_reqs, elapsed);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

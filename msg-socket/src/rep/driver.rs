@@ -122,7 +122,7 @@ where
                         );
                     }
                     Err(e) => {
-                        tracing::error!("Error authenticating client: {:?}", e);
+                        error!("Error authenticating client: {:?}", e);
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -279,7 +279,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         }
                         Err(e) => {
                             this.state.stats.increment_failed_requests();
-                            tracing::error!("Failed to send message to socket: {:?}", e);
+                            error!("Failed to send message to socket: {:?}", e);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(None);
                         }
@@ -300,12 +300,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             compression_type = compressor.compression_type() as u8;
                         }
                         Err(e) => {
-                            tracing::error!("Failed to compress message: {:?}", e);
+                            error!("Failed to compress message: {:?}", e);
                             continue;
                         }
                     }
 
-                    tracing::debug!(
+                    debug!(
                         "Compressed message {} from {} to {} bytes",
                         id,
                         len_before,

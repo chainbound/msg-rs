@@ -170,6 +170,7 @@ mod tests {
     use futures::StreamExt;
     use msg_transport::{quic::Quic, tcp::Tcp};
     use msg_wire::compression::GzipCompressor;
+    use tracing::info;
 
     use crate::{Authenticator, SubOptions, SubSocket};
 
@@ -179,7 +180,7 @@ mod tests {
 
     impl Authenticator for Auth {
         fn authenticate(&self, id: &Bytes) -> bool {
-            tracing::info!("Auth request from: {:?}", id);
+            info!("Auth request from: {:?}", id);
             true
         }
     }
@@ -205,7 +206,7 @@ mod tests {
             .unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -234,7 +235,7 @@ mod tests {
             .unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -263,7 +264,7 @@ mod tests {
             .unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -293,12 +294,12 @@ mod tests {
             .unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -330,12 +331,12 @@ mod tests {
             .unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
     }
@@ -362,7 +363,7 @@ mod tests {
             .unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -389,7 +390,7 @@ mod tests {
             .unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }

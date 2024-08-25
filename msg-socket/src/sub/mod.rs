@@ -1,19 +1,23 @@
+use std::{fmt, time::Duration};
+
 use bytes::Bytes;
-use core::fmt;
-use msg_transport::Address;
-use msg_wire::pubsub;
-use std::time::Duration;
 use thiserror::Error;
 
 mod driver;
+use driver::SubDriver;
+
 mod session;
+
 mod socket;
+pub use socket::*;
+
 mod stats;
+use stats::SocketStats;
+
 mod stream;
 
-use driver::SubDriver;
-pub use socket::*;
-use stats::SocketStats;
+use msg_transport::Address;
+use msg_wire::pubsub;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -176,7 +180,7 @@ mod tests {
         net::TcpListener,
     };
     use tokio_stream::StreamExt;
-    use tracing::Instrument;
+    use tracing::{info, info_span, Instrument};
 
     use super::*;
 
@@ -193,11 +197,11 @@ mod tests {
                 let b = socket.read(&mut buf).await.unwrap();
                 let read = &buf[..b];
 
-                tracing::info!("Received bytes: {:?}", read);
+                info!("Received bytes: {:?}", read);
                 socket.write_all(read).await.unwrap();
                 socket.flush().await.unwrap();
             }
-            .instrument(tracing::info_span!("listener")),
+            .instrument(info_span!("listener")),
         );
 
         addr

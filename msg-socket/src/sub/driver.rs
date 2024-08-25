@@ -20,7 +20,7 @@ use super::{
 };
 use crate::{ConnectionState, ExponentialBackoff};
 
-use msg_common::{channel, task::JoinMap, Channel};
+use msg_common::{channel, Channel, JoinMap};
 use msg_transport::{Address, Transport};
 use msg_wire::{auth, compression::try_decompress_payload, pubsub};
 

@@ -9,7 +9,7 @@ use std::{
 use futures::future::BoxFuture;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{Acceptor, Transport, TransportExt};
 
@@ -133,7 +133,7 @@ impl Transport<SocketAddr> for Quic {
                 .await
                 .map_err(Error::from)?;
 
-            tracing::debug!("Connected to {}, opening stream", addr);
+            debug!("Connected to {}, opening stream", addr);
 
             // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
             connection
@@ -159,12 +159,12 @@ impl Transport<SocketAddr> for Quic {
                     Some(Ok(connecting)) => {
                         let peer = connecting.remote_address();
 
-                        tracing::debug!("New incoming connection from {}", peer);
+                        debug!("New incoming connection from {}", peer);
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
                             let connection = connecting.await.map_err(Error::from)?;
-                            tracing::debug!(
+                            debug!(
                                 "Accepted connection from {}, opening stream",
                                 connection.remote_address()
                             );
@@ -235,6 +235,7 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         sync::oneshot,
     };
+    use tracing::info;
 
     use super::*;
 
@@ -251,7 +252,7 @@ mod tests {
             .unwrap();
 
         let server_addr = server.local_addr().unwrap();
-        tracing::info!("Server bound on {:?}", server_addr);
+        info!("Server bound on {:?}", server_addr);
 
         let (tx, rx) = oneshot::channel();
 
@@ -260,7 +261,7 @@ mod tests {
 
             let mut stream = server.accept().await.unwrap();
 
-            tracing::info!("Accepted connection");
+            info!("Accepted connection");
 
             let mut dst = [0u8; 5];
 
@@ -273,13 +274,13 @@ mod tests {
         let mut client = Quic::new(config);
 
         let mut stream = client.connect(server_addr).await.unwrap();
-        tracing::info!("Connected to remote");
+        info!("Connected to remote");
 
         let item = b"Hello";
         stream.write_all(item).await.unwrap();
         stream.flush().await.unwrap();
 
-        tracing::info!("Wrote to remote");
+        info!("Wrote to remote");
         let rcv = rx.await.unwrap();
 
         assert_eq!(rcv, *item);
@@ -299,7 +300,7 @@ mod tests {
 
         tokio::spawn(async move {
             let _stream = client.connect(addr).await.unwrap();
-            tracing::info!("Connected to remote");
+            info!("Connected to remote");
         });
 
         tokio::time::sleep(Duration::from_secs(17)).await;
