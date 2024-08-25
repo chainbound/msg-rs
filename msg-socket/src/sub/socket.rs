@@ -111,27 +111,23 @@ where
     T: Transport<Addr = PathBuf> + Send + Sync + Unpin + 'static,
 {
     /// Connects to the given path asynchronously.
-    pub async fn connect_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), SubError> {
-        let path = path.as_ref().clone();
-        self.connect(path).await
+    pub async fn connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
+        self.connect(path.into()).await
     }
 
     /// Attempts to connect to the given path immediately.
-    pub fn try_connect_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), SubError> {
-        let path = path.as_ref().clone();
-        self.try_connect(path)
+    pub fn try_connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
+        self.try_connect(path.into())
     }
 
     /// Disconnects from the given path asynchronously.
-    pub async fn disconnect_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), SubError> {
-        let path = path.as_ref().clone();
-        self.disconnect(path).await
+    pub async fn disconnect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
+        self.disconnect(path.into()).await
     }
 
     /// Attempts to disconnect from the given path immediately.
-    pub fn try_disconnect_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), SubError> {
-        let path = path.as_ref().clone();
-        self.try_disconnect(path)
+    pub fn try_disconnect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
+        self.try_disconnect(path.into())
     }
 }
 

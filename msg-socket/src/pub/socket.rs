@@ -37,13 +37,6 @@ pub struct PubSocket<T: Transport> {
 
 impl<T> PubSocket<T>
 where
-    T: Transport + Send + Unpin + 'static,
-    T::Addr: ToSocketAddrs,
-{
-}
-
-impl<T> PubSocket<T>
-where
     T: Transport<Addr = SocketAddr> + Send + Unpin + 'static,
 {
     /// Binds the socket to the given socket addres
@@ -64,9 +57,8 @@ where
     ///
     /// This method is only available for transports that support [`PathBuf`] as address type,
     /// like [`Ipc`](msg_transport::ipc::Ipc).
-    pub async fn bind_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), PubError> {
-        let addr = path.as_ref().clone();
-        self.try_bind(vec![addr]).await
+    pub async fn bind_path(&mut self, path: impl Into<PathBuf>) -> Result<(), PubError> {
+        self.try_bind(vec![path.into()]).await
     }
 }
 
