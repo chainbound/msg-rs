@@ -20,6 +20,18 @@ use msg_common::async_error;
 #[derive(Debug, Default)]
 pub struct Config;
 
+/// An IPC (Inter-Process Communication) implementation using Unix domain sockets.
+///
+/// This struct represents the IPC transport, which allows communication between processes
+/// on the same machine using Unix domain sockets.
+///
+/// # Features
+/// - Asynchronous communication using Tokio's runtime
+/// - Supports both connection-oriented (stream) and connectionless (datagram) sockets
+/// - Implements standard transport traits for easy integration with other components
+///
+/// Note: This implementation is specific to Unix-like operating systems and is not tested
+/// on Windows or other non-Unix platforms.
 #[derive(Debug, Default)]
 pub struct Ipc {
     #[allow(unused)]
@@ -142,7 +154,7 @@ impl Transport for Ipc {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl TransportExt for Ipc {
     fn accept(&mut self) -> Acceptor<'_, Self>
     where
