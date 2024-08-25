@@ -113,11 +113,7 @@ where
 
         client_config.transport_config(transport);
 
-        Config {
-            endpoint_config: quinn::EndpointConfig::default(),
-            client_config,
-            server_config,
-        }
+        Config { endpoint_config: quinn::EndpointConfig::default(), client_config, server_config }
     }
 }
 
@@ -170,10 +166,6 @@ impl Default for Config {
 
         client_config.transport_config(transport);
 
-        Self {
-            endpoint_config: quinn::EndpointConfig::default(),
-            client_config,
-            server_config,
-        }
+        Self { endpoint_config: quinn::EndpointConfig::default(), client_config, server_config }
     }
 }

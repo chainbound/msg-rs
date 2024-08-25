@@ -17,10 +17,7 @@ pub use task::JoinMap;
 /// Returns the current UNIX timestamp in microseconds.
 #[inline]
 pub fn unix_micros() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_micros() as u64
+    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64
 }
 
 /// Wraps the given error in a boxed future.

@@ -24,12 +24,7 @@ pub struct ExponentialBackoff {
 
 impl ExponentialBackoff {
     pub fn new(initial: Duration, max_retries: usize) -> Self {
-        Self {
-            retry_count: 0,
-            max_retries,
-            backoff: initial,
-            timeout: None,
-        }
+        Self { retry_count: 0, max_retries, backoff: initial, timeout: None }
     }
 
     /// (Re)-set the timeout to the current backoff duration.

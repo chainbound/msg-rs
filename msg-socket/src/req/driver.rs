@@ -1,6 +1,3 @@
-use bytes::Bytes;
-use futures::{Future, FutureExt, SinkExt, StreamExt};
-use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
     io,
@@ -9,6 +6,10 @@ use std::{
     task::{ready, Context, Poll},
     time::{Duration, Instant},
 };
+
+use bytes::Bytes;
+use futures::{Future, FutureExt, SinkExt, StreamExt};
+use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Interval,
@@ -26,7 +27,11 @@ use msg_wire::{
     reqrep,
 };
 
+/// A connection task that connects to a server and returns the underlying IO object.
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
+
+/// A connection controller that manages the connection to a server with an exponential backoff.
+type ConnectionCtl<Io, Addr> = ConnectionState<Framed<Io, reqrep::Codec>, ExponentialBackoff, Addr>;
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
@@ -48,7 +53,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state: ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff, A>,
+    pub(crate) conn_state: ConnectionCtl<T::Io, A>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -89,7 +94,7 @@ where
             let mut io = match connect.await {
                 Ok(io) => io,
                 Err(e) => {
-                    error!("Failed to connect to {:?}: {:?}", addr, e);
+                    error!(err = ?e, "Failed to connect to {:?}", addr);
                     return Err(e);
                 }
             };
@@ -112,17 +117,15 @@ where
                             Ok(io)
                         }
                         Ok(msg) => {
-                            error!("Unexpected auth ACK result: {:?}", msg);
+                            error!(?msg, "Unexpected auth ACK result");
                             Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
                         }
                         Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
                     },
                     None => {
                         error!("Connection closed while waiting for ACK");
-                        Err(
-                            io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
-                                .into(),
-                        )
+                        Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
+                            .into())
                     }
                 }
             } else {
@@ -144,7 +147,7 @@ where
             match try_decompress_payload(compression_type, payload) {
                 Ok(decompressed) => payload = decompressed,
                 Err(e) => {
-                    error!("Failed to decompress response payload: {:?}", e);
+                    error!(err = ?e, "Failed to decompress response payload");
                     let _ = pending.sender.send(Err(ReqError::Wire(reqrep::Error::Io(
                         io::Error::new(io::ErrorKind::Other, "Failed to decompress response"),
                     ))));
@@ -163,17 +166,14 @@ where
     /// Handle an incoming command from the socket frontend.
     fn on_command(&mut self, cmd: Command) {
         match cmd {
-            Command::Send {
-                mut message,
-                response,
-            } => {
+            Command::Send { mut message, response } => {
                 let start = std::time::Instant::now();
 
                 let len_before = message.payload().len();
                 if len_before > self.options.min_compress_size {
                     if let Some(ref compressor) = self.compressor {
                         if let Err(e) = message.compress(compressor.as_ref()) {
-                            error!("Failed to compress message: {:?}", e);
+                            error!(err = ?e, "Failed to compress message");
                         }
 
                         debug!(
@@ -188,13 +188,7 @@ where
                 let msg_id = msg.id();
                 self.id_counter = self.id_counter.wrapping_add(1);
                 self.egress_queue.push_back(msg);
-                self.pending_requests.insert(
-                    msg_id,
-                    PendingRequest {
-                        start,
-                        sender: response,
-                    },
-                );
+                self.pending_requests.insert(msg_id, PendingRequest { start, sender: response });
             }
         }
     }
@@ -286,11 +280,7 @@ where
 
             // If the connection is inactive, try to connect to the server
             // or poll the backoff timer if we're already trying to connect.
-            if let ConnectionState::Inactive {
-                ref mut backoff,
-                ref addr,
-            } = this.conn_state
-            {
+            if let ConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
                 if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
                     if let Some(duration) = item {
                         if this.conn_task.is_none() {
@@ -326,9 +316,9 @@ where
                 }
                 Poll::Ready(Some(Err(err))) => {
                     if let reqrep::Error::Io(e) = err {
-                        error!("Socket error: {:?}", e);
+                        error!(err = ?e, "Socket error");
                         if e.kind() == std::io::ErrorKind::Other {
-                            error!("Other error: {:?}", e);
+                            error!(err = ?e, "Other error");
                         }
                     }
 
@@ -358,7 +348,7 @@ where
                             this.should_flush = true;
                         }
                         Err(e) => {
-                            error!("Failed to send message to socket: {:?}", e);
+                            error!(err = ?e, "Failed to send message to socket");
 
                             // set the connection to inactive, so that it will be re-tried
                             this.reset_connection();

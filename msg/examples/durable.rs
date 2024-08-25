@@ -38,12 +38,7 @@ async fn start_rep() {
         info!("Message: {:?}", req.msg());
 
         let msg = String::from_utf8_lossy(req.msg()).to_string();
-        let msg_id = msg
-            .split_whitespace()
-            .nth(1)
-            .unwrap()
-            .parse::<i32>()
-            .unwrap();
+        let msg_id = msg.split_whitespace().nth(1).unwrap().parse::<i32>().unwrap();
 
         if n_reqs == 5 {
             warn!(
@@ -66,9 +61,7 @@ async fn main() {
     // and an identifier. This will implicitly turn on client authentication.
     let mut req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default()
-            .timeout(Duration::from_secs(4))
-            .auth_token(Bytes::from("client1")),
+        ReqOptions::default().timeout(Duration::from_secs(4)).auth_token(Bytes::from("client1")),
     );
 
     let (tx, rx) = oneshot::channel();
@@ -91,7 +84,7 @@ async fn main() {
                     match req.request(Bytes::from(msg.clone())).await {
                         Ok(res) => break res,
                         Err(e) => {
-                            error!("Request failed: {:?}, retrying...", e);
+                            error!(err = ?e, "Request failed, retrying...");
                             tokio::time::sleep(Duration::from_millis(1000)).await;
                         }
                     }

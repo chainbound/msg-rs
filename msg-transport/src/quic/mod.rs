@@ -36,14 +36,16 @@ pub enum Error {
     ClosedEndpoint,
 }
 
-/// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`] traits.
+/// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`]
+/// traits.
 ///
 /// # Note on multiplexing
-/// This implementation does not yet support multiplexing. This means that each connection only supports a single
-/// bi-directional stream, which is returned as the I/O object when connecting or accepting.
+/// This implementation does not yet support multiplexing. This means that each connection only
+/// supports a single bi-directional stream, which is returned as the I/O object when connecting or
+/// accepting.
 ///
-/// In a future release, we will add support for multiplexing, which will allow multiple streams per connection based on
-/// socket requirements / semantics.
+/// In a future release, we will add support for multiplexing, which will allow multiple streams per
+/// connection based on socket requirements / semantics.
 #[derive(Debug, Default)]
 pub struct Quic {
     config: Config,
@@ -56,15 +58,11 @@ pub struct Quic {
 impl Quic {
     /// Creates a new QUIC transport with the given configuration.
     pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            endpoint: None,
-            incoming: None,
-        }
+        Self { config, endpoint: None, incoming: None }
     }
 
-    /// Creates a new [`quinn::Endpoint`] with the given configuration and a Tokio runtime. If no `addr` is given,
-    /// the endpoint will be bound to the default address.
+    /// Creates a new [`quinn::Endpoint`] with the given configuration and a Tokio runtime. If no
+    /// `addr` is given, the endpoint will be bound to the default address.
     fn new_endpoint(
         &self,
         addr: Option<SocketAddr>,
@@ -106,8 +104,8 @@ impl Transport<SocketAddr> for Quic {
         Ok(())
     }
 
-    /// Connects to the given address, returning a future representing a pending outbound connection.
-    /// If the endpoint is not bound, it will be bound to the default address.
+    /// Connects to the given address, returning a future representing a pending outbound
+    /// connection. If the endpoint is not bound, it will be bound to the default address.
     fn connect(&mut self, addr: SocketAddr) -> Self::Connect {
         // If we have an endpoint, use it. Otherwise, create a new one.
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
@@ -128,22 +126,17 @@ impl Transport<SocketAddr> for Quic {
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
-            let connection = endpoint
-                .connect_with(client_config, addr, "l")?
-                .await
-                .map_err(Error::from)?;
+            let connection =
+                endpoint.connect_with(client_config, addr, "l")?.await.map_err(Error::from)?;
 
             debug!("Connected to {}, opening stream", addr);
 
-            // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
+            // Open a bi-directional stream and return it. We'll think about multiplexing per topic
+            // later.
             connection
                 .open_bi()
                 .await
-                .map(|(send, recv)| QuicStream {
-                    peer: addr,
-                    send,
-                    recv,
-                })
+                .map(|(send, recv)| QuicStream { peer: addr, send, recv })
                 .map_err(Error::from)
         })
     }
@@ -169,7 +162,8 @@ impl Transport<SocketAddr> for Quic {
                                 connection.remote_address()
                             );
 
-                            // Accept a bi-directional stream and return it. We'll think about multiplexing per topic later.
+                            // Accept a bi-directional stream and return it. We'll think about
+                            // multiplexing per topic later.
                             connection
                                 .accept_bi()
                                 .await
@@ -185,8 +179,8 @@ impl Transport<SocketAddr> for Quic {
                     }
                 }
             } else {
-                // We need to set the incoming channel and spawn a task to accept incoming connections
-                // on the endpoint.
+                // We need to set the incoming channel and spawn a task to accept incoming
+                // connections on the endpoint.
 
                 // Check if there's an endpoint bound.
                 let Some(endpoint) = this.endpoint.clone() else {
@@ -246,10 +240,7 @@ mod tests {
         let config = Config::default();
 
         let mut server = Quic::new(config.clone());
-        server
-            .bind(SocketAddr::from(([127, 0, 0, 1], 0)))
-            .await
-            .unwrap();
+        server.bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
 
         let server_addr = server.local_addr().unwrap();
         info!("Server bound on {:?}", server_addr);

@@ -33,10 +33,7 @@ pub struct RepOptions {
 
 impl Default for RepOptions {
     fn default() -> Self {
-        Self {
-            max_clients: None,
-            min_compress_size: 8192,
-        }
+        Self { max_clients: None, min_compress_size: 8192 }
     }
 }
 
@@ -86,9 +83,7 @@ impl<A: Address> Request<A> {
 
     /// Responds to the request.
     pub fn respond(self, response: Bytes) -> Result<(), PubError> {
-        self.response
-            .send(response)
-            .map_err(|_| PubError::SocketClosed)
+        self.response.send(response).map_err(|_| PubError::SocketClosed)
     }
 }
 

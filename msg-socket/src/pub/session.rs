@@ -40,19 +40,13 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
     fn on_outgoing(&mut self, msg: PubMessage) {
         // Check if the message matches the topic filter
         if self.topic_filter.contains(msg.topic()) {
-            trace!(
-                topic = msg.topic(),
-                "Message matches topic filter, adding to egress queue"
-            );
+            trace!(topic = msg.topic(), "Message matches topic filter, adding to egress queue");
 
             // Generate the wire message and increment the sequence number
             self.pending_egress = Some(msg.into_wire(self.seq));
             self.seq = self.seq.wrapping_add(1);
         } else {
-            trace!(
-                topic = msg.topic(),
-                "Message does not match topic filter, discarding"
-            );
+            trace!(topic = msg.topic(), "Message does not match topic filter, discarding");
         }
     }
 
@@ -69,10 +63,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
                 self.topic_filter.remove(&topic)
             }
             ControlMsg::Close => {
-                debug!(
-                    "Closing session after receiving close message {}",
-                    self.session_id
-                );
+                debug!("Closing session after receiving close message {}", self.session_id);
             }
         }
     }
@@ -127,10 +118,7 @@ fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
             ControlMsg::Close
         }
     } else {
-        warn!(
-            "Unkown control message topic, closing session: {:?}",
-            msg.topic()
-        );
+        warn!("Unkown control message topic, closing session: {:?}", msg.topic());
         ControlMsg::Close
     }
 }
@@ -144,8 +132,8 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
         loop {
             // First check if we should flush the connection. We only do this if we have written
-            // some data and the flush interval has elapsed. Only when we have succesfully flushed the data
-            // will we reset the `should_flush` flag.
+            // some data and the flush interval has elapsed. Only when we have succesfully flushed
+            // the data will we reset the `should_flush` flag.
             if this.should_flush(cx) {
                 if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
                     this.should_flush = false;
@@ -155,7 +143,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.pending_egress.take() {
-                    debug!("Sending message: {:?}", msg);
+                    debug!(?msg, "Sending message");
                     let msg_len = msg.size();
 
                     match this.conn.start_send_unpin(msg) {
@@ -167,7 +155,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                             continue;
                         }
                         Err(e) => {
-                            error!("Failed to send message to socket: {:?}", e);
+                            error!(err = ?e, "Failed to send message to socket");
                             let _ = this.conn.poll_close_unpin(cx);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(());
@@ -186,10 +174,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                         continue;
                     }
                     Some(Err(e)) => {
-                        warn!(
-                            session_id = this.session_id,
-                            "Receiver lagging behind: {:?}", e
-                        );
+                        warn!(err = ?e, session_id = this.session_id, "Receiver lagging behind");
                         continue;
                     }
                     None => {
@@ -204,23 +189,17 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             if let Poll::Ready(item) = this.conn.poll_next_unpin(cx) {
                 match item {
                     Some(Ok(msg)) => {
-                        debug!("Incoming message: {:?}", msg);
+                        debug!(?msg, "Incoming message");
                         this.on_incoming(msg);
                         continue;
                     }
                     Some(Err(e)) => {
-                        error!(
-                            session_id = this.session_id,
-                            "Error reading from socket: {:?}", e
-                        );
+                        error!(err = ?e, session_id = this.session_id, "Error reading from socket");
                         let _ = this.conn.poll_close_unpin(cx);
                         return Poll::Ready(());
                     }
                     None => {
-                        warn!(
-                            "Connection closed, shutting down session {}",
-                            this.session_id
-                        );
+                        warn!("Connection closed, shutting down session {}", this.session_id);
                         return Poll::Ready(());
                     }
                 }

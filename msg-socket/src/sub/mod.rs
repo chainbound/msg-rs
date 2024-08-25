@@ -72,8 +72,9 @@ impl SubOptions {
         self
     }
 
-    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
-    /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
+    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be
+    /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
+    /// being dropped.
     pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
         self.ingress_buffer_size = ingress_buffer_size;
         self
@@ -128,11 +129,7 @@ impl<A: Address> fmt::Debug for PubMessage<A> {
 
 impl<A: Address> PubMessage<A> {
     pub fn new(source: A, topic: String, payload: Bytes) -> Self {
-        Self {
-            source,
-            topic,
-            payload,
-        }
+        Self { source, topic, payload }
     }
 
     #[inline]
@@ -164,9 +161,7 @@ pub(crate) struct SocketState<A: Address> {
 
 impl<A: Address> SocketState<A> {
     pub fn new() -> Self {
-        Self {
-            stats: SocketStats::new(),
-        }
+        Self { stats: SocketStats::new() }
     }
 }
 

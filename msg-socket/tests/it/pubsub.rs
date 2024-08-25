@@ -67,14 +67,12 @@ where
 
     publisher.try_bind(vec![addr]).await?;
 
-    // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+    // Spawn a task to keep sending messages until the subscriber receives one (after connection
+    // process)
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            publisher
-                .publish(TOPIC, Bytes::from("WORLD"))
-                .await
-                .unwrap();
+            publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
         }
     });
 
@@ -149,14 +147,12 @@ async fn pubsub_fan_out_transport<
 
     publisher.try_bind(vec![addr]).await?;
 
-    // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+    // Spawn a task to keep sending messages until the subscriber receives one (after connection
+    // process)
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            publisher
-                .publish(TOPIC, Bytes::from("WORLD"))
-                .await
-                .unwrap();
+            publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
         }
     });
 
@@ -221,14 +217,12 @@ async fn pubsub_fan_in_transport<
             let local_addr = publisher.local_addr().unwrap().clone();
             tx.send(local_addr).await.unwrap();
 
-            // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+            // Spawn a task to keep sending messages until the subscriber receives one (after
+            // connection process)
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_millis(500)).await;
-                    publisher
-                        .publish(TOPIC, Bytes::from("WORLD"))
-                        .await
-                        .unwrap();
+                    publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
                 }
             });
         });

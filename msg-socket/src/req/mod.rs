@@ -35,10 +35,7 @@ pub enum ReqError {
 }
 
 pub enum Command {
-    Send {
-        message: ReqMessage,
-        response: oneshot::Sender<Result<Bytes, ReqError>>,
-    },
+    Send { message: ReqMessage, response: oneshot::Sender<Result<Bytes, ReqError>> },
 }
 
 #[derive(Debug, Clone)]
@@ -88,29 +85,32 @@ impl ReqOptions {
         self
     }
 
-    /// Sets the flush interval for the socket. A higher flush interval will result in higher throughput,
-    /// but at the cost of higher latency. Note that this behaviour can be completely useless if the
-    /// `backpressure_boundary` is set too low (which will trigger a flush before the interval is reached).
+    /// Sets the flush interval for the socket. A higher flush interval will result in higher
+    /// throughput, but at the cost of higher latency. Note that this behaviour can be
+    /// completely useless if the `backpressure_boundary` is set too low (which will trigger a
+    /// flush before the interval is reached).
     pub fn flush_interval(mut self, flush_interval: Duration) -> Self {
         self.flush_interval = Some(flush_interval);
         self
     }
 
-    /// Sets the backpressure boundary for the socket. This is the maximum number of bytes that can be buffered
-    /// in the session before being flushed. This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    /// Sets the backpressure boundary for the socket. This is the maximum number of bytes that can
+    /// be buffered in the session before being flushed. This internally sets
+    /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
     pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
         self.backpressure_boundary = backpressure_boundary;
         self
     }
 
-    /// Sets the maximum number of retry attempts. If `None`, all connections will be retried indefinitely.
+    /// Sets the maximum number of retry attempts. If `None`, all connections will be retried
+    /// indefinitely.
     pub fn retry_attempts(mut self, retry_attempts: usize) -> Self {
         self.retry_attempts = Some(retry_attempts);
         self
     }
 
-    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller than
-    /// this threshold, it will not be compressed.
+    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
+    /// than this threshold, it will not be compressed.
     pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self

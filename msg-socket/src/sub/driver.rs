@@ -12,9 +12,8 @@ use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
-use super::session::SessionCommand;
 use super::{
-    session::PublisherSession,
+    session::{PublisherSession, SessionCommand},
     stream::{PublisherStream, TopicMessage},
     Command, PubMessage, SocketState, SubOptions,
 };
@@ -79,7 +78,7 @@ where
                         this.on_connection(addr, io);
                     }
                     Err(e) => {
-                        error!(?addr, "Error connecting to publisher: {:?}", e);
+                        error!(err = ?e, ?addr, "Error connecting to publisher");
                     }
                 }
 
@@ -202,10 +201,7 @@ where
             }
             Command::Connect { endpoint } => {
                 if self.is_known(&endpoint) {
-                    debug!(
-                        ?endpoint,
-                        "Publisher already known, ignoring connect command"
-                    );
+                    debug!(?endpoint, "Publisher already known, ignoring connect command");
                     return;
                 }
 
@@ -269,10 +265,8 @@ where
                     None => {
                         return (
                             addr,
-                            Err(
-                                io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
-                                    .into(),
-                            ),
+                            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
+                                .into()),
                         )
                     }
                 };
@@ -318,26 +312,20 @@ where
         tokio::spawn(publisher_session);
 
         for topic in self.subscribed_topics.iter() {
-            if publisher_channel
-                .try_send(SessionCommand::Subscribe(topic.clone()))
-                .is_err()
-            {
+            if publisher_channel.try_send(SessionCommand::Subscribe(topic.clone())).is_err() {
                 error!(publisher = ?addr, "Error trying to subscribe to topic {topic} on startup: publisher channel closed / full");
             }
         }
 
-        self.publishers.insert(
-            addr.clone(),
-            ConnectionState::Active {
-                channel: publisher_channel,
-            },
-        );
+        self.publishers
+            .insert(addr.clone(), ConnectionState::Active { channel: publisher_channel });
 
         self.state.stats.insert(addr, session_stats);
     }
 
-    /// Polls all the publisher channels for new messages. On new messages, forwards them to the socket.
-    /// If a publisher channel is closed, it will be removed from the list of publishers.
+    /// Polls all the publisher channels for new messages. On new messages, forwards them to the
+    /// socket. If a publisher channel is closed, it will be removed from the list of
+    /// publishers.
     ///
     /// Returns `Poll::Ready` if any progress was made and this method should be called again.
     /// Returns `Poll::Pending` if no progress was made.
@@ -357,14 +345,14 @@ where
                             match try_decompress_payload(msg.compression_type, msg.payload) {
                                 Ok(decompressed) => msg.payload = decompressed,
                                 Err(e) => {
-                                    error!("Failed to decompress message: {:?}", e);
+                                    error!(err = ?e, "Failed to decompress message");
                                     continue;
                                 }
                             };
 
                             let msg = PubMessage::new(addr.clone(), msg.topic, msg.payload);
 
-                            debug!(source = ?msg.source, "New message: {:?}", msg);
+                            debug!(source = ?msg.source, ?msg, "New message");
                             // TODO: queuing
                             if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
                                 error!(

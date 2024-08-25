@@ -25,10 +25,8 @@ async fn run_tcp() {
     );
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::with_options(
-        Tcp::default(),
-        SubOptions::default().ingress_buffer_size(1024),
-    );
+    let mut sub1 =
+        SubSocket::with_options(Tcp::default(), SubOptions::default().ingress_buffer_size(1024));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();
@@ -91,10 +89,7 @@ async fn run_transfer<T: Transport<A> + Send + Unpin + 'static, A: Address>(
 
     for _ in 0..100 {
         let start = Instant::now();
-        pub_socket
-            .publish("HELLO_TOPIC".to_string(), data.clone())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO_TOPIC".to_string(), data.clone()).await.unwrap();
 
         let recv = sub_socket.next().await.unwrap();
         let elapsed = start.elapsed();

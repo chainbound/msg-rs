@@ -6,8 +6,8 @@ use std::{
 use tokio::task::{JoinError, JoinSet};
 
 /// A collection of keyed tasks spawned on a Tokio runtime.
-/// Hacky implementation of a join set that allows for a key to be associated with each task by having
-/// the task return a tuple of (key, value).
+/// Hacky implementation of a join set that allows for a key to be associated with each task by
+/// having the task return a tuple of (key, value).
 #[derive(Debug, Default)]
 pub struct JoinMap<K, V> {
     keys: HashSet<K>,
@@ -17,10 +17,7 @@ pub struct JoinMap<K, V> {
 impl<K, V> JoinMap<K, V> {
     /// Create a new `JoinSet`.
     pub fn new() -> Self {
-        Self {
-            keys: HashSet::new(),
-            joinset: JoinSet::new(),
-        }
+        Self { keys: HashSet::new(), joinset: JoinSet::new() }
     }
 
     /// Returns the number of tasks currently in the `JoinSet`.
@@ -71,7 +68,8 @@ where
 
     /// Polls for one of the tasks in the set to complete.
     ///
-    /// If this returns `Poll::Ready(Some(_))`, then the task that completed is removed from the set.
+    /// If this returns `Poll::Ready(Some(_))`, then the task that completed is removed from the
+    /// set.
     ///
     /// When the method returns `Poll::Pending`, the `Waker` in the provided `Context` is scheduled
     /// to receive a wakeup when a task in the `JoinSet` completes. Note that on multiple calls to
@@ -83,11 +81,11 @@ where
     /// This function returns:
     ///
     ///  * `Poll::Pending` if the `JoinSet` is not empty but there is no task whose output is
-    ///     available right now.
-    ///  * `Poll::Ready(Some(Ok(value)))` if one of the tasks in this `JoinSet` has completed.
-    ///     The `value` is the return value of one of the tasks that completed.
+    ///    available right now.
+    ///  * `Poll::Ready(Some(Ok(value)))` if one of the tasks in this `JoinSet` has completed. The
+    ///    `value` is the return value of one of the tasks that completed.
     ///  * `Poll::Ready(Some(Err(err)))` if one of the tasks in this `JoinSet` has panicked or been
-    ///     aborted. The `err` is the `JoinError` from the panicked/aborted task.
+    ///    aborted. The `err` is the `JoinError` from the panicked/aborted task.
     ///  * `Poll::Ready(None)` if the `JoinSet` is empty.
     ///
     /// Note that this method may return `Poll::Pending` even if one of the tasks has completed.

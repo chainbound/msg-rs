@@ -19,10 +19,8 @@ async fn main() {
     );
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::with_options(
-        Tcp::default(),
-        SubOptions::default().ingress_buffer_size(1024),
-    );
+    let mut sub1 =
+        SubSocket::with_options(Tcp::default(), SubOptions::default().ingress_buffer_size(1024));
 
     let mut sub2 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
@@ -49,8 +47,8 @@ async fn main() {
     let t1 = tokio::spawn(
         async move {
             loop {
-                // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription was succesful,
-                // we should time out after the 10th message.
+                // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription
+                // was succesful, we should time out after the 10th message.
                 let Ok(Some(recv)) = timeout(Duration::from_millis(2000), sub1.next()).await else {
                     warn!("Timeout waiting for message, stopping sub1");
                     break;
@@ -83,10 +81,7 @@ async fn main() {
 
     for i in 0..20 {
         tokio::time::sleep(Duration::from_millis(300)).await;
-        pub_socket
-            .publish("HELLO_TOPIC".to_string(), format!("Message {i}").into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO_TOPIC".to_string(), format!("Message {i}").into()).await.unwrap();
     }
 
     let _ = tokio::join!(t1, t2);

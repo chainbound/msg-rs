@@ -31,9 +31,7 @@ impl Codec {
     /// codec in the `AuthReceive` state since it will be waiting for the
     /// client to send its ID.
     pub fn new_server() -> Self {
-        Self {
-            state: State::AuthReceive,
-        }
+        Self { state: State::AuthReceive }
     }
 }
 

@@ -10,11 +10,7 @@ struct Node {
 
 impl Node {
     fn new() -> Self {
-        Self {
-            children: FxHashMap::default(),
-            catch_all: false,
-            topic_end: false,
-        }
+        Self { children: FxHashMap::default(), catch_all: false, topic_end: false }
     }
 }
 
@@ -36,10 +32,7 @@ impl PrefixTrie {
     pub fn insert(&mut self, topic: &str) {
         let mut node = &mut self.root;
         for token in topic.split('.') {
-            node = node
-                .children
-                .entry(token.to_string())
-                .or_insert(Node::new());
+            node = node.children.entry(token.to_string()).or_insert(Node::new());
             // Check if this is a catch-all wildcard. If so, we mark it as such and break.
             if token == ">" {
                 node.catch_all = true;

@@ -23,10 +23,7 @@ pub struct Tcp {
 
 impl Tcp {
     pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            listener: None,
-        }
+        Self { config, listener: None }
     }
 }
 

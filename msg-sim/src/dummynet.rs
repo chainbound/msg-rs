@@ -21,12 +21,7 @@ pub struct Pipe {
 impl Pipe {
     /// Creates a new pipe with the given ID. The ID must be unique.
     pub fn new(id: usize) -> Self {
-        Self {
-            id,
-            bandwidth: None,
-            delay: None,
-            plr: None,
-        }
+        Self { id, bandwidth: None, delay: None, plr: None }
     }
 
     /// Set the bandwidth cap of the pipe in Kbps.
@@ -54,10 +49,7 @@ impl Pipe {
     fn build_cmd(&self) -> Command {
         let mut cmd = Command::new("sudo");
 
-        cmd.arg("dnctl")
-            .arg("pipe")
-            .arg(self.id.to_string())
-            .arg("config");
+        cmd.arg("dnctl").arg("pipe").arg(self.id.to_string()).arg("config");
 
         if let Some(bandwidth) = self.bandwidth {
             let bw = format!("{}Kbit/s", bandwidth);
@@ -87,10 +79,7 @@ impl Pipe {
 
     fn destroy_cmd(&self) -> Command {
         let mut cmd = Command::new("sudo");
-        cmd.arg("dnctl")
-            .arg("pipe")
-            .arg("delete")
-            .arg(self.id.to_string());
+        cmd.arg("dnctl").arg("pipe").arg("delete").arg(self.id.to_string());
 
         cmd
     }
@@ -169,9 +158,7 @@ impl PacketFilter {
 
     /// Destroys the packet filter by executing the correct shell commands.
     pub fn destroy(self) -> io::Result<()> {
-        let status = Command::new("sudo")
-            .args(["pfctl", "-f", "/etc/pf.conf"])
-            .status()?;
+        let status = Command::new("sudo").args(["pfctl", "-f", "/etc/pf.conf"]).status()?;
 
         assert_status(status, "Failed to flush packet filter")?;
 
@@ -181,21 +168,15 @@ impl PacketFilter {
 
         // Remove the loopback alias
         let status = Command::new("sudo")
-            .args([
-                "ifconfig",
-                &self.loopback,
-                "-alias",
-                &self.endpoint.unwrap().to_string(),
-            ])
+            .args(["ifconfig", &self.loopback, "-alias", &self.endpoint.unwrap().to_string()])
             .status()?;
 
         assert_status(status, "Failed to remove the loopback alias")?;
 
         // Reset the MTU of the loopback interface
 
-        let status = Command::new("sudo")
-            .args(["ifconfig", &self.loopback, "mtu", "16384"])
-            .status()?;
+        let status =
+            Command::new("sudo").args(["ifconfig", &self.loopback, "mtu", "16384"]).status()?;
 
         assert_status(status, "Failed to reset loopback MTU back to 16384")?;
 
@@ -207,19 +188,13 @@ impl PacketFilter {
 
     fn create_loopback_alias(&self) -> io::Result<()> {
         let status = Command::new("sudo")
-            .args([
-                "ifconfig",
-                &self.loopback,
-                "alias",
-                &self.endpoint.unwrap().to_string(),
-            ])
+            .args(["ifconfig", &self.loopback, "alias", &self.endpoint.unwrap().to_string()])
             .status()?;
 
         assert_status(status, "Failed to create loopback alias")?;
 
-        let status = Command::new("sudo")
-            .args(["ifconfig", &self.loopback, "mtu", "1500"])
-            .status()?;
+        let status =
+            Command::new("sudo").args(["ifconfig", &self.loopback, "mtu", "1500"]).status()?;
 
         assert_status(status, "Failed to set loopback MTU to 1500")?;
 
@@ -230,31 +205,18 @@ impl PacketFilter {
     /// `(cat /etc/pf.conf && echo "dummynet-anchor \"msg-sim\"" &&
     /// echo "anchor \"msg-sim\"") | sudo pfctl -f -`
     fn load_pf_config(&self) -> io::Result<()> {
-        let echo_cmd = format!(
-            "dummynet-anchor \"{}\"\nanchor \"{}\"",
-            self.anchor, self.anchor
-        );
+        let echo_cmd = format!("dummynet-anchor \"{}\"\nanchor \"{}\"", self.anchor, self.anchor);
 
-        let mut cat = Command::new("cat")
-            .arg("/etc/pf.conf")
-            .stdout(Stdio::piped())
-            .spawn()?;
+        let mut cat = Command::new("cat").arg("/etc/pf.conf").stdout(Stdio::piped()).spawn()?;
 
         let cat_stdout = cat.stdout.take().unwrap();
 
-        let mut echo = Command::new("echo")
-            .arg(echo_cmd)
-            .stdout(Stdio::piped())
-            .spawn()?;
+        let mut echo = Command::new("echo").arg(echo_cmd).stdout(Stdio::piped()).spawn()?;
 
         let echo_stdout = echo.stdout.take().unwrap();
 
-        let mut pfctl = Command::new("sudo")
-            .arg("pfctl")
-            .arg("-f")
-            .arg("-")
-            .stdin(Stdio::piped())
-            .spawn()?;
+        let mut pfctl =
+            Command::new("sudo").arg("pfctl").arg("-f").arg("-").stdin(Stdio::piped()).spawn()?;
 
         let pfctl_stdin = pfctl.stdin.as_mut().unwrap();
         io::copy(&mut cat_stdout.chain(echo_stdout), pfctl_stdin)?;
@@ -277,10 +239,7 @@ impl PacketFilter {
         let echo_command = format!("dummynet in from any to {} pipe {}", endpoint, pipe_id);
 
         // Set up the echo command
-        let mut echo = Command::new("echo")
-            .arg(echo_command)
-            .stdout(Stdio::piped())
-            .spawn()?;
+        let mut echo = Command::new("echo").arg(echo_command).stdout(Stdio::piped()).spawn()?;
 
         if let Some(echo_stdout) = echo.stdout.take() {
             // Set up the pfctl command
@@ -346,10 +305,7 @@ mod tests {
         let cmd = Pipe::new(1).bandwidth(10).delay(100).plr(0.1).build_cmd();
         let cmd_str = cmd_to_string(&cmd);
 
-        assert_eq!(
-            cmd_str,
-            "sudo dnctl pipe 1 config bw 10Kbit/s delay 100 plr 0.1"
-        );
+        assert_eq!(cmd_str, "sudo dnctl pipe 1 config bw 10Kbit/s delay 100 plr 0.1");
 
         let cmd = Pipe::new(2).delay(1000).plr(10.0).build_cmd();
         let cmd_str = cmd_to_string(&cmd);
@@ -378,9 +334,7 @@ mod tests {
         let pipe = Pipe::new(3).bandwidth(100).delay(300);
 
         let endpoint = "127.0.0.2".parse().unwrap();
-        let pf = PacketFilter::new(pipe)
-            .endpoint(endpoint)
-            .anchor("msg-sim-test");
+        let pf = PacketFilter::new(pipe).endpoint(endpoint).anchor("msg-sim-test");
 
         pf.enable().unwrap();
 

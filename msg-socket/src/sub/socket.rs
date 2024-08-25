@@ -254,10 +254,7 @@ where
     /// Sends a command to the driver, returning [`SubError::SocketClosed`] if the
     /// driver has been dropped.
     async fn send_command(&self, command: Command<A>) -> Result<(), SubError> {
-        self.to_driver
-            .send(command)
-            .await
-            .map_err(|_| SubError::SocketClosed)?;
+        self.to_driver.send(command).await.map_err(|_| SubError::SocketClosed)?;
 
         Ok(())
     }

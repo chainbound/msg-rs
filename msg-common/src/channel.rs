@@ -104,11 +104,11 @@ impl<S: Send + 'static, R> Channel<S, R> {
     ///
     /// This method returns:
     ///
-    ///  * `Poll::Pending` if no messages are available but the channel is not
-    ///    closed, or if a spurious failure happens.
+    ///  * `Poll::Pending` if no messages are available but the channel is not closed, or if a
+    ///    spurious failure happens.
     ///  * `Poll::Ready(Some(message))` if a message is available.
-    ///  * `Poll::Ready(None)` if the channel has been closed and all messages
-    ///    sent before it was closed have been received.
+    ///  * `Poll::Ready(None)` if the channel has been closed and all messages sent before it was
+    ///    closed have been received.
     ///
     /// When the method returns `Poll::Pending`, the `Waker` in the provided
     /// `Context` is scheduled to receive a wakeup when a message is sent on any

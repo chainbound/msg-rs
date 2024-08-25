@@ -1,11 +1,10 @@
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
-use std::marker::PhantomData;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::{io, sync::Arc, time::Duration};
-use tokio::net::{lookup_host, ToSocketAddrs};
-use tokio::sync::{mpsc, oneshot};
+use std::{io, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::{
+    net::{lookup_host, ToSocketAddrs},
+    sync::{mpsc, oneshot},
+};
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
@@ -42,10 +41,7 @@ where
     pub async fn connect(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
         let mut addrs = lookup_host(addr).await?;
         let endpoint = addrs.next().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            )
+            io::Error::new(io::ErrorKind::InvalidInput, "could not find any valid address")
         })?;
 
         self.try_connect(endpoint).await
@@ -100,10 +96,7 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(Command::Send {
-                message: msg,
-                response: response_tx,
-            })
+            .send(Command::Send { message: msg, response: response_tx })
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 
@@ -116,10 +109,7 @@ where
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let transport = self
-            .transport
-            .take()
-            .expect("Transport has been moved already");
+        let transport = self.transport.take().expect("Transport has been moved already");
 
         // We initialize the connection as inactive, and let it be activated
         // by the backend task as soon as the driver is spawned.
@@ -132,8 +122,8 @@ where
 
         let flush_interval = self.options.flush_interval.map(tokio::time::interval);
 
-        // TODO: we should limit the amount of active outgoing requests, and that should be the capacity.
-        // If we do this, we'll never have to re-allocate.
+        // TODO: we should limit the amount of active outgoing requests, and that should be the
+        // capacity. If we do this, we'll never have to re-allocate.
         let pending_requests = FxHashMap::default();
 
         // Create the socket backend
