@@ -1,7 +1,8 @@
 use bytes::Bytes;
 use core::fmt;
+use msg_transport::Address;
 use msg_wire::pubsub;
-use std::{net::SocketAddr, time::Duration};
+use std::time::Duration;
 use thiserror::Error;
 
 mod driver;
@@ -33,15 +34,15 @@ pub enum SubError {
 }
 
 #[derive(Debug)]
-enum Command {
+enum Command<A: Address> {
     /// Subscribe to a topic.
     Subscribe { topic: String },
     /// Unsubscribe from a topic.
     Unsubscribe { topic: String },
     /// Connect to a publisher socket.
-    Connect { endpoint: SocketAddr },
+    Connect { endpoint: A },
     /// Disconnect from a publisher socket.
-    Disconnect { endpoint: SocketAddr },
+    Disconnect { endpoint: A },
     /// Shut down the driver.
     Shutdown,
 }
@@ -101,17 +102,17 @@ impl Default for SubOptions {
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
 #[derive(Clone)]
-pub struct PubMessage {
+pub struct PubMessage<A: Address> {
     /// The source address of the publisher. We need this because
     /// a subscriber can connect to multiple publishers.
-    source: SocketAddr,
+    source: A,
     /// The topic of the message.
     topic: String,
     /// The message payload.
     payload: Bytes,
 }
 
-impl fmt::Debug for PubMessage {
+impl<A: Address> fmt::Debug for PubMessage<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PubMessage")
             .field("source", &self.source)
@@ -121,8 +122,8 @@ impl fmt::Debug for PubMessage {
     }
 }
 
-impl PubMessage {
-    pub fn new(source: SocketAddr, topic: String, payload: Bytes) -> Self {
+impl<A: Address> PubMessage<A> {
+    pub fn new(source: A, topic: String, payload: Bytes) -> Self {
         Self {
             source,
             topic,
@@ -131,8 +132,8 @@ impl PubMessage {
     }
 
     #[inline]
-    pub fn source(&self) -> SocketAddr {
-        self.source
+    pub fn source(&self) -> &A {
+        &self.source
     }
 
     #[inline]
@@ -153,12 +154,22 @@ impl PubMessage {
 
 /// The request socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
-pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+pub(crate) struct SocketState<A: Address> {
+    pub(crate) stats: SocketStats<A>,
+}
+
+impl<A: Address> SocketState<A> {
+    pub fn new() -> Self {
+        Self {
+            stats: SocketStats::new(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+
     use msg_transport::tcp::Tcp;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},

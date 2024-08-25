@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use msg_wire::compression::Compressor;
 use rustc_hash::FxHashMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::{io, sync::Arc, time::Duration};
 use tokio::net::{lookup_host, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
@@ -27,6 +29,34 @@ pub struct ReqSocket<T: Transport> {
     // NOTE: for now we're using dynamic dispatch, since using generics here
     // complicates the API a lot. We can always change this later for perf reasons.
     compressor: Option<Arc<dyn Compressor>>,
+}
+
+impl<T> ReqSocket<T>
+where
+    T: Transport<Addr = SocketAddr> + Send + Sync + Unpin + 'static,
+{
+    /// Connects to the target address with the default options.
+    pub async fn connect_socket(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
+        let mut addrs = lookup_host(addr).await?;
+        let endpoint = addrs.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            )
+        })?;
+
+        self.try_connect(endpoint).await
+    }
+}
+
+impl<T> ReqSocket<T>
+where
+    T: Transport<Addr = PathBuf> + Send + Sync + Unpin + 'static,
+{
+    /// Connects to the target path with the default options.
+    pub async fn connect_path(&mut self, addr: impl Into<PathBuf>) -> Result<(), ReqError> {
+        self.try_connect(addr.into().clone()).await
+    }
 }
 
 impl<T> ReqSocket<T>
@@ -75,17 +105,9 @@ where
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
-    /// Connects to the target address with the default options.
+    /// Tries to connect to the target endpoint with the default options.
     /// A ReqSocket can only be connected to a single address.
-    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), ReqError> {
-        let mut addrs = lookup_host(addr).await?;
-        let endpoint = addrs.next().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            )
-        })?;
-
+    pub async fn try_connect(&mut self, endpoint: T::Addr) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -97,7 +119,7 @@ where
         // We initialize the connection as inactive, and let it be activated
         // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
-            addr: endpoint,
+            addr: endpoint.clone(),
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
 

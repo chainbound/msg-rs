@@ -29,7 +29,7 @@ impl Tcp {
     }
 }
 
-impl PeerAddress for TcpStream {
+impl PeerAddress<SocketAddr> for TcpStream {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.peer_addr()
     }
@@ -37,6 +37,7 @@ impl PeerAddress for TcpStream {
 
 #[async_trait::async_trait]
 impl Transport for Tcp {
+    type Addr = SocketAddr;
     type Io = TcpStream;
 
     type Error = io::Error;

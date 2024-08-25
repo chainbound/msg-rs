@@ -13,7 +13,7 @@ async fn main() {
         RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
             // Enable Gzip compression (compression level 6)
             .with_compressor(GzipCompressor::new(6));
-    rep.bind("0.0.0.0:4444").await.unwrap();
+    rep.bind_socket("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and a minimum compresion size of 0 bytes to compress all requests
@@ -24,7 +24,7 @@ async fn main() {
             // use the same compression algorithm or level.
             .with_compressor(GzipCompressor::new(6));
 
-    req.connect("0.0.0.0:4444").await.unwrap();
+    req.connect_socket("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

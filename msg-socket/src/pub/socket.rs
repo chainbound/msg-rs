@@ -1,12 +1,12 @@
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
-use std::{io, net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::broadcast,
     task::JoinSet,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
@@ -32,7 +32,42 @@ pub struct PubSocket<T: Transport> {
     // complicates the API a lot. We can always change this later for perf reasons.
     compressor: Option<Arc<dyn Compressor>>,
     /// The local address this socket is bound to.
-    local_addr: Option<SocketAddr>,
+    local_addr: Option<T::Addr>,
+}
+
+impl<T> PubSocket<T>
+where
+    T: Transport + Send + Unpin + 'static,
+    T::Addr: ToSocketAddrs,
+{
+}
+
+impl<T> PubSocket<T>
+where
+    T: Transport<Addr = SocketAddr> + Send + Unpin + 'static,
+{
+    /// Binds the socket to the given socket addres
+    ///
+    /// This method is only available for transports that support [`SocketAddr`] as address type,
+    /// like [`Tcp`](msg_transport::tcp::Tcp) and [`Quic`](msg_transport::quic::Quic).
+    pub async fn bind_socket(&mut self, addr: impl ToSocketAddrs) -> Result<(), PubError> {
+        let addrs = lookup_host(addr).await?;
+        self.try_bind(addrs.collect()).await
+    }
+}
+
+impl<T> PubSocket<T>
+where
+    T: Transport<Addr = PathBuf> + Send + Unpin + 'static,
+{
+    /// Binds the socket to the given path.
+    ///
+    /// This method is only available for transports that support [`PathBuf`] as address type,
+    /// like [`Ipc`](msg_transport::ipc::Ipc).
+    pub async fn bind_path(&mut self, path: impl AsRef<PathBuf>) -> Result<(), PubError> {
+        let addr = path.as_ref().clone();
+        self.try_bind(vec![addr]).await
+    }
 }
 
 impl<T> PubSocket<T>
@@ -69,8 +104,10 @@ where
         self
     }
 
-    /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), PubError> {
+    /// Binds the socket to the given addresses in order until one succeeds.
+    ///
+    /// This also spawns the socket driver task.
+    pub async fn try_bind(&mut self, addresses: Vec<T::Addr>) -> Result<(), PubError> {
         let (to_sessions_bcast, from_socket_bcast) =
             broadcast::channel(self.options.session_buffer_size);
 
@@ -79,13 +116,11 @@ where
             .take()
             .expect("Transport has been moved already");
 
-        let addrs = lookup_host(addr).await?;
-
-        for addr in addrs {
-            match transport.bind(addr).await {
+        for addr in addresses {
+            match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    tracing::warn!("Failed to bind to {}, trying next address: {}", addr, e);
+                    warn!("Failed to bind to {:?}, trying next address: {}", addr, e);
                     continue;
                 }
             }
@@ -98,7 +133,7 @@ where
             )));
         };
 
-        tracing::debug!("Listening on {}", local_addr);
+        debug!("Listening on {:?}", local_addr);
 
         let backend = PubDriver {
             id_counter: 0,
@@ -192,7 +227,7 @@ where
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.local_addr
+    pub fn local_addr(&self) -> Option<&T::Addr> {
+        self.local_addr.as_ref()
     }
 }

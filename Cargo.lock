@@ -713,7 +713,7 @@ dependencies = [
 
 [[package]]
 name = "msg"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bytes",
  "criterion",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "futures",
  "tokio",
@@ -742,16 +742,15 @@ dependencies = [
 
 [[package]]
 name = "msg-sim"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "pnet",
 ]
 
 [[package]]
 name = "msg-socket"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
- "async-trait",
  "bytes",
  "futures",
  "msg-common",
@@ -771,27 +770,23 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
- "bytes",
  "futures",
  "msg-common",
- "msg-wire",
  "quinn",
- "rand",
  "rcgen",
  "rustls",
  "thiserror",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "msg-wire"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bytes",
  "flate2",
@@ -800,7 +795,6 @@ dependencies = [
  "snap",
  "thiserror",
  "tokio-util",
- "tracing",
  "zstd",
 ]
 

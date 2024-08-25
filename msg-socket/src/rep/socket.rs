@@ -1,25 +1,29 @@
-use futures::{stream::FuturesUnordered, Stream};
-use msg_wire::compression::Compressor;
 use std::{
     io,
     net::SocketAddr,
+    path::PathBuf,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{stream::FuturesUnordered, Stream};
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::mpsc,
     task::JoinSet,
 };
 use tokio_stream::StreamMap;
+use tracing::{debug, warn};
 
 use crate::{
     rep::{driver::RepDriver, DEFAULT_BUFFER_SIZE},
     rep::{SocketState, SocketStats},
     Authenticator, PubError, RepOptions, Request,
 };
-use msg_transport::{Transport, TransportExt};
+
+use msg_transport::Transport;
+use msg_wire::compression::Compressor;
 
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
 #[derive(Default)]
@@ -29,21 +33,49 @@ pub struct RepSocket<T: Transport> {
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
     /// Receiver from the socket driver.
-    from_driver: Option<mpsc::Receiver<Request>>,
+    from_driver: Option<mpsc::Receiver<Request<T::Addr>>>,
     /// The transport used by this socket. This value is temporary and will be moved
     /// to the driver task once the socket is bound.
     transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
     /// The local address this socket is bound to.
-    local_addr: Option<SocketAddr>,
+    local_addr: Option<T::Addr>,
     /// Optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
 }
 
 impl<T> RepSocket<T>
 where
-    T: TransportExt + Send + Unpin + 'static,
+    T: Transport<Addr = SocketAddr> + Send + Unpin + 'static,
+{
+    /// Binds the socket to the given socket addres
+    ///
+    /// This method is only available for transports that support [`SocketAddr`] as address type,
+    /// like [`Tcp`](msg_transport::tcp::Tcp) and [`Quic`](msg_transport::quic::Quic).
+    pub async fn bind_socket(&mut self, addr: impl ToSocketAddrs) -> Result<(), PubError> {
+        let addrs = lookup_host(addr).await?;
+        self.try_bind(addrs.collect()).await
+    }
+}
+
+impl<T> RepSocket<T>
+where
+    T: Transport<Addr = PathBuf> + Send + Unpin + 'static,
+{
+    /// Binds the socket to the given path.
+    ///
+    /// This method is only available for transports that support [`PathBuf`] as address type,
+    /// like [`Ipc`](msg_transport::ipc::Ipc).
+    pub async fn bind_path(&mut self, path: impl Into<PathBuf>) -> Result<(), PubError> {
+        let addr = path.into().clone();
+        self.try_bind(vec![addr]).await
+    }
+}
+
+impl<T> RepSocket<T>
+where
+    T: Transport + Send + Unpin + 'static,
 {
     /// Creates a new reply socket with the default [`RepOptions`].
     pub fn new(transport: T) -> Self {
@@ -76,7 +108,7 @@ where
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn bind<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), PubError> {
+    pub async fn try_bind(&mut self, addresses: Vec<T::Addr>) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let mut transport = self
@@ -84,12 +116,11 @@ where
             .take()
             .expect("Transport has been moved already");
 
-        let addrs = lookup_host(addr).await?;
-        for addr in addrs {
-            match transport.bind(addr).await {
+        for addr in addresses {
+            match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    tracing::warn!("Failed to bind to {}, trying next address: {}", addr, e);
+                    warn!("Failed to bind to {:?}, trying next address: {}", addr, e);
                     continue;
                 }
             }
@@ -102,7 +133,7 @@ where
             )));
         };
 
-        tracing::debug!("Listening on {}", local_addr);
+        debug!("Listening on {:?}", local_addr);
 
         let backend = RepDriver {
             transport,
@@ -129,13 +160,13 @@ where
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.
-    pub fn local_addr(&self) -> Option<SocketAddr> {
-        self.local_addr
+    pub fn local_addr(&self) -> Option<&T::Addr> {
+        self.local_addr.as_ref()
     }
 }
 
 impl<T: Transport + Unpin> Stream for RepSocket<T> {
-    type Item = Request;
+    type Item = Request<T::Addr>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut()

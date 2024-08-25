@@ -1,11 +1,14 @@
-use futures::future::BoxFuture;
+#![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use std::{
     pin::Pin,
     task::{Context, Poll},
     time::SystemTime,
 };
 
-use futures::{Sink, SinkExt, Stream};
+use futures::{future::BoxFuture, Sink, SinkExt, Stream};
 use tokio::sync::mpsc::{
     self,
     error::{TryRecvError, TrySendError},

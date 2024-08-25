@@ -192,10 +192,10 @@ mod tests {
 
         let mut sub_socket = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub_socket.connect(addr).await.unwrap();
+        sub_socket.connect_socket(addr).await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -221,10 +221,10 @@ mod tests {
             SubOptions::default().auth_token(Bytes::from("client1")),
         );
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub_socket.connect(addr).await.unwrap();
+        sub_socket.connect_socket(addr).await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -250,10 +250,10 @@ mod tests {
             SubOptions::default().auth_token(Bytes::from("client1")),
         );
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub_socket.connect(addr).await.unwrap();
+        sub_socket.connect_socket(addr).await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -278,11 +278,11 @@ mod tests {
 
         let mut sub2 = SubSocket::new(Tcp::default());
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(addr).await.unwrap();
-        sub2.connect(addr).await.unwrap();
+        sub1.connect_socket(addr).await.unwrap();
+        sub2.connect_socket(addr).await.unwrap();
         sub1.subscribe("HELLO".to_string()).await.unwrap();
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -313,11 +313,11 @@ mod tests {
 
         let mut sub2 = SubSocket::new(Tcp::default());
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(addr).await.unwrap();
-        sub2.connect(addr).await.unwrap();
+        sub1.connect_socket(addr).await.unwrap();
+        sub2.connect_socket(addr).await.unwrap();
         sub1.subscribe("HELLO".to_string()).await.unwrap();
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -349,11 +349,11 @@ mod tests {
         let mut sub_socket = SubSocket::new(Tcp::default());
 
         // Try to connect and subscribe before the publisher is up
-        sub_socket.connect("0.0.0.0:6662").await.unwrap();
+        sub_socket.connect_socket("0.0.0.0:6662").await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        pub_socket.bind("0.0.0.0:6662").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
         pub_socket
@@ -376,11 +376,11 @@ mod tests {
         let mut sub_socket = SubSocket::new(Quic::default());
 
         // Try to connect and subscribe before the publisher is up
-        sub_socket.connect("0.0.0.0:6662").await.unwrap();
+        sub_socket.connect_socket("0.0.0.0:6662").await.unwrap();
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        pub_socket.bind("0.0.0.0:6662").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
         pub_socket
@@ -401,7 +401,7 @@ mod tests {
         let mut pub_socket =
             PubSocket::with_options(Tcp::default(), PubOptions::default().max_clients(1));
 
-        pub_socket.bind("0.0.0.0:0").await.unwrap();
+        pub_socket.bind_socket("0.0.0.0:0").await.unwrap();
 
         let mut sub1 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
 
@@ -409,10 +409,10 @@ mod tests {
 
         let addr = pub_socket.local_addr().unwrap();
 
-        sub1.connect(addr).await.unwrap();
+        sub1.connect_socket(addr).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(pub_socket.stats().active_clients(), 1);
-        sub2.connect(addr).await.unwrap();
+        sub2.connect_socket(addr).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(pub_socket.stats().active_clients(), 1);
     }

@@ -1,10 +1,11 @@
-use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use std::{
     io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
@@ -16,6 +17,7 @@ use crate::{AuthResult, Authenticator};
 use msg_transport::{PeerAddress, Transport};
 use msg_wire::{auth, pubsub};
 
+#[allow(clippy::type_complexity)]
 pub(crate) struct PubDriver<T: Transport> {
     /// Session ID counter.
     pub(super) id_counter: u32,
@@ -30,7 +32,7 @@ pub(crate) struct PubDriver<T: Transport> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
+    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, T::Addr>, PubError>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
@@ -50,7 +52,7 @@ where
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
+                        debug!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
                         let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
@@ -137,12 +139,12 @@ where
     fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
 
-        info!("New connection from {}", addr);
+        info!("New connection from {:?}", addr);
 
         // If authentication is enabled, start the authentication process
         if let Some(ref auth) = self.auth {
             let authenticator = Arc::clone(auth);
-            debug!("New connection from {}, authenticating", addr);
+            debug!("New connection from {:?}, authenticating", addr);
             self.auth_tasks.spawn(async move {
                 let mut conn = Framed::new(io, auth::Codec::new_server());
 
@@ -201,7 +203,7 @@ where
 
             self.id_counter = self.id_counter.wrapping_add(1);
             debug!(
-                "New connection from {}, session ID {}",
+                "New connection from {:?}, session ID {}",
                 addr, self.id_counter
             );
         }

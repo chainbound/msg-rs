@@ -4,9 +4,13 @@ use criterion::{
     Throughput,
 };
 use futures::StreamExt;
+use msg::ipc::Ipc;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::Rng;
-use std::time::{Duration, Instant};
+use std::{
+    env::temp_dir,
+    time::{Duration, Instant},
+};
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
@@ -31,13 +35,13 @@ struct PairBenchmark<T: Transport> {
 
 impl<T: Transport + Send + Sync + Unpin + 'static> PairBenchmark<T> {
     /// Sets up the publisher and subscriber sockets.
-    fn init(&mut self) {
+    fn init(&mut self, addr: T::Addr) {
         // Set up the socket connections
         self.rt.block_on(async {
-            self.publisher.bind("127.0.0.1:0").await.unwrap();
+            self.publisher.try_bind(vec![addr]).await.unwrap();
 
             let addr = self.publisher.local_addr().unwrap();
-            self.subscriber.connect(addr).await.unwrap();
+            self.subscriber.connect(addr.clone()).await.unwrap();
 
             self.subscriber
                 .subscribe("HELLO".to_string())
@@ -172,7 +176,7 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
 
     let mut group = c.benchmark_group("pubsub_single_thread_tcp_bytes");
     group.sample_size(10);
@@ -217,7 +221,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
 
     let mut group = c.benchmark_group("pubsub_multi_thread_tcp_bytes");
     group.sample_size(10);
@@ -261,7 +265,7 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
 
     let mut group = c.benchmark_group("pubsub_single_thread_quic_bytes");
     group.sample_size(10);
@@ -306,7 +310,7 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
 
     let mut group = c.benchmark_group("pubsub_multi_thread_quic_bytes");
     group.sample_size(10);
@@ -317,10 +321,100 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
     bench.bench_message_throughput(group);
 }
 
+fn pubsub_single_thread_ipc(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let buffer_size = 1024 * 64;
+
+    let publisher = PubSocket::with_options(
+        Ipc::default(),
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
+    );
+
+    let subscriber = SubSocket::with_options(
+        Ipc::default(),
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
+    );
+
+    let mut bench = PairBenchmark {
+        rt,
+        publisher,
+        subscriber,
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init(temp_dir().join("msg-bench-pubsub-ipc.sock"));
+
+    let mut group = c.benchmark_group("pubsub_single_thread_ipc_bytes");
+    group.sample_size(10);
+    bench.bench_bytes_throughput(group);
+
+    let mut group = c.benchmark_group("pubsub_single_thread_ipc_msgs");
+    group.sample_size(10);
+    bench.bench_message_throughput(group);
+}
+
+fn pubsub_multi_thread_ipc(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let buffer_size = 1024 * 64;
+
+    let publisher = PubSocket::with_options(
+        Ipc::default(),
+        PubOptions::default()
+            .flush_interval(Duration::from_micros(100))
+            .backpressure_boundary(buffer_size)
+            .session_buffer_size(N_REQS * 2),
+    );
+
+    let subscriber = SubSocket::with_options(
+        Ipc::default(),
+        SubOptions::default()
+            .read_buffer_size(buffer_size)
+            .ingress_buffer_size(N_REQS * 2),
+    );
+
+    let mut bench = PairBenchmark {
+        rt,
+        publisher,
+        subscriber,
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init(temp_dir().join("msg-bench-pubsub-ipc-multi.sock"));
+
+    let mut group = c.benchmark_group("pubsub_multi_thread_ipc_bytes");
+    group.sample_size(10);
+    bench.bench_bytes_throughput(group);
+
+    let mut group = c.benchmark_group("pubsub_multi_thread_ipc_msgs");
+    group.sample_size(10);
+    bench.bench_message_throughput(group);
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = pubsub_single_thread_tcp, pubsub_multi_thread_tcp, pubsub_single_thread_quic, pubsub_multi_thread_quic
+    targets = pubsub_single_thread_tcp, pubsub_multi_thread_tcp, pubsub_single_thread_quic,
+              pubsub_multi_thread_quic, pubsub_single_thread_ipc, pubsub_multi_thread_ipc
 }
 
 // Runs various benchmarks for the `PubSocket` and `SubSocket`.

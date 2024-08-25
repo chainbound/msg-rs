@@ -1,35 +1,43 @@
 use std::{
     collections::HashMap,
-    net::SocketAddr,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
     },
 };
 
+use msg_transport::Address;
 use parking_lot::RwLock;
 
 /// Statistics for a reply socket. These are shared between the driver task
 /// and the socket.
 #[derive(Debug, Default)]
-pub struct SocketStats {
+pub struct SocketStats<A: Address> {
     /// Individual session stats for each publisher
-    session_stats: RwLock<HashMap<SocketAddr, Arc<SessionStats>>>,
+    session_stats: RwLock<HashMap<A, Arc<SessionStats>>>,
 }
 
-impl SocketStats {
+impl<A: Address> SocketStats<A> {
+    pub fn new() -> Self {
+        Self {
+            session_stats: RwLock::new(HashMap::new()),
+        }
+    }
+}
+
+impl<A: Address> SocketStats<A> {
     #[inline]
-    pub(crate) fn insert(&self, addr: SocketAddr, stats: Arc<SessionStats>) {
+    pub(crate) fn insert(&self, addr: A, stats: Arc<SessionStats>) {
         self.session_stats.write().insert(addr, stats);
     }
 
     #[inline]
-    pub(crate) fn remove(&self, addr: &SocketAddr) {
+    pub(crate) fn remove(&self, addr: &A) {
         self.session_stats.write().remove(addr);
     }
 
     #[inline]
-    pub fn bytes_rx(&self, session_addr: &SocketAddr) -> Option<usize> {
+    pub fn bytes_rx(&self, session_addr: &A) -> Option<usize> {
         self.session_stats
             .read()
             .get(session_addr)
@@ -38,7 +46,7 @@ impl SocketStats {
 
     /// Returns the average latency in microseconds for the given session.
     #[inline]
-    pub fn avg_latency(&self, session_addr: &SocketAddr) -> Option<u64> {
+    pub fn avg_latency(&self, session_addr: &A) -> Option<u64> {
         self.session_stats
             .read()
             .get(session_addr)

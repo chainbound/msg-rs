@@ -1,13 +1,13 @@
-use bytes::Bytes;
-use futures::{stream::FuturesUnordered, Future, FutureExt, SinkExt, Stream, StreamExt};
 use std::{
     collections::VecDeque,
     io,
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use bytes::Bytes;
+use futures::{stream::FuturesUnordered, Future, FutureExt, SinkExt, Stream, StreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{mpsc, oneshot},
@@ -15,26 +15,28 @@ use tokio::{
 };
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
-use msg_transport::{PeerAddress, Transport};
+
+use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{
     auth,
     compression::{try_decompress_payload, Compressor},
     reqrep,
 };
 
-pub(crate) struct PeerState<T: AsyncRead + AsyncWrite> {
+pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_requests: FuturesUnordered<PendingRequest>,
     conn: Framed<T, reqrep::Codec>,
-    addr: SocketAddr,
+    addr: A,
     egress_queue: VecDeque<reqrep::Message>,
     state: Arc<SocketState>,
     should_flush: bool,
     compressor: Option<Arc<dyn Compressor>>,
 }
 
+#[allow(clippy::type_complexity)]
 pub(crate) struct RepDriver<T: Transport> {
     /// The server transport used to accept incoming connections.
     pub(crate) transport: T,
@@ -44,9 +46,9 @@ pub(crate) struct RepDriver<T: Transport> {
     /// Options shared with socket.
     pub(crate) options: Arc<RepOptions>,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
-    pub(crate) peer_states: StreamMap<SocketAddr, StreamNotifyClose<PeerState<T::Io>>>,
+    pub(crate) peer_states: StreamMap<T::Addr, StreamNotifyClose<PeerState<T::Io, T::Addr>>>,
     /// Sender to the socket front-end. Used to notify the socket of incoming requests.
-    pub(crate) to_socket: mpsc::Sender<Request>,
+    pub(crate) to_socket: mpsc::Sender<Request<T::Addr>>,
     /// Optional connection authenticator.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
     /// Optional message compressor. This is shared with the socket to keep
@@ -55,7 +57,7 @@ pub(crate) struct RepDriver<T: Transport> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
+    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, T::Addr>, PubError>>,
 }
 
 impl<T> Future for RepDriver<T>
@@ -71,7 +73,7 @@ where
             if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
                 match msg {
                     Some(Ok(mut request)) => {
-                        debug!("Received request from peer {}", peer);
+                        debug!("Received request from peer {:?}", peer);
 
                         let size = request.msg().len();
 
@@ -88,10 +90,10 @@ where
                         let _ = this.to_socket.try_send(request);
                     }
                     Some(Err(e)) => {
-                        error!("Error receiving message from peer {}: {:?}", peer, e);
+                        error!("Error receiving message from peer {:?}: {:?}", peer, e);
                     }
                     None => {
-                        warn!("Peer {} disconnected", peer);
+                        warn!("Peer {:?} disconnected", peer);
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -103,10 +105,10 @@ where
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        tracing::info!("Authentication passed for {:?} ({})", auth.id, auth.addr);
+                        info!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
                         this.peer_states.insert(
-                            auth.addr,
+                            auth.addr.clone(),
                             StreamNotifyClose::new(PeerState {
                                 pending_requests: FuturesUnordered::new(),
                                 conn: Framed::new(auth.stream, reqrep::Codec::new()),
@@ -183,12 +185,12 @@ where
     fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
 
-        info!("New connection from {}", addr);
+        info!("New connection from {:?}", addr);
 
         // If authentication is enabled, start the authentication process
         if let Some(ref auth) = self.auth {
             let authenticator = Arc::clone(auth);
-            debug!("New connection from {}, authenticating", addr);
+            debug!("New connection from {:?}, authenticating", addr);
             self.auth_tasks.spawn(async move {
                 let mut conn = Framed::new(io, auth::Codec::new_server());
 
@@ -229,7 +231,7 @@ where
             });
         } else {
             self.peer_states.insert(
-                addr,
+                addr.clone(),
                 StreamNotifyClose::new(PeerState {
                     pending_requests: FuturesUnordered::new(),
                     conn: Framed::new(io, reqrep::Codec::new()),
@@ -246,8 +248,8 @@ where
     }
 }
 
-impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
-    type Item = Result<Request, PubError>;
+impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
+    type Item = Result<Request<A>, PubError>;
 
     /// Advances the state of the peer.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -318,7 +320,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
             // Finally we accept incoming requests from the peer.
             match this.conn.poll_next_unpin(cx) {
                 Poll::Ready(Some(result)) => {
-                    tracing::trace!("Received message from peer {}: {:?}", this.addr, result);
+                    trace!("Received message from peer {:?}: {:?}", this.addr, result);
                     let msg = result?;
 
                     let (tx, rx) = oneshot::channel();
@@ -330,7 +332,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     });
 
                     let request = Request {
-                        source: this.addr,
+                        source: this.addr.clone(),
                         response: tx,
                         compression_type: msg.header().compression_type(),
                         msg: msg.into_payload(),
@@ -339,7 +341,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin> Stream for PeerState<T> {
                     return Poll::Ready(Some(Ok(request)));
                 }
                 Poll::Ready(None) => {
-                    tracing::error!("Framed closed unexpectedly (peer {})", this.addr);
+                    error!("Framed closed unexpectedly (peer {:?})", this.addr);
                     return Poll::Ready(None);
                 }
                 Poll::Pending => {}

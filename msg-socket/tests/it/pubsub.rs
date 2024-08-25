@@ -35,29 +35,34 @@ async fn pubsub_channel() {
         },
     );
 
-    let result = pubsub_channel_transport(build_tcp).await;
+    let result = pubsub_channel_transport(build_tcp, "127.0.0.1:9879".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_channel_transport(build_quic).await;
+    let result = pubsub_channel_transport(build_quic, "127.0.0.1:9879".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
     simulator.stop(addr);
 }
 
-async fn pubsub_channel_transport<F: Fn() -> T, T: Transport + Send + Sync + Unpin + 'static>(
+async fn pubsub_channel_transport<F, T>(
     new_transport: F,
-) -> Result<(), Box<dyn std::error::Error>> {
+    addr: T::Addr,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    F: Fn() -> T,
+    T: Transport + Send + Sync + Unpin + 'static,
+{
     let mut publisher = PubSocket::new(new_transport());
 
     let mut subscriber = SubSocket::new(new_transport());
-    subscriber.connect("127.0.0.1:9879").await?;
+    subscriber.connect(addr.clone()).await?;
     subscriber.subscribe(TOPIC).await?;
 
     inject_delay(400).await;
 
-    publisher.bind("127.0.0.1:9879").await?;
+    publisher.try_bind(vec![addr]).await?;
 
     // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
     tokio::spawn(async move {
@@ -96,11 +101,11 @@ async fn pubsub_fan_out() {
         },
     );
 
-    let result = pubsub_fan_out_transport(build_tcp, 10).await;
+    let result = pubsub_fan_out_transport(build_tcp, 10, "127.0.0.1:9880".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_out_transport(build_quic, 10).await;
+    let result = pubsub_fan_out_transport(build_quic, 10, "127.0.0.1:9880".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
@@ -113,15 +118,14 @@ async fn pubsub_fan_out_transport<
 >(
     new_transport: F,
     subscibers: usize,
+    addr: T::Addr,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
 
     let mut sub_tasks = JoinSet::new();
 
-    let addr = "127.0.0.1:9880";
-
     for i in 0..subscibers {
-        let cloned = addr.to_string();
+        let cloned = addr.clone();
         sub_tasks.spawn(async move {
             let mut subscriber = SubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
@@ -139,7 +143,7 @@ async fn pubsub_fan_out_transport<
 
     inject_delay(400).await;
 
-    publisher.bind(addr).await?;
+    publisher.try_bind(vec![addr]).await?;
 
     // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
     tokio::spawn(async move {
@@ -177,11 +181,11 @@ async fn pubsub_fan_in() {
         },
     );
 
-    let result = pubsub_fan_in_transport(build_tcp, 20).await;
+    let result = pubsub_fan_in_transport(build_tcp, 20, "127.0.0.1:9881".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_in_transport(build_quic, 20).await;
+    let result = pubsub_fan_in_transport(build_quic, 20, "127.0.0.1:9881".parse().unwrap()).await;
 
     assert!(result.is_ok());
 
@@ -194,6 +198,7 @@ async fn pubsub_fan_in_transport<
 >(
     new_transport: F,
     publishers: usize,
+    addr: T::Addr,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sub_tasks = JoinSet::new();
 
@@ -201,14 +206,15 @@ async fn pubsub_fan_in_transport<
 
     for i in 0..publishers {
         let tx = tx.clone();
+        let addr = addr.clone();
         sub_tasks.spawn(async move {
             let mut publisher = PubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
 
-            publisher.bind("127.0.0.1:0").await.unwrap();
+            publisher.try_bind(vec![addr]).await.unwrap();
 
-            let addr = publisher.local_addr().unwrap();
-            tx.send(addr).await.unwrap();
+            let local_addr = publisher.local_addr().unwrap().clone();
+            tx.send(local_addr).await.unwrap();
 
             // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
             tokio::spawn(async move {
@@ -233,9 +239,9 @@ async fn pubsub_fan_in_transport<
         addrs.insert(addr);
     }
 
-    for addr in &addrs {
+    for addr in addrs.clone() {
         inject_delay(500).await;
-        subscriber.connect(addr).await.unwrap();
+        subscriber.connect(addr.clone()).await.unwrap();
         subscriber.subscribe(TOPIC).await.unwrap();
     }
 
@@ -249,7 +255,7 @@ async fn pubsub_fan_in_transport<
         assert_eq!(TOPIC, msg.topic());
         assert_eq!("WORLD", msg.payload());
 
-        addrs.remove(&msg.source());
+        addrs.remove(msg.source());
     }
 
     for _ in 0..publishers {

@@ -23,12 +23,12 @@ tokio-util.workspace = true
 thiserror.workspace = true
 rustc-hash.workspace = true
 tracing.workspace = true
-async-trait.workspace = true
 tokio-stream.workspace = true
-rand.workspace = true
 parking_lot.workspace = true
 
 [dev-dependencies]
+rand.workspace = true
+
 msg-sim.workspace = true
 
 tracing-subscriber = "0.3"

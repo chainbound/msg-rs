@@ -4,7 +4,6 @@ use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
     io,
-    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -44,12 +43,13 @@ pub(crate) struct ReqDriver<T: Transport> {
     /// The transport for this socket.
     pub(crate) transport: T,
     /// The address of the server.
-    pub(crate) addr: SocketAddr,
+    pub(crate) addr: T::Addr,
     /// The connection task which handles the connection to the server.
     pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state: ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff>,
+    pub(crate) conn_state:
+        ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff, T::Addr>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -79,17 +79,17 @@ where
 {
     /// Start the connection task to the server, handling authentication if necessary.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
-    fn try_connect(&mut self, addr: SocketAddr) {
-        trace!("Trying to connect to {}", addr);
+    fn try_connect(&mut self, addr: T::Addr) {
+        trace!("Trying to connect to {:?}", addr);
 
-        let connect = self.transport.connect(addr);
+        let connect = self.transport.connect(addr.clone());
         let token = self.options.auth_token.clone();
 
         self.conn_task = Some(Box::pin(async move {
             let mut io = match connect.await {
                 Ok(io) => io,
                 Err(e) => {
-                    error!("Failed to connect to {}: {:?}", addr, e);
+                    error!("Failed to connect to {:?}: {:?}", addr, e);
                     return Err(e);
                 }
             };
@@ -108,7 +108,7 @@ where
                 match conn.next().await {
                     Some(res) => match res {
                         Ok(auth::Message::Ack) => {
-                            debug!("Connected to {}", addr);
+                            debug!("Connected to {:?}", addr);
                             Ok(io)
                         }
                         Ok(msg) => {
@@ -126,7 +126,7 @@ where
                     }
                 }
             } else {
-                debug!("Connected to {}", addr);
+                debug!("Connected to {:?}", addr);
                 Ok(io)
             }
         }));
@@ -242,7 +242,7 @@ where
     #[inline]
     fn reset_connection(&mut self) {
         self.conn_state = ConnectionState::Inactive {
-            addr: self.addr,
+            addr: self.addr.clone(),
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
     }
@@ -287,14 +287,14 @@ where
             // or poll the backoff timer if we're already trying to connect.
             if let ConnectionState::Inactive {
                 ref mut backoff,
-                addr,
+                ref addr,
             } = this.conn_state
             {
                 if let Poll::Ready(item) = backoff.poll_next_unpin(cx) {
                     if let Some(duration) = item {
                         if this.conn_task.is_none() {
                             debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
-                            this.try_connect(addr);
+                            this.try_connect(addr.clone());
                         } else {
                             debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                         }

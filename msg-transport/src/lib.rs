@@ -1,13 +1,31 @@
+#![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
 use futures::{Future, FutureExt};
 use std::{
+    fmt::Debug,
+    hash::Hash,
+    io,
     net::SocketAddr,
+    path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
+pub mod ipc;
 pub mod quic;
 pub mod tcp;
+
+/// A trait for address types that can be used by any transport.
+pub trait Address: Clone + Debug + Send + Sync + Unpin + Hash + Eq + 'static {}
+
+/// IP address types, used for TCP and QUIC transports.
+impl Address for SocketAddr {}
+
+/// File system path, used for IPC transport.
+impl Address for PathBuf {}
 
 /// A transport provides connection-oriented communication between two peers through
 /// ordered and reliable streams of bytes.
@@ -15,14 +33,17 @@ pub mod tcp;
 /// It provides an interface to manage both inbound and outbound connections.
 #[async_trait::async_trait]
 pub trait Transport {
+    /// The generic address type used by this transport
+    type Addr: Address;
+
     /// The result of a successful connection.
     ///
     /// The output type is transport-specific, and can be a handle to directly write to the
     /// connection, or it can be a substream multiplexer in the case of stream protocols.
-    type Io: AsyncRead + AsyncWrite + PeerAddress + Send + Unpin;
+    type Io: AsyncRead + AsyncWrite + PeerAddress<Self::Addr> + Send + Unpin;
 
     /// An error that occurred when setting up the connection.
-    type Error: std::error::Error + From<std::io::Error> + Send + Sync;
+    type Error: std::error::Error + From<io::Error> + Send + Sync;
 
     /// A pending [`Transport::Output`] for an outbound connection,
     /// obtained when calling [`Transport::connect`].
@@ -33,13 +54,13 @@ pub trait Transport {
     type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
 
     /// Returns the local address this transport is bound to (if it is bound).
-    fn local_addr(&self) -> Option<SocketAddr>;
+    fn local_addr(&self) -> Option<Self::Addr>;
 
     /// Binds to the given address.
-    async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error>;
+    async fn bind(&mut self, addr: Self::Addr) -> Result<(), Self::Error>;
 
     /// Connects to the given address, returning a future representing a pending outbound connection.
-    fn connect(&mut self, addr: SocketAddr) -> Self::Connect;
+    fn connect(&mut self, addr: Self::Addr) -> Self::Connect;
 
     /// Poll for incoming connections. If an inbound connection is received, a future representing
     /// a pending inbound connection is returned. The future will resolve to [`Transport::Output`].
@@ -85,6 +106,6 @@ where
 }
 
 /// Trait for connection types that can return their peer address.
-pub trait PeerAddress {
-    fn peer_addr(&self) -> Result<SocketAddr, std::io::Error>;
+pub trait PeerAddress<A: Address> {
+    fn peer_addr(&self) -> Result<A, io::Error>;
 }
