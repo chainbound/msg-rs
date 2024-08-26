@@ -6,10 +6,10 @@ use criterion::{
     Throughput,
 };
 use futures::StreamExt;
-use msg::{ipc::Ipc, Transport};
 use pprof::criterion::Output;
 use rand::Rng;
 
+use msg::{ipc::Ipc, Address, Transport};
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::tcp::Tcp;
 use tokio::runtime::Runtime;
@@ -23,17 +23,17 @@ const MSG_SIZE: usize = 512;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-struct PairBenchmark<T: Transport> {
+struct PairBenchmark<T: Transport<A>, A: Address> {
     rt: Runtime,
-    req: ReqSocket<T>,
-    rep: Option<RepSocket<T>>,
+    req: ReqSocket<T, A>,
+    rep: Option<RepSocket<T, A>>,
 
     n_reqs: usize,
     msg_sizes: Vec<usize>,
 }
 
-impl<T: Transport + Send + Sync + Unpin + 'static> PairBenchmark<T> {
-    fn init(&mut self, addr: T::Addr) {
+impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<T, A> {
+    fn init(&mut self, addr: A) {
         let mut rep = self.rep.take().unwrap();
         // setup the socket connections
         self.rt.block_on(async {

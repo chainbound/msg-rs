@@ -6,7 +6,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
 
 use msg_socket::{PubSocket, SubSocket};
-use msg_transport::{quic::Quic, tcp::Tcp, Transport};
+use msg_transport::{quic::Quic, tcp::Tcp, Address, Transport};
 
 const TOPIC: &str = "test";
 
@@ -46,18 +46,19 @@ async fn pubsub_channel() {
     simulator.stop(addr);
 }
 
-async fn pubsub_channel_transport<F, T>(
+async fn pubsub_channel_transport<F, T, A>(
     new_transport: F,
-    addr: T::Addr,
+    addr: A,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     F: Fn() -> T,
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 {
     let mut publisher = PubSocket::new(new_transport());
 
     let mut subscriber = SubSocket::new(new_transport());
-    subscriber.connect(addr.clone()).await?;
+    subscriber.connect_inner(addr.clone()).await?;
     subscriber.subscribe(TOPIC).await?;
 
     inject_delay(400).await;
@@ -114,11 +115,12 @@ async fn pubsub_fan_out() {
 
 async fn pubsub_fan_out_transport<
     F: Fn() -> T + Send + 'static + Copy,
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 >(
     new_transport: F,
     subscibers: usize,
-    addr: T::Addr,
+    addr: A,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut publisher = PubSocket::new(new_transport());
 
@@ -130,7 +132,7 @@ async fn pubsub_fan_out_transport<
             let mut subscriber = SubSocket::new(new_transport());
             inject_delay((100 * (i + 1)) as u64).await;
 
-            subscriber.connect(cloned).await.unwrap();
+            subscriber.connect_inner(cloned).await.unwrap();
             inject_delay((1000 / (i + 1)) as u64).await;
             subscriber.subscribe(TOPIC).await.unwrap();
 
@@ -194,11 +196,12 @@ async fn pubsub_fan_in() {
 
 async fn pubsub_fan_in_transport<
     F: Fn() -> T + Send + 'static + Copy,
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 >(
     new_transport: F,
     publishers: usize,
-    addr: T::Addr,
+    addr: A,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut sub_tasks = JoinSet::new();
 
@@ -241,7 +244,7 @@ async fn pubsub_fan_in_transport<
 
     for addr in addrs.clone() {
         inject_delay(500).await;
-        subscriber.connect(addr.clone()).await.unwrap();
+        subscriber.connect_inner(addr.clone()).await.unwrap();
         subscriber.subscribe(TOPIC).await.unwrap();
     }
 

@@ -37,7 +37,7 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
 }
 
 #[allow(clippy::type_complexity)]
-pub(crate) struct RepDriver<T: Transport> {
+pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// The server transport used to accept incoming connections.
     pub(crate) transport: T,
     /// The reply socket state, shared with the socket front-end.
@@ -46,9 +46,9 @@ pub(crate) struct RepDriver<T: Transport> {
     /// Options shared with socket.
     pub(crate) options: Arc<RepOptions>,
     /// [`StreamMap`] of connected peers. The key is the peer's address.
-    pub(crate) peer_states: StreamMap<T::Addr, StreamNotifyClose<PeerState<T::Io, T::Addr>>>,
+    pub(crate) peer_states: StreamMap<A, StreamNotifyClose<PeerState<T::Io, A>>>,
     /// Sender to the socket front-end. Used to notify the socket of incoming requests.
-    pub(crate) to_socket: mpsc::Sender<Request<T::Addr>>,
+    pub(crate) to_socket: mpsc::Sender<Request<A>>,
     /// Optional connection authenticator.
     pub(crate) auth: Option<Arc<dyn Authenticator>>,
     /// Optional message compressor. This is shared with the socket to keep
@@ -57,12 +57,13 @@ pub(crate) struct RepDriver<T: Transport> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, T::Addr>, PubError>>,
+    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
 }
 
-impl<T> Future for RepDriver<T>
+impl<T, A> Future for RepDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     type Output = Result<(), PubError>;
 
@@ -176,9 +177,10 @@ where
     }
 }
 
-impl<T> RepDriver<T>
+impl<T, A> RepDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     /// Handles an incoming connection. If this returns an error, the active connections counter
     /// should be decremented.

@@ -14,11 +14,11 @@ use super::{
     session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
 };
 use crate::{AuthResult, Authenticator};
-use msg_transport::{PeerAddress, Transport};
+use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{auth, pubsub};
 
 #[allow(clippy::type_complexity)]
-pub(crate) struct PubDriver<T: Transport> {
+pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// Session ID counter.
     pub(super) id_counter: u32,
     /// The server transport used to accept incoming connections.
@@ -32,14 +32,15 @@ pub(crate) struct PubDriver<T: Transport> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, T::Addr>, PubError>>,
+    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
 
-impl<T> Future for PubDriver<T>
+impl<T, A> Future for PubDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     type Output = Result<(), PubError>;
 
@@ -130,9 +131,10 @@ where
     }
 }
 
-impl<T> PubDriver<T>
+impl<T, A> PubDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     /// Handles an incoming connection. If this returns an error, the active connections counter
     /// should be decremented.

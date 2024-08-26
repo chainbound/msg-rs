@@ -14,12 +14,12 @@ async fn main() {
 
     // use a temporary file as the socket path
     let path = temp_dir().join("test.sock");
-    rep.bind_path(path.clone()).await.unwrap();
+    rep.bind(path.clone()).await.unwrap();
     println!("Listening on {:?}", rep.local_addr().unwrap());
 
     // Initialize the request socket (client side) with a transport
     let mut req = ReqSocket::new(Ipc::default());
-    req.connect_path(path).await.unwrap();
+    req.connect(path).await.unwrap();
 
     tokio::spawn(async move {
         // Receive the request and respond with "world"

@@ -22,60 +22,53 @@ use crate::{
     Authenticator, PubError, RepOptions, Request,
 };
 
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
 #[derive(Default)]
-pub struct RepSocket<T: Transport> {
+pub struct RepSocket<T: Transport<A>, A: Address> {
     /// The reply socket options, shared with the driver.
     options: Arc<RepOptions>,
     /// The reply socket state, shared with the driver.
     state: Arc<SocketState>,
     /// Receiver from the socket driver.
-    from_driver: Option<mpsc::Receiver<Request<T::Addr>>>,
+    from_driver: Option<mpsc::Receiver<Request<A>>>,
     /// The transport used by this socket. This value is temporary and will be moved
     /// to the driver task once the socket is bound.
     transport: Option<T>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
     /// The local address this socket is bound to.
-    local_addr: Option<T::Addr>,
+    local_addr: Option<A>,
     /// Optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
 }
 
-impl<T> RepSocket<T>
+impl<T> RepSocket<T, SocketAddr>
 where
-    T: Transport<Addr = SocketAddr> + Send + Unpin + 'static,
+    T: Transport<SocketAddr> + Send + Unpin + 'static,
 {
-    /// Binds the socket to the given socket addres
-    ///
-    /// This method is only available for transports that support [`SocketAddr`] as address type,
-    /// like [`Tcp`](msg_transport::tcp::Tcp) and [`Quic`](msg_transport::quic::Quic).
-    pub async fn bind_socket(&mut self, addr: impl ToSocketAddrs) -> Result<(), PubError> {
+    pub async fn bind(&mut self, addr: impl ToSocketAddrs) -> Result<(), PubError> {
         let addrs = lookup_host(addr).await?;
         self.try_bind(addrs.collect()).await
     }
 }
 
-impl<T> RepSocket<T>
+impl<T> RepSocket<T, PathBuf>
 where
-    T: Transport<Addr = PathBuf> + Send + Unpin + 'static,
+    T: Transport<PathBuf> + Send + Unpin + 'static,
 {
-    /// Binds the socket to the given path.
-    ///
-    /// This method is only available for transports that support [`PathBuf`] as address type,
-    /// like [`Ipc`](msg_transport::ipc::Ipc).
-    pub async fn bind_path(&mut self, path: impl Into<PathBuf>) -> Result<(), PubError> {
+    pub async fn bind(&mut self, path: impl Into<PathBuf>) -> Result<(), PubError> {
         let addr = path.into().clone();
         self.try_bind(vec![addr]).await
     }
 }
 
-impl<T> RepSocket<T>
+impl<T, A> RepSocket<T, A>
 where
-    T: Transport + Send + Unpin + 'static,
+    T: Transport<A> + Send + Unpin + 'static,
+    A: Address,
 {
     /// Creates a new reply socket with the default [`RepOptions`].
     pub fn new(transport: T) -> Self {
@@ -96,7 +89,7 @@ where
     }
 
     /// Sets the connection authenticator for this socket.
-    pub fn with_auth<A: Authenticator>(mut self, authenticator: A) -> Self {
+    pub fn with_auth<O: Authenticator>(mut self, authenticator: O) -> Self {
         self.auth = Some(Arc::new(authenticator));
         self
     }
@@ -108,7 +101,7 @@ where
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn try_bind(&mut self, addresses: Vec<T::Addr>) -> Result<(), PubError> {
+    pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let mut transport = self
@@ -160,13 +153,13 @@ where
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.
-    pub fn local_addr(&self) -> Option<&T::Addr> {
+    pub fn local_addr(&self) -> Option<&A> {
         self.local_addr.as_ref()
     }
 }
 
-impl<T: Transport + Unpin> Stream for RepSocket<T> {
-    type Item = Request<T::Addr>;
+impl<T: Transport<A> + Unpin, A: Address> Stream for RepSocket<T, A> {
+    type Item = Request<A>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut()

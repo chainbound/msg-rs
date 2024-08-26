@@ -36,8 +36,7 @@ impl PeerAddress<SocketAddr> for TcpStream {
 }
 
 #[async_trait::async_trait]
-impl Transport for Tcp {
-    type Addr = SocketAddr;
+impl Transport<SocketAddr> for Tcp {
     type Io = TcpStream;
 
     type Error = io::Error;
@@ -89,8 +88,8 @@ impl Transport for Tcp {
 }
 
 #[async_trait::async_trait]
-impl TransportExt for Tcp {
-    fn accept(&mut self) -> Acceptor<'_, Self>
+impl TransportExt<SocketAddr> for Tcp {
+    fn accept(&mut self) -> Acceptor<'_, Self, SocketAddr>
     where
         Self: Sized + Unpin,
     {

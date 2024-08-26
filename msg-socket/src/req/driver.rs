@@ -19,7 +19,7 @@ use tracing::{debug, error, trace};
 use super::{Command, ReqError, ReqOptions};
 use crate::{req::SocketState, ConnectionState, ExponentialBackoff};
 
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
 use msg_wire::{
     auth,
     compression::{try_decompress_payload, Compressor},
@@ -30,7 +30,7 @@ type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Se
 
 /// The request socket driver. Endless future that drives
 /// the the socket forward.
-pub(crate) struct ReqDriver<T: Transport> {
+pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     #[allow(unused)]
     pub(crate) options: Arc<ReqOptions>,
@@ -43,13 +43,12 @@ pub(crate) struct ReqDriver<T: Transport> {
     /// The transport for this socket.
     pub(crate) transport: T,
     /// The address of the server.
-    pub(crate) addr: T::Addr,
+    pub(crate) addr: A,
     /// The connection task which handles the connection to the server.
     pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state:
-        ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff, T::Addr>,
+    pub(crate) conn_state: ConnectionState<Framed<T::Io, reqrep::Codec>, ExponentialBackoff, A>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -73,13 +72,14 @@ pub(crate) struct PendingRequest {
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
-impl<T> ReqDriver<T>
+impl<T, A> ReqDriver<T, A>
 where
-    T: Transport + Send + Sync + 'static,
+    T: Transport<A> + Send + Sync + 'static,
+    A: Address,
 {
     /// Start the connection task to the server, handling authentication if necessary.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
-    fn try_connect(&mut self, addr: T::Addr) {
+    fn try_connect(&mut self, addr: A) {
         trace!("Trying to connect to {:?}", addr);
 
         let connect = self.transport.connect(addr.clone());
@@ -248,9 +248,10 @@ where
     }
 }
 
-impl<T> Future for ReqDriver<T>
+impl<T, A> Future for ReqDriver<T, A>
 where
-    T: Transport + Unpin + Send + Sync + 'static,
+    T: Transport<A> + Unpin + Send + Sync + 'static,
+    A: Address,
 {
     type Output = ();
 
