@@ -2,7 +2,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use futures::{Future, FutureExt};
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -13,6 +12,9 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+
+use async_trait::async_trait;
+use futures::{Future, FutureExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod ipc;
@@ -32,11 +34,8 @@ impl Address for PathBuf {}
 /// ordered and reliable streams of bytes.
 ///
 /// It provides an interface to manage both inbound and outbound connections.
-#[async_trait::async_trait]
+#[async_trait]
 pub trait Transport<A: Address> {
-    // /// The generic address type used by this transport
-    // type Addr: Address;
-
     /// The result of a successful connection.
     ///
     /// The output type is transport-specific, and can be a handle to directly write to the
