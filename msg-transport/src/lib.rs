@@ -3,13 +3,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use futures::{Future, FutureExt};
-use msg_common::io_error;
 use std::{
     fmt::Debug,
     hash::Hash,
     io,
     marker::PhantomData,
-    net::{SocketAddr, ToSocketAddrs},
+    net::SocketAddr,
     path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
@@ -28,64 +27,6 @@ impl Address for SocketAddr {}
 
 /// File system path, used for IPC transport.
 impl Address for PathBuf {}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AddressType {
-    SocketAddr(SocketAddr),
-    PathBuf(PathBuf),
-}
-
-impl From<SocketAddr> for AddressType {
-    fn from(addr: SocketAddr) -> Self {
-        AddressType::SocketAddr(addr)
-    }
-}
-
-impl From<PathBuf> for AddressType {
-    fn from(path: PathBuf) -> Self {
-        AddressType::PathBuf(path)
-    }
-}
-
-impl TryFrom<&str> for AddressType {
-    type Error = io::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let s = value.to_string();
-        if s.contains(':') {
-            // try to parse as socket address
-            let addr = s
-                .parse::<SocketAddr>()
-                .map_err(|_| io_error("invalid socket address"))?;
-
-            Ok(AddressType::SocketAddr(addr))
-        } else {
-            // try to parse as path
-            let path = PathBuf::from(s);
-            Ok(AddressType::PathBuf(path))
-        }
-    }
-}
-
-impl ToSocketAddrs for AddressType {
-    type Iter = std::vec::IntoIter<SocketAddr>;
-
-    fn to_socket_addrs(&self) -> io::Result<Self::Iter> {
-        match self {
-            AddressType::SocketAddr(addr) => Ok(vec![*addr].into_iter()),
-            AddressType::PathBuf(_) => Err(io_error("path is not a valid socket address")),
-        }
-    }
-}
-
-impl From<AddressType> for PathBuf {
-    fn from(val: AddressType) -> Self {
-        match val {
-            AddressType::SocketAddr(_) => panic!("socket address is not a valid path"),
-            AddressType::PathBuf(path) => path,
-        }
-    }
-}
 
 /// A transport provides connection-oriented communication between two peers through
 /// ordered and reliable streams of bytes.

@@ -3,7 +3,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use std::{
-    io,
     pin::Pin,
     task::{Context, Poll},
     time::SystemTime,
@@ -33,11 +32,6 @@ pub fn async_error<E: std::error::Error + Send + 'static, T>(
     e: E,
 ) -> BoxFuture<'static, Result<T, E>> {
     Box::pin(async move { Err(e) })
-}
-
-/// Creates a new [`io::Error`] with the given message.
-pub fn io_error(msg: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, msg.into())
 }
 
 #[allow(non_upper_case_globals)]
