@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use std::net::SocketAddr;
+use msg_transport::Address;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -62,9 +62,9 @@ pub(crate) struct SocketState {
 }
 
 /// A request received by the socket.
-pub struct Request {
+pub struct Request<A: Address> {
     /// The source address of the request.
-    source: SocketAddr,
+    source: A,
     /// The compression type used for the request payload
     compression_type: u8,
     /// The oneshot channel to respond to the request.
@@ -73,10 +73,10 @@ pub struct Request {
     msg: Bytes,
 }
 
-impl Request {
+impl<A: Address> Request<A> {
     /// Returns the source address of the request.
-    pub fn source(&self) -> SocketAddr {
-        self.source
+    pub fn source(&self) -> &A {
+        &self.source
     }
 
     /// Returns a reference to the message.
@@ -94,7 +94,7 @@ impl Request {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{net::SocketAddr, time::Duration};
 
     use futures::StreamExt;
     use msg_transport::tcp::Tcp;

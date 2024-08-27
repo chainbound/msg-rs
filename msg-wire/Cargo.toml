@@ -16,7 +16,6 @@ msg-common.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
 tokio-util.workspace = true
-tracing.workspace = true
 
 flate2 = "1"
 zstd = "0.13"

@@ -1,4 +1,8 @@
-use std::net::SocketAddr;
+#![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+
+use msg_transport::Address;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[path = "pub/mod.rs"]
@@ -36,8 +40,8 @@ pub trait Authenticator: Send + Sync + Unpin + 'static {
     fn authenticate(&self, id: &Bytes) -> bool;
 }
 
-pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite> {
+pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite, A: Address> {
     id: Bytes,
-    addr: SocketAddr,
+    addr: A,
     stream: S,
 }

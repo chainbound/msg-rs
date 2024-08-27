@@ -403,9 +403,9 @@ mod tests {
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
 
-        let mut sub1 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
+        let mut sub1 = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
-        let mut sub2 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
+        let mut sub2 = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
         let addr = pub_socket.local_addr().unwrap();
 

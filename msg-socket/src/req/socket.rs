@@ -1,11 +1,14 @@
 use bytes::Bytes;
-use msg_wire::compression::Compressor;
 use rustc_hash::FxHashMap;
+use std::marker::PhantomData;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::{io, sync::Arc, time::Duration};
 use tokio::net::{lookup_host, ToSocketAddrs};
 use tokio::sync::{mpsc, oneshot};
 
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
+use msg_wire::compression::Compressor;
 
 use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 use crate::{
@@ -14,7 +17,7 @@ use crate::{
 };
 
 /// The request socket.
-pub struct ReqSocket<T: Transport> {
+pub struct ReqSocket<T: Transport<A>, A: Address> {
     /// Command channel to the backend task.
     to_driver: Option<mpsc::Sender<Command>>,
     /// The socket transport.
@@ -27,11 +30,42 @@ pub struct ReqSocket<T: Transport> {
     // NOTE: for now we're using dynamic dispatch, since using generics here
     // complicates the API a lot. We can always change this later for perf reasons.
     compressor: Option<Arc<dyn Compressor>>,
+    /// Marker for the address type.
+    _marker: PhantomData<A>,
 }
 
-impl<T> ReqSocket<T>
+impl<T> ReqSocket<T, SocketAddr>
 where
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<SocketAddr> + Send + Sync + Unpin + 'static,
+{
+    /// Connects to the target address with the default options.
+    pub async fn connect(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
+        let mut addrs = lookup_host(addr).await?;
+        let endpoint = addrs.next().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find any valid address",
+            )
+        })?;
+
+        self.try_connect(endpoint).await
+    }
+}
+
+impl<T> ReqSocket<T, PathBuf>
+where
+    T: Transport<PathBuf> + Send + Sync + Unpin + 'static,
+{
+    /// Connects to the target path with the default options.
+    pub async fn connect(&mut self, addr: impl Into<PathBuf>) -> Result<(), ReqError> {
+        self.try_connect(addr.into().clone()).await
+    }
+}
+
+impl<T, A> ReqSocket<T, A>
+where
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 {
     pub fn new(transport: T) -> Self {
         Self::with_options(transport, ReqOptions::default())
@@ -44,6 +78,7 @@ where
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
             compressor: None,
+            _marker: PhantomData,
         }
     }
 
@@ -75,17 +110,9 @@ where
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
-    /// Connects to the target address with the default options.
+    /// Tries to connect to the target endpoint with the default options.
     /// A ReqSocket can only be connected to a single address.
-    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<(), ReqError> {
-        let mut addrs = lookup_host(addr).await?;
-        let endpoint = addrs.next().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            )
-        })?;
-
+    pub async fn try_connect(&mut self, endpoint: A) -> Result<(), ReqError> {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -97,7 +124,7 @@ where
         // We initialize the connection as inactive, and let it be activated
         // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
-            addr: endpoint,
+            addr: endpoint.clone(),
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
 
@@ -110,7 +137,7 @@ where
         let pending_requests = FxHashMap::default();
 
         // Create the socket backend
-        let driver: ReqDriver<T> = ReqDriver {
+        let driver: ReqDriver<T, A> = ReqDriver {
             addr: endpoint,
             options: Arc::clone(&self.options),
             socket_state: Arc::clone(&self.state),

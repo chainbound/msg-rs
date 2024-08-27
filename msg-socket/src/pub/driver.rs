@@ -1,10 +1,11 @@
-use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use std::{
     io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
@@ -13,10 +14,11 @@ use super::{
     session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
 };
 use crate::{AuthResult, Authenticator};
-use msg_transport::{PeerAddress, Transport};
+use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{auth, pubsub};
 
-pub(crate) struct PubDriver<T: Transport> {
+#[allow(clippy::type_complexity)]
+pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// Session ID counter.
     pub(super) id_counter: u32,
     /// The server transport used to accept incoming connections.
@@ -30,14 +32,15 @@ pub(crate) struct PubDriver<T: Transport> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io>, PubError>>,
+    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
 
-impl<T> Future for PubDriver<T>
+impl<T, A> Future for PubDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     type Output = Result<(), PubError>;
 
@@ -50,7 +53,7 @@ where
                 match auth {
                     Ok(auth) => {
                         // Run custom authenticator
-                        debug!("Authentication passed for {:?} ({})", auth.id, auth.addr);
+                        debug!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
                         let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
@@ -128,21 +131,22 @@ where
     }
 }
 
-impl<T> PubDriver<T>
+impl<T, A> PubDriver<T, A>
 where
-    T: Transport + Unpin + 'static,
+    T: Transport<A> + Unpin + 'static,
+    A: Address,
 {
     /// Handles an incoming connection. If this returns an error, the active connections counter
     /// should be decremented.
     fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
 
-        info!("New connection from {}", addr);
+        info!("New connection from {:?}", addr);
 
         // If authentication is enabled, start the authentication process
         if let Some(ref auth) = self.auth {
             let authenticator = Arc::clone(auth);
-            debug!("New connection from {}, authenticating", addr);
+            debug!("New connection from {:?}, authenticating", addr);
             self.auth_tasks.spawn(async move {
                 let mut conn = Framed::new(io, auth::Codec::new_server());
 
@@ -201,7 +205,7 @@ where
 
             self.id_counter = self.id_counter.wrapping_add(1);
             debug!(
-                "New connection from {}, session ID {}",
+                "New connection from {:?}, session ID {}",
                 addr, self.id_counter
             );
         }

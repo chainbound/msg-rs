@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env::temp_dir, time::Duration};
 
 use bytes::Bytes;
 use criterion::{
@@ -9,6 +9,7 @@ use futures::StreamExt;
 use pprof::criterion::Output;
 use rand::Rng;
 
+use msg::{ipc::Ipc, Address, Transport};
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::tcp::Tcp;
 use tokio::runtime::Runtime;
@@ -22,23 +23,26 @@ const MSG_SIZE: usize = 512;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-struct PairBenchmark {
+struct PairBenchmark<T: Transport<A>, A: Address> {
     rt: Runtime,
-    req: ReqSocket<Tcp>,
-    rep: Option<RepSocket<Tcp>>,
+    req: ReqSocket<T, A>,
+    rep: Option<RepSocket<T, A>>,
 
     n_reqs: usize,
     msg_sizes: Vec<usize>,
 }
 
-impl PairBenchmark {
-    fn init(&mut self) {
+impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<T, A> {
+    fn init(&mut self, addr: A) {
         let mut rep = self.rep.take().unwrap();
         // setup the socket connections
         self.rt.block_on(async {
-            rep.bind("127.0.0.1:0").await.unwrap();
+            rep.try_bind(vec![addr]).await.unwrap();
 
-            self.req.connect(rep.local_addr().unwrap()).await.unwrap();
+            self.req
+                .try_connect(rep.local_addr().unwrap().clone())
+                .await
+                .unwrap();
 
             tokio::spawn(async move {
                 rep.map(|req| async move {
@@ -133,7 +137,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
     let mut group = c.benchmark_group("reqrep_single_thread_tcp_bytes");
     group.sample_size(10);
     bench.bench_request_throughput(group);
@@ -167,7 +171,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
         msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
     };
 
-    bench.init();
+    bench.init("127.0.0.1:0".parse().unwrap());
     let mut group = c.benchmark_group("reqrep_multi_thread_tcp_bytes");
     group.sample_size(10);
     bench.bench_request_throughput(group);
@@ -177,10 +181,69 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     bench.bench_rps(group);
 }
 
+fn reqrep_single_thread_ipc(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let req = ReqSocket::new(Ipc::default());
+    let rep = RepSocket::new(Ipc::default());
+
+    let mut bench = PairBenchmark {
+        rt,
+        req,
+        rep: Some(rep),
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init(temp_dir().join("msg-bench-reqrep-ipc.sock"));
+    let mut group = c.benchmark_group("reqrep_single_thread_ipc_bytes");
+    group.sample_size(10);
+    bench.bench_request_throughput(group);
+
+    let mut group = c.benchmark_group("reqrep_single_thread_ipc_rps");
+    group.sample_size(10);
+    bench.bench_rps(group);
+}
+
+fn reqrep_multi_thread_ipc(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let req = ReqSocket::new(Ipc::default());
+    let rep = RepSocket::new(Ipc::default());
+
+    let mut bench = PairBenchmark {
+        rt,
+        req,
+        rep: Some(rep),
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init(temp_dir().join("msg-bench-reqrep-ipc-multi.sock"));
+    let mut group = c.benchmark_group("reqrep_multi_thread_ipc_bytes");
+    group.sample_size(10);
+    bench.bench_request_throughput(group);
+
+    let mut group = c.benchmark_group("reqrep_multi_thread_ipc_rps");
+    group.sample_size(10);
+    bench.bench_rps(group);
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(pprof::criterion::PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp
+    targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp, reqrep_single_thread_ipc, reqrep_multi_thread_ipc
 }
 
 // Runs various benchmarks for the `ReqSocket` and `RepSocket`.

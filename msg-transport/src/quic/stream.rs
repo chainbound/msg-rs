@@ -45,7 +45,7 @@ impl AsyncWrite for QuicStream {
     }
 }
 
-impl PeerAddress for QuicStream {
+impl PeerAddress<SocketAddr> for QuicStream {
     fn peer_addr(&self) -> Result<SocketAddr, std::io::Error> {
         Ok(self.peer)
     }

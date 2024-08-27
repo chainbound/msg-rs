@@ -1,13 +1,13 @@
-use futures::{Future, SinkExt, StreamExt};
-use rustc_hash::FxHashMap;
 use std::{
     collections::HashSet,
     io,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{Future, SinkExt, StreamExt};
+use rustc_hash::FxHashMap;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
@@ -21,35 +21,36 @@ use super::{
 use crate::{ConnectionState, ExponentialBackoff};
 
 use msg_common::{channel, task::JoinMap, Channel};
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
 use msg_wire::{auth, compression::try_decompress_payload, pubsub};
 
 /// Publisher channel type, used to send messages to the publisher session
 /// and receive messages to forward to the socket frontend.
 type PubChannel = Channel<SessionCommand, TopicMessage>;
 
-pub(crate) struct SubDriver<T: Transport> {
+pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(super) options: Arc<SubOptions>,
     /// The transport for this socket.
     pub(super) transport: T,
     /// Commands from the socket.
-    pub(super) from_socket: mpsc::Receiver<Command>,
+    pub(super) from_socket: mpsc::Receiver<Command<A>>,
     /// Messages to the socket.
-    pub(super) to_socket: mpsc::Sender<PubMessage>,
+    pub(super) to_socket: mpsc::Sender<PubMessage<A>>,
     /// A joinset of authentication tasks.
-    pub(super) connection_tasks: JoinMap<SocketAddr, Result<T::Io, T::Error>>,
+    pub(super) connection_tasks: JoinMap<A, Result<T::Io, T::Error>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All publisher sessions for this subscriber socket, keyed by address.
-    pub(super) publishers: FxHashMap<SocketAddr, ConnectionState<PubChannel, ExponentialBackoff>>,
+    pub(super) publishers: FxHashMap<A, ConnectionState<PubChannel, ExponentialBackoff, A>>,
     /// Socket state. This is shared with the backend task.
-    pub(super) state: Arc<SocketState>,
+    pub(super) state: Arc<SocketState<A>>,
 }
 
-impl<T> Future for SubDriver<T>
+impl<T, A> Future for SubDriver<T, A>
 where
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 {
     type Output = ();
 
@@ -78,7 +79,7 @@ where
                         this.on_connection(addr, io);
                     }
                     Err(e) => {
-                        error!(%addr, "Error connecting to publisher: {:?}", e);
+                        error!(?addr, "Error connecting to publisher: {:?}", e);
                     }
                 }
 
@@ -90,16 +91,17 @@ where
     }
 }
 
-impl<T> SubDriver<T>
+impl<T, A> SubDriver<T, A>
 where
-    T: Transport + Send + Sync + 'static,
+    T: Transport<A> + Send + Sync + 'static,
+    A: Address,
 {
     /// De-activates a publisher by setting it to [`ConnectionState::Inactive`].
     /// This will initialize the backoff stream.
-    fn reset_publisher(&mut self, addr: SocketAddr) {
+    fn reset_publisher(&mut self, addr: A) {
         debug!("Resetting publisher at {addr:?}");
         self.publishers.insert(
-            addr,
+            addr.clone(),
             ConnectionState::Inactive {
                 addr,
                 backoff: ExponentialBackoff::new(self.options.initial_backoff, 16),
@@ -108,7 +110,7 @@ where
     }
 
     /// Returns true if we're already connected to the given publisher address.
-    fn is_connected(&self, addr: &SocketAddr) -> bool {
+    fn is_connected(&self, addr: &A) -> bool {
         if self.publishers.get(addr).is_some_and(|s| s.is_active()) {
             return true;
         }
@@ -116,7 +118,7 @@ where
         false
     }
 
-    fn is_known(&self, addr: &SocketAddr) -> bool {
+    fn is_known(&self, addr: &A) -> bool {
         self.publishers.contains_key(addr)
     }
 
@@ -133,8 +135,8 @@ where
                     if let Err(TrySendError::Closed(_)) =
                         channel.try_send(SessionCommand::Subscribe(topic.clone()))
                     {
-                        warn!(publisher = %addr, "Error trying to subscribe to topic {topic}: publisher channel closed");
-                        inactive.push(*addr);
+                        warn!(publisher = ?addr, "Error trying to subscribe to topic {topic}: publisher channel closed");
+                        inactive.push(addr.clone());
                     }
                 }
             }
@@ -167,8 +169,8 @@ where
                     if let Err(TrySendError::Closed(_)) =
                         channel.try_send(SessionCommand::Unsubscribe(topic.clone()))
                     {
-                        warn!(publisher = %addr, "Error trying to unsubscribe from topic {topic}: publisher channel closed");
-                        inactive.push(*addr);
+                        warn!(publisher = ?addr, "Error trying to unsubscribe from topic {topic}: publisher channel closed");
+                        inactive.push(addr.clone());
                     }
                 }
             }
@@ -189,7 +191,7 @@ where
         }
     }
 
-    fn on_command(&mut self, cmd: Command) {
+    fn on_command(&mut self, cmd: Command<A>) {
         debug!("Received command: {:?}", cmd);
         match cmd {
             Command::Subscribe { topic } => {
@@ -198,20 +200,16 @@ where
             Command::Unsubscribe { topic } => {
                 self.unsubscribe(topic);
             }
-            Command::Connect { mut endpoint } => {
-                // Some transport implementations (e.g. Quinn) can't dial an unspecified IP address, so replace
-                // it with localhost.
-                if endpoint.ip().is_unspecified() {
-                    // TODO: support IPv6
-                    endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
-                }
-
+            Command::Connect { endpoint } => {
                 if self.is_known(&endpoint) {
-                    debug!(%endpoint, "Publisher already known, ignoring connect command");
+                    debug!(
+                        ?endpoint,
+                        "Publisher already known, ignoring connect command"
+                    );
                     return;
                 }
 
-                self.connect(endpoint);
+                self.connect(endpoint.clone());
 
                 // Also set the publisher to the disconnected state. This will make sure that if the
                 // initial connection attempt fails, it will be retried in `poll_publishers`.
@@ -219,10 +217,10 @@ where
             }
             Command::Disconnect { endpoint } => {
                 if self.publishers.remove(&endpoint).is_some() {
-                    debug!(%endpoint, "Disconnected from publisher");
+                    debug!(?endpoint, "Disconnected from publisher");
                     self.state.stats.remove(&endpoint);
                 } else {
-                    debug!(%endpoint, "Not connected to publisher");
+                    debug!(?endpoint, "Not connected to publisher");
                 };
             }
             Command::Shutdown => {
@@ -232,11 +230,11 @@ where
         }
     }
 
-    fn connect(&mut self, addr: SocketAddr) {
-        let connect = self.transport.connect(addr);
+    fn connect(&mut self, addr: A) {
+        let connect = self.transport.connect(addr.clone());
         let token = self.options.auth_token.clone();
 
-        self.connection_tasks.spawn(addr, async move {
+        self.connection_tasks.spawn(addr.clone(), async move {
             let io = match connect.await {
                 Ok(io) => io,
                 Err(e) => {
@@ -297,21 +295,21 @@ where
         });
     }
 
-    fn on_connection(&mut self, addr: SocketAddr, io: T::Io) {
+    fn on_connection(&mut self, addr: A, io: T::Io) {
         if self.is_connected(&addr) {
             // We're already connected to this publisher
-            warn!(%addr, "Already connected to publisher");
+            warn!(?addr, "Already connected to publisher");
             return;
         }
 
-        debug!("Connection to {} established, spawning session", addr);
+        debug!("Connection to {:?} established, spawning session", addr);
 
         let framed = Framed::with_capacity(io, pubsub::Codec::new(), self.options.read_buffer_size);
 
         let (driver_channel, mut publisher_channel) = channel(1024, 64);
 
         let publisher_session =
-            PublisherSession::new(addr, PublisherStream::from(framed), driver_channel);
+            PublisherSession::new(addr.clone(), PublisherStream::from(framed), driver_channel);
 
         // Get the shared session stats.
         let session_stats = publisher_session.stats();
@@ -324,12 +322,12 @@ where
                 .try_send(SessionCommand::Subscribe(topic.clone()))
                 .is_err()
             {
-                error!(publisher = %addr, "Error trying to subscribe to topic {topic} on startup: publisher channel closed / full");
+                error!(publisher = ?addr, "Error trying to subscribe to topic {topic} on startup: publisher channel closed / full");
             }
         }
 
         self.publishers.insert(
-            addr,
+            addr.clone(),
             ConnectionState::Active {
                 channel: publisher_channel,
             },
@@ -364,9 +362,9 @@ where
                                 }
                             };
 
-                            let msg = PubMessage::new(*addr, msg.topic, msg.payload);
+                            let msg = PubMessage::new(addr.clone(), msg.topic, msg.payload);
 
-                            debug!(source = %msg.source, "New message: {:?}", msg);
+                            debug!(source = ?msg.source, "New message: {:?}", msg);
                             // TODO: queuing
                             if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
                                 error!(
@@ -378,8 +376,8 @@ where
                             progress = true;
                         }
                         Poll::Ready(None) => {
-                            error!(source = %addr, "Publisher stream closed, removing channel");
-                            inactive.push(*addr);
+                            error!(source = ?addr, "Publisher stream closed, removing channel");
+                            inactive.push(addr.clone());
 
                             progress = true;
                         }
@@ -395,13 +393,13 @@ where
                             // Only retry if there are no active connection tasks
                             if !self.connection_tasks.contains_key(addr) {
                                 debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
-                                to_retry.push(*addr);
+                                to_retry.push(addr.clone());
                             } else {
                                 debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                             }
                         } else {
                             error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);
-                            to_terminate.push(*addr);
+                            to_terminate.push(addr.clone());
                         }
                     }
                 }

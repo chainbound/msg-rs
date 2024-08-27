@@ -10,9 +10,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
-rust-version = "1.70"                                                                # Remember to update .clippy.toml and README.md
+rust-version = "1.70"
 license = "MIT"
 description = "A flexible and lightweight messaging library for distributed systems"
 authors = ["Jonas Bostoen", "Nicolas Racchi"]
@@ -35,7 +35,6 @@ futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 parking_lot = "0.12"
 
-
 # general
 bytes = "1"
 thiserror = "1"
@@ -43,9 +42,9 @@ tracing = "0.1"
 rustc-hash = "1"
 rand = "0.8"
 
-# NETWORKING
+# networking
 quinn = "0.10"
-# rustls needs to be the same version as the one used by quinn
+# (rustls needs to be the same version as the one used by quinn)
 rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
 rcgen = "0.12"
 

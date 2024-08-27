@@ -1,4 +1,3 @@
-use futures::future::BoxFuture;
 use std::{
     io,
     net::{SocketAddr, UdpSocket},
@@ -6,21 +5,23 @@ use std::{
     sync::Arc,
     task::{ready, Poll},
 };
+
+use futures::future::BoxFuture;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
 use tracing::error;
 
-use msg_common::async_error;
-
 use crate::{Acceptor, Transport, TransportExt};
 
-mod config;
-mod stream;
-mod tls;
+use msg_common::async_error;
 
+mod config;
 pub use config::{Config, ConfigBuilder};
-pub use quinn::congestion;
+
+mod stream;
 use stream::QuicStream;
+
+mod tls;
 
 /// A QUIC error.
 #[derive(Debug, Error)]
@@ -83,7 +84,7 @@ impl Quic {
 }
 
 #[async_trait::async_trait]
-impl Transport for Quic {
+impl Transport<SocketAddr> for Quic {
     type Io = QuicStream;
 
     type Error = Error;
@@ -216,8 +217,8 @@ impl Transport for Quic {
     }
 }
 
-impl TransportExt for Quic {
-    fn accept(&mut self) -> crate::Acceptor<'_, Self>
+impl TransportExt<SocketAddr> for Quic {
+    fn accept(&mut self) -> crate::Acceptor<'_, Self, SocketAddr>
     where
         Self: Sized + Unpin,
     {
