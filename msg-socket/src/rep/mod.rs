@@ -113,10 +113,10 @@ mod tests {
     async fn reqrep_simple() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::new(Tcp::default());
-        rep.bind_socket(localhost()).await.unwrap();
+        rep.bind(localhost()).await.unwrap();
 
         let mut req = ReqSocket::new(Tcp::default());
-        req.connect_socket(rep.local_addr().unwrap()).await.unwrap();
+        req.connect(rep.local_addr().unwrap()).await.unwrap();
 
         tokio::spawn(async move {
             loop {
@@ -156,7 +156,7 @@ mod tests {
         // Try to connect even through the server isn't up yet
         let endpoint = addr.clone();
         let connection_attempt = tokio::spawn(async move {
-            req.connect_socket(endpoint).await.unwrap();
+            req.connect(endpoint).await.unwrap();
 
             req
         });
@@ -164,7 +164,7 @@ mod tests {
         // Wait a moment to start the server
         tokio::time::sleep(Duration::from_millis(500)).await;
         let mut rep = RepSocket::new(Tcp::default());
-        rep.bind_socket(addr).await.unwrap();
+        rep.bind(addr).await.unwrap();
 
         let req = connection_attempt.await.unwrap();
 
@@ -193,7 +193,7 @@ mod tests {
 
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
-        rep.bind_socket(localhost()).await.unwrap();
+        rep.bind(localhost()).await.unwrap();
 
         // Initialize socket with a client ID. This will implicitly enable authentication.
         let mut req = ReqSocket::with_options(
@@ -201,7 +201,7 @@ mod tests {
             ReqOptions::default().auth_token(Bytes::from("REQ")),
         );
 
-        req.connect_socket(rep.local_addr().unwrap()).await.unwrap();
+        req.connect(rep.local_addr().unwrap()).await.unwrap();
 
         tracing::info!("Connected to rep");
 
@@ -236,16 +236,16 @@ mod tests {
     async fn rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
         let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().max_clients(1));
-        rep.bind_socket("127.0.0.1:0").await.unwrap();
+        rep.bind("127.0.0.1:0").await.unwrap();
         let addr = rep.local_addr().unwrap();
 
         let mut req1 = ReqSocket::new(Tcp::default());
-        req1.connect_socket(addr).await.unwrap();
+        req1.connect(addr).await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);
 
         let mut req2 = ReqSocket::new(Tcp::default());
-        req2.connect_socket(addr).await.unwrap();
+        req2.connect(addr).await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         assert_eq!(rep.stats().active_clients(), 1);
     }
@@ -256,13 +256,13 @@ mod tests {
             RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
                 .with_compressor(SnappyCompressor);
 
-        rep.bind_socket("0.0.0.0:4445").await.unwrap();
+        rep.bind("0.0.0.0:4445").await.unwrap();
 
         let mut req =
             ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
                 .with_compressor(GzipCompressor::new(6));
 
-        req.connect_socket("0.0.0.0:4445").await.unwrap();
+        req.connect("0.0.0.0:4445").await.unwrap();
 
         tokio::spawn(async move {
             let req = rep.next().await.unwrap();

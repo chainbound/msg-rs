@@ -21,36 +21,36 @@ use super::{
 use crate::{ConnectionState, ExponentialBackoff};
 
 use msg_common::{channel, task::JoinMap, Channel};
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
 use msg_wire::{auth, compression::try_decompress_payload, pubsub};
 
 /// Publisher channel type, used to send messages to the publisher session
 /// and receive messages to forward to the socket frontend.
 type PubChannel = Channel<SessionCommand, TopicMessage>;
 
-pub(crate) struct SubDriver<T: Transport> {
+pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(super) options: Arc<SubOptions>,
     /// The transport for this socket.
     pub(super) transport: T,
     /// Commands from the socket.
-    pub(super) from_socket: mpsc::Receiver<Command<T::Addr>>,
+    pub(super) from_socket: mpsc::Receiver<Command<A>>,
     /// Messages to the socket.
-    pub(super) to_socket: mpsc::Sender<PubMessage<T::Addr>>,
+    pub(super) to_socket: mpsc::Sender<PubMessage<A>>,
     /// A joinset of authentication tasks.
-    pub(super) connection_tasks: JoinMap<T::Addr, Result<T::Io, T::Error>>,
+    pub(super) connection_tasks: JoinMap<A, Result<T::Io, T::Error>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All publisher sessions for this subscriber socket, keyed by address.
-    pub(super) publishers:
-        FxHashMap<T::Addr, ConnectionState<PubChannel, ExponentialBackoff, T::Addr>>,
+    pub(super) publishers: FxHashMap<A, ConnectionState<PubChannel, ExponentialBackoff, A>>,
     /// Socket state. This is shared with the backend task.
-    pub(super) state: Arc<SocketState<T::Addr>>,
+    pub(super) state: Arc<SocketState<A>>,
 }
 
-impl<T> Future for SubDriver<T>
+impl<T, A> Future for SubDriver<T, A>
 where
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 {
     type Output = ();
 
@@ -91,13 +91,14 @@ where
     }
 }
 
-impl<T> SubDriver<T>
+impl<T, A> SubDriver<T, A>
 where
-    T: Transport + Send + Sync + 'static,
+    T: Transport<A> + Send + Sync + 'static,
+    A: Address,
 {
     /// De-activates a publisher by setting it to [`ConnectionState::Inactive`].
     /// This will initialize the backoff stream.
-    fn reset_publisher(&mut self, addr: T::Addr) {
+    fn reset_publisher(&mut self, addr: A) {
         debug!("Resetting publisher at {addr:?}");
         self.publishers.insert(
             addr.clone(),
@@ -109,7 +110,7 @@ where
     }
 
     /// Returns true if we're already connected to the given publisher address.
-    fn is_connected(&self, addr: &T::Addr) -> bool {
+    fn is_connected(&self, addr: &A) -> bool {
         if self.publishers.get(addr).is_some_and(|s| s.is_active()) {
             return true;
         }
@@ -117,7 +118,7 @@ where
         false
     }
 
-    fn is_known(&self, addr: &T::Addr) -> bool {
+    fn is_known(&self, addr: &A) -> bool {
         self.publishers.contains_key(addr)
     }
 
@@ -190,7 +191,7 @@ where
         }
     }
 
-    fn on_command(&mut self, cmd: Command<T::Addr>) {
+    fn on_command(&mut self, cmd: Command<A>) {
         debug!("Received command: {:?}", cmd);
         match cmd {
             Command::Subscribe { topic } => {
@@ -229,7 +230,7 @@ where
         }
     }
 
-    fn connect(&mut self, addr: T::Addr) {
+    fn connect(&mut self, addr: A) {
         let connect = self.transport.connect(addr.clone());
         let token = self.options.auth_token.clone();
 
@@ -294,7 +295,7 @@ where
         });
     }
 
-    fn on_connection(&mut self, addr: T::Addr, io: T::Io) {
+    fn on_connection(&mut self, addr: A, io: T::Io) {
         if self.is_connected(&addr) {
             // We're already connected to this publisher
             warn!(?addr, "Already connected to publisher");

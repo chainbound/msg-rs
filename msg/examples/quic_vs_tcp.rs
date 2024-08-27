@@ -3,7 +3,7 @@ use futures::StreamExt;
 use msg_transport::{quic::Quic, Transport};
 use std::time::{Duration, Instant};
 
-use msg::{tcp::Tcp, PubOptions, PubSocket, SubOptions, SubSocket};
+use msg::{tcp::Tcp, Address, PubOptions, PubSocket, SubOptions, SubSocket};
 
 #[tokio::main]
 async fn main() {
@@ -30,12 +30,12 @@ async fn run_tcp() {
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket.bind_socket("127.0.0.1:0").await.unwrap();
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
     tracing::info!("Publisher listening on: {}", pub_addr);
 
-    sub1.connect_socket(pub_addr).await.unwrap();
+    sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
@@ -63,12 +63,12 @@ async fn run_quic() {
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket.bind_socket("127.0.0.1:0").await.unwrap();
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
     tracing::info!("Publisher listening on: {}", pub_addr);
 
-    sub1.connect_socket(pub_addr).await.unwrap();
+    sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
@@ -78,10 +78,10 @@ async fn run_quic() {
     run_transfer("QUIC", &mut pub_socket, &mut sub1).await;
 }
 
-async fn run_transfer<T: Transport + Send + Unpin + 'static>(
+async fn run_transfer<T: Transport<A> + Send + Unpin + 'static, A: Address>(
     transport: &str,
-    pub_socket: &mut PubSocket<T>,
-    sub_socket: &mut SubSocket<T>,
+    pub_socket: &mut PubSocket<T, A>,
+    sub_socket: &mut SubSocket<T, A>,
 ) {
     let data = Bytes::from(
         std::fs::read("./testdata/mainnetCapellaBlock7928030.ssz")

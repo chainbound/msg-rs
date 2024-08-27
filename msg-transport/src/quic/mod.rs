@@ -84,8 +84,7 @@ impl Quic {
 }
 
 #[async_trait::async_trait]
-impl Transport for Quic {
-    type Addr = SocketAddr;
+impl Transport<SocketAddr> for Quic {
     type Io = QuicStream;
 
     type Error = Error;
@@ -218,8 +217,8 @@ impl Transport for Quic {
     }
 }
 
-impl TransportExt for Quic {
-    fn accept(&mut self) -> crate::Acceptor<'_, Self>
+impl TransportExt<SocketAddr> for Quic {
+    fn accept(&mut self) -> crate::Acceptor<'_, Self, SocketAddr>
     where
         Self: Sized + Unpin,
     {

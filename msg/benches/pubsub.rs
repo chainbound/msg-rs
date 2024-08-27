@@ -4,7 +4,7 @@ use criterion::{
     Throughput,
 };
 use futures::StreamExt;
-use msg::ipc::Ipc;
+use msg::{ipc::Ipc, Address};
 use pprof::criterion::{Output, PProfProfiler};
 use rand::Rng;
 use std::{
@@ -24,24 +24,24 @@ const MSG_SIZE: usize = 512;
 #[global_allocator]
 static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
-struct PairBenchmark<T: Transport> {
+struct PairBenchmark<T: Transport<A>, A: Address> {
     rt: Runtime,
-    publisher: PubSocket<T>,
-    subscriber: SubSocket<T>,
+    publisher: PubSocket<T, A>,
+    subscriber: SubSocket<T, A>,
 
     n_reqs: usize,
     msg_sizes: Vec<usize>,
 }
 
-impl<T: Transport + Send + Sync + Unpin + 'static> PairBenchmark<T> {
+impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<T, A> {
     /// Sets up the publisher and subscriber sockets.
-    fn init(&mut self, addr: T::Addr) {
+    fn init(&mut self, addr: A) {
         // Set up the socket connections
         self.rt.block_on(async {
             self.publisher.try_bind(vec![addr]).await.unwrap();
 
             let addr = self.publisher.local_addr().unwrap();
-            self.subscriber.connect(addr.clone()).await.unwrap();
+            self.subscriber.connect_inner(addr.clone()).await.unwrap();
 
             self.subscriber
                 .subscribe("HELLO".to_string())

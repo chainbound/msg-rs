@@ -97,8 +97,7 @@ impl PeerAddress<PathBuf> for IpcStream {
 }
 
 #[async_trait]
-impl Transport for Ipc {
-    type Addr = PathBuf;
+impl Transport<PathBuf> for Ipc {
     type Io = IpcStream;
 
     type Error = io::Error;
@@ -106,11 +105,11 @@ impl Transport for Ipc {
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
     type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
 
-    fn local_addr(&self) -> Option<Self::Addr> {
+    fn local_addr(&self) -> Option<PathBuf> {
         self.path.clone()
     }
 
-    async fn bind(&mut self, addr: Self::Addr) -> Result<(), Self::Error> {
+    async fn bind(&mut self, addr: PathBuf) -> Result<(), Self::Error> {
         if addr.exists() {
             debug!("Socket file already exists. Attempting to remove.");
             if let Err(e) = std::fs::remove_file(&addr) {
@@ -127,7 +126,7 @@ impl Transport for Ipc {
         Ok(())
     }
 
-    fn connect(&mut self, addr: Self::Addr) -> Self::Connect {
+    fn connect(&mut self, addr: PathBuf) -> Self::Connect {
         Box::pin(async move { IpcStream::connect(addr).await })
     }
 
@@ -155,8 +154,8 @@ impl Transport for Ipc {
 }
 
 #[async_trait]
-impl TransportExt for Ipc {
-    fn accept(&mut self) -> Acceptor<'_, Self>
+impl TransportExt<PathBuf> for Ipc {
+    fn accept(&mut self) -> Acceptor<'_, Self, PathBuf>
     where
         Self: Sized + Unpin,
     {

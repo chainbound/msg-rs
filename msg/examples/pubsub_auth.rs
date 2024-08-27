@@ -45,17 +45,17 @@ async fn main() {
     );
 
     tracing::info!("Setting up the sockets...");
-    pub_socket.bind_socket("127.0.0.1:0").await.unwrap();
+    pub_socket.bind("127.0.0.1:0").await.unwrap();
 
     let pub_addr = pub_socket.local_addr().unwrap();
     tracing::info!("Publisher listening on: {}", pub_addr);
 
-    sub1.connect_socket(pub_addr).await.unwrap();
+    sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
-    sub2.connect_socket(pub_addr).await.unwrap();
+    sub2.connect(pub_addr).await.unwrap();
 
     sub2.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
     tracing::info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");

@@ -15,35 +15,35 @@ use tokio::{
 };
 
 use msg_common::task::JoinMap;
-use msg_transport::Transport;
+use msg_transport::{Address, Transport};
 
 use super::{
     Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
     DEFAULT_BUFFER_SIZE,
 };
 
-pub struct SubSocket<T: Transport> {
+pub struct SubSocket<T: Transport<A>, A: Address> {
     /// Command channel to the socket driver.
-    to_driver: mpsc::Sender<Command<T::Addr>>,
+    to_driver: mpsc::Sender<Command<A>>,
     /// Receiver channel from the socket driver.
-    from_driver: mpsc::Receiver<PubMessage<T::Addr>>,
+    from_driver: mpsc::Receiver<PubMessage<A>>,
     /// Options for the socket. These are shared with the backend task.
     #[allow(unused)]
     options: Arc<SubOptions>,
     /// The pending driver.
-    driver: Option<SubDriver<T>>,
+    driver: Option<SubDriver<T, A>>,
     /// Socket state. This is shared with the socket frontend.
-    state: Arc<SocketState<T::Addr>>,
+    state: Arc<SocketState<A>>,
     /// Marker for the transport type.
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T> SubSocket<T>
+impl<T> SubSocket<T, SocketAddr>
 where
-    T: Transport<Addr = SocketAddr> + Send + Sync + Unpin + 'static,
+    T: Transport<SocketAddr> + Send + Sync + Unpin + 'static,
 {
     /// Connects to the given endpoint asynchronously.
-    pub async fn connect_socket(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
+    pub async fn connect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
         let mut addrs = lookup_host(endpoint).await?;
         let mut endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -57,11 +57,11 @@ where
             endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
         }
 
-        self.connect(endpoint).await
+        self.connect_inner(endpoint).await
     }
 
     /// Attempts to connect to the given endpoint immediately.
-    pub fn try_connect_socket(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
+    pub fn try_connect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         let addr = endpoint.into();
         let mut endpoint: SocketAddr = addr.parse().map_err(|_| {
             SubError::Io(io::Error::new(
@@ -77,23 +77,22 @@ where
             endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
         }
 
-        self.try_connect(endpoint)
+        self.try_connect_inner(endpoint)
     }
 
-    pub async fn disconnect_socket(
-        &mut self,
-        endpoint: impl ToSocketAddrs,
-    ) -> Result<(), SubError> {
+    /// Disconnects from the given endpoint asynchronously.
+    pub async fn disconnect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
         let mut addrs = lookup_host(endpoint).await?;
         let endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
             "could not find any valid address",
         )))?;
 
-        self.disconnect(endpoint).await
+        self.disconnect_inner(endpoint).await
     }
 
-    pub fn try_disconnect_socket(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
+    /// Attempts to disconnect from the given endpoint immediately.
+    pub fn try_disconnect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         let endpoint = endpoint.into();
         let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
             SubError::Io(io::Error::new(
@@ -102,38 +101,39 @@ where
             ))
         })?;
 
-        self.try_disconnect(endpoint)
+        self.try_disconnect_inner(endpoint)
     }
 }
 
-impl<T> SubSocket<T>
+impl<T> SubSocket<T, PathBuf>
 where
-    T: Transport<Addr = PathBuf> + Send + Sync + Unpin + 'static,
+    T: Transport<PathBuf> + Send + Sync + Unpin + 'static,
 {
     /// Connects to the given path asynchronously.
     pub async fn connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
-        self.connect(path.into()).await
+        self.connect_inner(path.into()).await
     }
 
     /// Attempts to connect to the given path immediately.
     pub fn try_connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
-        self.try_connect(path.into())
+        self.try_connect_inner(path.into())
     }
 
     /// Disconnects from the given path asynchronously.
     pub async fn disconnect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
-        self.disconnect(path.into()).await
+        self.disconnect_inner(path.into()).await
     }
 
     /// Attempts to disconnect from the given path immediately.
     pub fn try_disconnect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
-        self.try_disconnect(path.into())
+        self.try_disconnect_inner(path.into())
     }
 }
 
-impl<T> SubSocket<T>
+impl<T, A> SubSocket<T, A>
 where
-    T: Transport + Send + Sync + Unpin + 'static,
+    T: Transport<A> + Send + Sync + Unpin + 'static,
+    A: Address,
 {
     #[allow(clippy::new_without_default)]
     pub fn new(transport: T) -> Self {
@@ -173,28 +173,28 @@ where
     }
 
     /// Asynchronously connects to the endpoint.
-    pub async fn connect(&mut self, endpoint: T::Addr) -> Result<(), SubError> {
+    pub async fn connect_inner(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
         self.send_command(Command::Connect { endpoint }).await?;
         Ok(())
     }
 
     /// Immediately send a connect command to the driver.
-    pub fn try_connect(&mut self, endpoint: T::Addr) -> Result<(), SubError> {
+    pub fn try_connect_inner(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
         self.try_send_command(Command::Connect { endpoint })?;
         Ok(())
     }
 
     /// Asynchronously disconnects from the endpoint.
-    pub async fn disconnect(&mut self, endpoint: T::Addr) -> Result<(), SubError> {
+    pub async fn disconnect_inner(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
         self.send_command(Command::Disconnect { endpoint }).await?;
         Ok(())
     }
 
     /// Immediately send a disconnect command to the driver.
-    pub fn try_disconnect(&mut self, endpoint: T::Addr) -> Result<(), SubError> {
+    pub fn try_disconnect_inner(&mut self, endpoint: A) -> Result<(), SubError> {
         self.ensure_active_driver();
         self.try_send_command(Command::Disconnect { endpoint })?;
         Ok(())
@@ -252,7 +252,7 @@ where
 
     /// Sends a command to the driver, returning [`SubError::SocketClosed`] if the
     /// driver has been dropped.
-    async fn send_command(&self, command: Command<T::Addr>) -> Result<(), SubError> {
+    async fn send_command(&self, command: Command<A>) -> Result<(), SubError> {
         self.to_driver
             .send(command)
             .await
@@ -261,7 +261,7 @@ where
         Ok(())
     }
 
-    fn try_send_command(&self, command: Command<T::Addr>) -> Result<(), SubError> {
+    fn try_send_command(&self, command: Command<A>) -> Result<(), SubError> {
         use mpsc::error::TrySendError::*;
         self.to_driver.try_send(command).map_err(|e| match e {
             Full(_) => SubError::ChannelFull,
@@ -278,20 +278,20 @@ where
         }
     }
 
-    pub fn stats(&self) -> &SocketStats<T::Addr> {
+    pub fn stats(&self) -> &SocketStats<A> {
         &self.state.stats
     }
 }
 
-impl<T: Transport> Drop for SubSocket<T> {
+impl<T: Transport<A>, A: Address> Drop for SubSocket<T, A> {
     fn drop(&mut self) {
         // Try to tell the driver to gracefully shut down.
         let _ = self.to_driver.try_send(Command::Shutdown);
     }
 }
 
-impl<T: Transport + Unpin> Stream for SubSocket<T> {
-    type Item = PubMessage<T::Addr>;
+impl<T: Transport<A> + Unpin, A: Address> Stream for SubSocket<T, A> {
+    type Item = PubMessage<A>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.from_driver.poll_recv(cx)

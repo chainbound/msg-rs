@@ -23,7 +23,7 @@ async fn start_rep() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator.
     let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
-    while rep.bind_socket("0.0.0.0:4444").await.is_err() {
+    while rep.bind("0.0.0.0:4444").await.is_err() {
         rep = RepSocket::new(Tcp::default()).with_auth(Auth);
         tracing::warn!("Failed to bind rep socket, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -76,7 +76,7 @@ async fn main() {
     tokio::spawn(
         async move {
             tracing::info!("Trying to connect to rep socket... This will start the connection process in the background, it won't immediately connect.");
-            req.connect_socket("0.0.0.0:4444").await.unwrap();
+            req.connect("0.0.0.0:4444").await.unwrap();
 
             for i in 0..10 {
                 tracing::info!("Sending request {i}...");
