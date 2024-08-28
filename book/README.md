@@ -3,7 +3,7 @@
 To build the book locally, you need to install the following tools:
 
 ```shell
-cargo install mdbook mdbook-mermaid mdbook-template
+cargo install mdbook mdbook-template
 ```
 
 Then, to run the book locally:

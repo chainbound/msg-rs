@@ -18,10 +18,6 @@ jobs:
         uses: peaceiris/actions-mdbook@v1
         with:
           mdbook-version: "latest"
-      - name: Setup mdbook-mermaid
-        uses: magicgh/mdbook-mermaid-action@v1
-        with:
-          version: "latest"
       - name: Install mdbook-template
         run: |
           mkdir mdbook-template
