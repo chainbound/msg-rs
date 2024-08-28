@@ -214,7 +214,8 @@ impl Decoder for Codec {
 
                     cursor += 2;
 
-                    // We don't have enough bytes to read the topic and the rest of the data (timestamp u64, seq u32, size u32)
+                    // We don't have enough bytes to read the topic and the rest of the data
+                    // (timestamp u64, seq u32, size u32)
                     if src.len() < cursor + topic_size as usize + 8 + 8 {
                         return Ok(None);
                     }
@@ -244,10 +245,7 @@ impl Decoder for Codec {
                     let header = header.take().unwrap();
 
                     let payload = src.split_to(header.size as usize);
-                    let message = Message {
-                        header,
-                        payload: payload.freeze(),
-                    };
+                    let message = Message { header, payload: payload.freeze() };
 
                     self.state = State::Header;
                     return Ok(Some(message));

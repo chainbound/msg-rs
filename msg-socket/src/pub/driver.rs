@@ -33,7 +33,8 @@ pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
     pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
-    /// The receiver end of the message broadcast channel. The sender half is stored by [`PubSocket`](super::PubSocket).
+    /// The receiver end of the message broadcast channel. The sender half is stored by
+    /// [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
 }
 
@@ -48,7 +49,8 @@ where
         let this = self.get_mut();
 
         loop {
-            // First, poll the joinset of authentication tasks. If a new connection has been handled we spawn a new session for it.
+            // First, poll the joinset of authentication tasks. If a new connection has been handled
+            // we spawn a new session for it.
             if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
                 match auth {
                     Ok(auth) => {
@@ -75,7 +77,7 @@ where
                         this.id_counter = this.id_counter.wrapping_add(1);
                     }
                     Err(e) => {
-                        error!("Error authenticating client: {:?}", e);
+                        error!(err = ?e, "Error authenticating client");
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -83,20 +85,21 @@ where
                 continue;
             }
 
-            // Then poll the incoming connection tasks. If a new connection has been accepted, spawn a new authentication task for it.
+            // Then poll the incoming connection tasks. If a new connection has been accepted, spawn
+            // a new authentication task for it.
             if let Poll::Ready(Some(incoming)) = this.conn_tasks.poll_next_unpin(cx) {
                 match incoming {
                     Ok(io) => {
                         if let Err(e) = this.on_incoming(io) {
-                            error!("Error accepting incoming connection: {:?}", e);
+                            error!(err = ?e, "Error accepting incoming connection");
                             this.state.stats.decrement_active_clients();
                         }
                     }
                     Err(e) => {
-                        error!("Error accepting incoming connection: {:?}", e);
+                        error!(err = ?e, "Error accepting incoming connection");
 
-                        // Active clients have already been incremented in the initial call to `poll_accept`,
-                        // so we need to decrement them here.
+                        // Active clients have already been incremented in the initial call to
+                        // `poll_accept`, so we need to decrement them here.
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -104,21 +107,18 @@ where
                 continue;
             }
 
-            // Finally, poll the transport for new incoming connection futures and push them to the incoming connection tasks.
+            // Finally, poll the transport for new incoming connection futures and push them to the
+            // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 if let Some(max) = this.options.max_clients {
                     if this.state.stats.active_clients() >= max {
-                        warn!(
-                            "Max connections reached ({}), rejecting new incoming connection",
-                            max
-                        );
-
+                        warn!("Max connections reached ({}), rejecting incoming connection", max);
                         continue;
                     }
                 }
 
-                // Increment the active clients counter. If the authentication fails, this counter
-                // will be decremented.
+                // Increment the active clients counter. If the authentication fails,
+                // this counter will be decremented.
                 this.state.stats.increment_active_clients();
 
                 this.conn_tasks.push(accept);
@@ -179,11 +179,7 @@ where
                 conn.send(auth::Message::Ack).await?;
                 conn.flush().await?;
 
-                Ok(AuthResult {
-                    id,
-                    addr,
-                    stream: conn.into_inner(),
-                })
+                Ok(AuthResult { id, addr, stream: conn.into_inner() })
             });
         } else {
             let mut framed = Framed::new(io, pubsub::Codec::new());
@@ -204,10 +200,7 @@ where
             tokio::spawn(session);
 
             self.id_counter = self.id_counter.wrapping_add(1);
-            debug!(
-                "New connection from {:?}, session ID {}",
-                addr, self.id_counter
-            );
+            debug!("New connection from {:?}, session ID {}", addr, self.id_counter);
         }
 
         Ok(())

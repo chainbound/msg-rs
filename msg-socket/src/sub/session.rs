@@ -35,8 +35,8 @@ pub(super) struct PublisherSession<Io, A: Address> {
     stream: PublisherStream<Io>,
     /// The session stats
     stats: Arc<SessionStats>,
-    /// Channel for bi-directional communication with the driver. Sends new messages from the associated
-    /// publisher and receives subscribe / unsubscribe commands.
+    /// Channel for bi-directional communication with the driver. Sends new messages from the
+    /// associated publisher and receives subscribe / unsubscribe commands.
     driver_channel: Channel<TopicMessage, SessionCommand>,
 }
 
@@ -63,19 +63,17 @@ impl<Io: AsyncRead + AsyncWrite + Unpin, A: Address> PublisherSession<Io, A> {
     /// Queues a subscribe message for this publisher.
     /// On the next poll, the message will be attempted to be sent.
     fn subscribe(&mut self, topic: String) {
-        self.egress
-            .push_back(pubsub::Message::new_sub(Bytes::from(topic)));
+        self.egress.push_back(pubsub::Message::new_sub(Bytes::from(topic)));
     }
 
     /// Queues an unsubscribe message for this publisher.
     /// On the next poll, the message will be attempted to be sent.
     fn unsubscribe(&mut self, topic: String) {
-        self.egress
-            .push_back(pubsub::Message::new_unsub(Bytes::from(topic)));
+        self.egress.push_back(pubsub::Message::new_unsub(Bytes::from(topic)));
     }
 
-    /// Handles incoming messages. On a successful message, the session stats are updated and the message
-    /// is forwarded to the driver.
+    /// Handles incoming messages. On a successful message, the session stats are updated and the
+    /// message is forwarded to the driver.
     fn on_incoming(&mut self, incoming: Result<TopicMessage, pubsub::Error>) {
         match incoming {
             Ok(msg) => {
@@ -84,12 +82,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin, A: Address> PublisherSession<Io, A> {
                 self.stats.increment_rx(msg.payload.len());
                 self.stats.update_latency(now.saturating_sub(msg.timestamp));
 
-                if self.driver_channel.try_send(msg).is_err() {
-                    warn!(addr = ?self.addr, "Failed to send message to driver");
+                if let Err(e) = self.driver_channel.try_send(msg) {
+                    warn!(err = ?e, addr = ?self.addr, "Failed to send message to driver");
                 }
             }
             Err(e) => {
-                error!(addr = ?self.addr, "Error receiving message: {:?}", e);
+                error!(err = ?e, addr = ?self.addr, "Error receiving message");
             }
         }
     }

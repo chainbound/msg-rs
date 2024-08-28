@@ -1,9 +1,11 @@
+use std::{collections::HashSet, net::IpAddr, time::Duration};
+
 use bytes::Bytes;
 use msg_sim::{Protocol, SimulationConfig, Simulator};
 use rand::Rng;
-use std::{collections::HashSet, net::IpAddr, time::Duration};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
+use tracing::info;
 
 use msg_socket::{PubSocket, SubSocket};
 use msg_transport::{quic::Quic, tcp::Tcp, Address, Transport};
@@ -65,19 +67,17 @@ where
 
     publisher.try_bind(vec![addr]).await?;
 
-    // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+    // Spawn a task to keep sending messages until the subscriber receives one (after connection
+    // process)
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            publisher
-                .publish(TOPIC, Bytes::from("WORLD"))
-                .await
-                .unwrap();
+            publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
         }
     });
 
     let msg = subscriber.next().await.unwrap();
-    tracing::info!("Received message: {:?}", msg);
+    info!("Received message: {:?}", msg);
     assert_eq!(TOPIC, msg.topic());
     assert_eq!("WORLD", msg.payload());
 
@@ -137,7 +137,7 @@ async fn pubsub_fan_out_transport<
             subscriber.subscribe(TOPIC).await.unwrap();
 
             let msg = subscriber.next().await.unwrap();
-            tracing::info!("Received message: {:?}", msg);
+            info!("Received message: {:?}", msg);
             assert_eq!(TOPIC, msg.topic());
             assert_eq!("WORLD", msg.payload());
         });
@@ -147,14 +147,12 @@ async fn pubsub_fan_out_transport<
 
     publisher.try_bind(vec![addr]).await?;
 
-    // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+    // Spawn a task to keep sending messages until the subscriber receives one (after connection
+    // process)
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
-            publisher
-                .publish(TOPIC, Bytes::from("WORLD"))
-                .await
-                .unwrap();
+            publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
         }
     });
 
@@ -219,14 +217,12 @@ async fn pubsub_fan_in_transport<
             let local_addr = publisher.local_addr().unwrap().clone();
             tx.send(local_addr).await.unwrap();
 
-            // Spawn a task to keep sending messages until the subscriber receives one (after connection process)
+            // Spawn a task to keep sending messages until the subscriber receives one (after
+            // connection process)
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_millis(500)).await;
-                    publisher
-                        .publish(TOPIC, Bytes::from("WORLD"))
-                        .await
-                        .unwrap();
+                    publisher.publish(TOPIC, Bytes::from("WORLD")).await.unwrap();
                 }
             });
         });
@@ -254,7 +250,7 @@ async fn pubsub_fan_in_transport<
         }
 
         let msg = subscriber.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!(TOPIC, msg.topic());
         assert_eq!("WORLD", msg.payload());
 

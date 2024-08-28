@@ -170,31 +170,19 @@ mod tests {
 
         let gzip = GzipCompressor::new(6);
         let (gzip_time, gzip_perf, gzip_comp) = compression_test(&data, gzip);
-        println!(
-            "gzip compression shrank the data by {:.2}% in {:?}",
-            gzip_perf, gzip_time
-        );
+        println!("gzip compression shrank the data by {:.2}% in {:?}", gzip_perf, gzip_time);
 
         let zstd = ZstdCompressor::new(6);
         let (zstd_time, zstd_perf, zstd_comp) = compression_test(&data, zstd);
-        println!(
-            "zstd compression shrank the data by {:.2}% in {:?}",
-            zstd_perf, zstd_time
-        );
+        println!("zstd compression shrank the data by {:.2}% in {:?}", zstd_perf, zstd_time);
 
         let snappy = SnappyCompressor;
         let (snappy_time, snappy_perf, snappy_comp) = compression_test(&data, snappy);
-        println!(
-            "snappy compression shrank the data by {:.2}% in {:?}",
-            snappy_perf, snappy_time
-        );
+        println!("snappy compression shrank the data by {:.2}% in {:?}", snappy_perf, snappy_time);
 
         let lz4 = Lz4Compressor;
         let (lz4_time, lz4_perf, lz4_comp) = compression_test(&data, lz4);
-        println!(
-            "lz4 compression shrank the data by {:.2}% in {:?}",
-            lz4_perf, lz4_time
-        );
+        println!("lz4 compression shrank the data by {:.2}% in {:?}", lz4_perf, lz4_time);
 
         println!("------ SSZ BLOCK -------");
 
@@ -225,31 +213,19 @@ mod tests {
 
         let gzip = GzipCompressor::new(6);
         let (gzip_time, gzip_perf, gzip_comp) = compression_test(&data, gzip);
-        println!(
-            "gzip compression shrank the data by {:.2}% in {:?}",
-            gzip_perf, gzip_time
-        );
+        println!("gzip compression shrank the data by {:.2}% in {:?}", gzip_perf, gzip_time);
 
         let zstd = ZstdCompressor::new(6);
         let (zstd_time, zstd_perf, zstd_comp) = compression_test(&data, zstd);
-        println!(
-            "zstd compression shrank the data by {:.2}% in {:?}",
-            zstd_perf, zstd_time
-        );
+        println!("zstd compression shrank the data by {:.2}% in {:?}", zstd_perf, zstd_time);
 
         let snappy = SnappyCompressor;
         let (snappy_time, snappy_perf, snappy_comp) = compression_test(&data, snappy);
-        println!(
-            "snappy compression shrank the data by {:.2}% in {:?}",
-            snappy_perf, snappy_time
-        );
+        println!("snappy compression shrank the data by {:.2}% in {:?}", snappy_perf, snappy_time);
 
         let lz4 = Lz4Compressor;
         let (lz4_time, lz4_perf, lz4_comp) = compression_test(&data, lz4);
-        println!(
-            "lz4 compression shrank the data by {:.2}% in {:?}",
-            lz4_perf, lz4_time
-        );
+        println!("lz4 compression shrank the data by {:.2}% in {:?}", lz4_perf, lz4_time);
 
         println!("------ BLOB TX ------");
 

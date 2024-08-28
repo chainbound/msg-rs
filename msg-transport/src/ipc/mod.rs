@@ -42,11 +42,7 @@ pub struct Ipc {
 
 impl Ipc {
     pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            listener: None,
-            path: None,
-        }
+        Self { config, listener: None, path: None }
     }
 }
 
@@ -115,7 +111,7 @@ impl Transport<PathBuf> for Ipc {
             if let Err(e) = std::fs::remove_file(&addr) {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Failed to remove existing socket file: {}", e),
+                    format!("Failed to remove existing socket file, {:?}", e),
                 ));
             }
         }

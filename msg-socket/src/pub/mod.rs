@@ -91,8 +91,8 @@ impl PubOptions {
         self
     }
 
-    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller than
-    /// this threshold, it will not be compressed.
+    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
+    /// than this threshold, it will not be compressed.
     pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
@@ -170,6 +170,7 @@ mod tests {
     use futures::StreamExt;
     use msg_transport::{quic::Quic, tcp::Tcp};
     use msg_wire::compression::GzipCompressor;
+    use tracing::info;
 
     use crate::{Authenticator, SubOptions, SubSocket};
 
@@ -179,7 +180,7 @@ mod tests {
 
     impl Authenticator for Auth {
         fn authenticate(&self, id: &Bytes) -> bool {
-            tracing::info!("Auth request from: {:?}", id);
+            info!("Auth request from: {:?}", id);
             true
         }
     }
@@ -199,13 +200,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -228,13 +226,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -257,13 +252,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -287,18 +279,15 @@ mod tests {
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -324,18 +313,15 @@ mod tests {
 
         let original_msg = Bytes::from("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORLD");
 
-        pub_socket
-            .publish("HELLO".to_string(), original_msg.clone())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), original_msg.clone()).await.unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
     }
@@ -356,13 +342,10 @@ mod tests {
         pub_socket.bind("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -383,13 +366,10 @@ mod tests {
         pub_socket.bind("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }

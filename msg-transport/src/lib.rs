@@ -59,7 +59,8 @@ pub trait Transport<A: Address> {
     /// Binds to the given address.
     async fn bind(&mut self, addr: A) -> Result<(), Self::Error>;
 
-    /// Connects to the given address, returning a future representing a pending outbound connection.
+    /// Connects to the given address, returning a future representing a
+    /// pending outbound connection.
     fn connect(&mut self, addr: A) -> Self::Connect;
 
     /// Poll for incoming connections. If an inbound connection is received, a future representing
@@ -84,10 +85,7 @@ pub struct Acceptor<'a, T, A> {
 
 impl<'a, T, A> Acceptor<'a, T, A> {
     fn new(inner: &'a mut T) -> Self {
-        Self {
-            inner,
-            _marker: PhantomData,
-        }
+        Self { inner, _marker: PhantomData }
     }
 }
 

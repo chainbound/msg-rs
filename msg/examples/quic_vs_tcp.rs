@@ -2,6 +2,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use msg_transport::{quic::Quic, Transport};
 use std::time::{Duration, Instant};
+use tracing::info;
 
 use msg::{tcp::Tcp, Address, PubOptions, PubSocket, SubOptions, SubSocket};
 
@@ -24,21 +25,19 @@ async fn run_tcp() {
     );
 
     // Configure the subscribers with options
-    let mut sub1 = SubSocket::with_options(
-        Tcp::default(),
-        SubOptions::default().ingress_buffer_size(1024),
-    );
+    let mut sub1 =
+        SubSocket::with_options(Tcp::default(), SubOptions::default().ingress_buffer_size(1024));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
-    tracing::info!("Publisher listening on: {}", pub_addr);
+    info!("Publisher listening on: {}", pub_addr);
 
     sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
-    tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
+    info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
@@ -66,12 +65,12 @@ async fn run_quic() {
     pub_socket.bind("127.0.0.1:0").await.unwrap();
     let pub_addr = pub_socket.local_addr().unwrap();
 
-    tracing::info!("Publisher listening on: {}", pub_addr);
+    info!("Publisher listening on: {}", pub_addr);
 
     sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
-    tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
+    info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
@@ -90,14 +89,11 @@ async fn run_transfer<T: Transport<A> + Send + Unpin + 'static, A: Address>(
 
     for _ in 0..100 {
         let start = Instant::now();
-        pub_socket
-            .publish("HELLO_TOPIC".to_string(), data.clone())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO_TOPIC".to_string(), data.clone()).await.unwrap();
 
         let recv = sub_socket.next().await.unwrap();
         let elapsed = start.elapsed();
-        tracing::info!("{} transfer took {:?}", transport, elapsed);
+        info!("{} transfer took {:?}", transport, elapsed);
         assert_eq!(recv.into_payload(), data);
 
         tokio::time::sleep(Duration::from_secs(1)).await;

@@ -39,10 +39,7 @@ impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<
         self.rt.block_on(async {
             rep.try_bind(vec![addr]).await.unwrap();
 
-            self.req
-                .try_connect(rep.local_addr().unwrap().clone())
-                .await
-                .unwrap();
+            self.req.try_connect(rep.local_addr().unwrap().clone()).await.unwrap();
 
             tokio::spawn(async move {
                 rep.map(|req| async move {
@@ -117,10 +114,7 @@ fn generate_requests(n_reqs: usize, msg_size: usize) -> Vec<Bytes> {
 fn reqrep_single_thread_tcp(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
     let req = ReqSocket::with_options(
         Tcp::default(),
@@ -150,11 +144,8 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
 fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
     let req = ReqSocket::with_options(
         Tcp::default(),
@@ -184,10 +175,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
 fn reqrep_single_thread_ipc(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
     let req = ReqSocket::new(Ipc::default());
     let rep = RepSocket::new(Ipc::default());
@@ -213,11 +201,8 @@ fn reqrep_single_thread_ipc(c: &mut Criterion) {
 fn reqrep_multi_thread_ipc(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
     let req = ReqSocket::new(Ipc::default());
     let rep = RepSocket::new(Ipc::default());

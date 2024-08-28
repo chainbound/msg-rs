@@ -19,9 +19,7 @@ pub struct SocketStats<A: Address> {
 
 impl<A: Address> SocketStats<A> {
     pub fn new() -> Self {
-        Self {
-            session_stats: RwLock::new(HashMap::new()),
-        }
+        Self { session_stats: RwLock::new(HashMap::new()) }
     }
 }
 
@@ -38,19 +36,13 @@ impl<A: Address> SocketStats<A> {
 
     #[inline]
     pub fn bytes_rx(&self, session_addr: &A) -> Option<usize> {
-        self.session_stats
-            .read()
-            .get(session_addr)
-            .map(|stats| stats.bytes_rx())
+        self.session_stats.read().get(session_addr).map(|stats| stats.bytes_rx())
     }
 
     /// Returns the average latency in microseconds for the given session.
     #[inline]
     pub fn avg_latency(&self, session_addr: &A) -> Option<u64> {
-        self.session_stats
-            .read()
-            .get(session_addr)
-            .map(|stats| stats.avg_latency())
+        self.session_stats.read().get(session_addr).map(|stats| stats.avg_latency())
     }
 }
 

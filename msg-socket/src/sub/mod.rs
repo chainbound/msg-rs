@@ -1,19 +1,23 @@
+use std::{fmt, time::Duration};
+
 use bytes::Bytes;
-use core::fmt;
-use msg_transport::Address;
-use msg_wire::pubsub;
-use std::time::Duration;
 use thiserror::Error;
 
 mod driver;
+use driver::SubDriver;
+
 mod session;
+
 mod socket;
+pub use socket::*;
+
 mod stats;
+use stats::SocketStats;
+
 mod stream;
 
-use driver::SubDriver;
-pub use socket::*;
-use stats::SocketStats;
+use msg_transport::Address;
+use msg_wire::pubsub;
 
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
@@ -68,8 +72,9 @@ impl SubOptions {
         self
     }
 
-    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
-    /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
+    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be
+    /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
+    /// being dropped.
     pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
         self.ingress_buffer_size = ingress_buffer_size;
         self
@@ -124,11 +129,7 @@ impl<A: Address> fmt::Debug for PubMessage<A> {
 
 impl<A: Address> PubMessage<A> {
     pub fn new(source: A, topic: String, payload: Bytes) -> Self {
-        Self {
-            source,
-            topic,
-            payload,
-        }
+        Self { source, topic, payload }
     }
 
     #[inline]
@@ -160,9 +161,7 @@ pub(crate) struct SocketState<A: Address> {
 
 impl<A: Address> SocketState<A> {
     pub fn new() -> Self {
-        Self {
-            stats: SocketStats::new(),
-        }
+        Self { stats: SocketStats::new() }
     }
 }
 
@@ -176,7 +175,7 @@ mod tests {
         net::TcpListener,
     };
     use tokio_stream::StreamExt;
-    use tracing::Instrument;
+    use tracing::{info, info_span, Instrument};
 
     use super::*;
 
@@ -193,11 +192,11 @@ mod tests {
                 let b = socket.read(&mut buf).await.unwrap();
                 let read = &buf[..b];
 
-                tracing::info!("Received bytes: {:?}", read);
+                info!("Received bytes: {:?}", read);
                 socket.write_all(read).await.unwrap();
                 socket.flush().await.unwrap();
             }
-            .instrument(tracing::info_span!("listener")),
+            .instrument(info_span!("listener")),
         );
 
         addr

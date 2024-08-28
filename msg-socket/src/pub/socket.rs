@@ -1,6 +1,7 @@
+use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
+
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
-use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::broadcast,
@@ -10,6 +11,7 @@ use tracing::{debug, trace, warn};
 
 use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
+
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
@@ -23,7 +25,8 @@ pub struct PubSocket<T: Transport<A>, A: Address> {
     /// The transport used by this socket. This value is temporary and will be moved
     /// to the driver task once the socket is bound.
     transport: Option<T>,
-    /// The broadcast channel to all active [`SubscriberSession`](super::session::SubscriberSession)s.
+    /// The broadcast channel to all active
+    /// [`SubscriberSession`](super::session::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
     /// Optional connection authenticator.
     auth: Option<Arc<dyn Authenticator>>,
@@ -104,16 +107,13 @@ where
         let (to_sessions_bcast, from_socket_bcast) =
             broadcast::channel(self.options.session_buffer_size);
 
-        let mut transport = self
-            .transport
-            .take()
-            .expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("Transport has been moved already");
 
         for addr in addresses {
             match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    warn!("Failed to bind to {:?}, trying next address: {}", addr, e);
+                    warn!(err = ?e, "Failed to bind to {:?}, trying next address", addr);
                     continue;
                 }
             }
@@ -160,22 +160,12 @@ where
             if let Some(ref compressor) = self.compressor {
                 msg.compress(compressor.as_ref())?;
 
-                trace!(
-                    "Compressed message from {} to {} bytes",
-                    len_before,
-                    msg.payload().len(),
-                );
+                trace!("Compressed message from {} to {} bytes", len_before, msg.payload().len(),);
             }
         }
 
         // Broadcast the message directly to all active sessions.
-        if self
-            .to_sessions_bcast
-            .as_ref()
-            .ok_or(PubError::SocketClosed)?
-            .send(msg)
-            .is_err()
-        {
+        if self.to_sessions_bcast.as_ref().ok_or(PubError::SocketClosed)?.send(msg).is_err() {
             debug!("No active subscriber sessions");
         }
 
@@ -194,21 +184,11 @@ where
             // For relatively small messages, this takes <100us
             msg.compress(compressor.as_ref())?;
 
-            debug!(
-                "Compressed message from {} to {} bytes",
-                len_before,
-                msg.payload().len(),
-            );
+            debug!("Compressed message from {} to {} bytes", len_before, msg.payload().len(),);
         }
 
         // Broadcast the message directly to all active sessions.
-        if self
-            .to_sessions_bcast
-            .as_ref()
-            .ok_or(PubError::SocketClosed)?
-            .send(msg)
-            .is_err()
-        {
+        if self.to_sessions_bcast.as_ref().ok_or(PubError::SocketClosed)?.send(msg).is_err() {
             debug!("No active subscriber sessions");
         }
 

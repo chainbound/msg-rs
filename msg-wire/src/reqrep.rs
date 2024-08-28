@@ -23,14 +23,7 @@ pub struct Message {
 impl Message {
     #[inline]
     pub fn new(id: u32, compression_type: u8, payload: Bytes) -> Self {
-        Self {
-            header: Header {
-                id,
-                compression_type,
-                size: payload.len() as u32,
-            },
-            payload,
-        }
+        Self { header: Header { id, compression_type, size: payload.len() as u32 }, payload }
     }
 
     #[inline]
@@ -151,11 +144,8 @@ impl Decoder for Codec {
                     src.advance(cursor);
 
                     // Construct the header
-                    let header = Header {
-                        compression_type,
-                        id: src.get_u32(),
-                        size: src.get_u32(),
-                    };
+                    let header =
+                        Header { compression_type, id: src.get_u32(), size: src.get_u32() };
 
                     self.state = State::Payload(header);
                 }
@@ -165,10 +155,7 @@ impl Decoder for Codec {
                     }
 
                     let payload = src.split_to(header.size as usize);
-                    let message = Message {
-                        header,
-                        payload: payload.freeze(),
-                    };
+                    let message = Message { header, payload: payload.freeze() };
 
                     self.state = State::Header;
                     return Ok(Some(message));

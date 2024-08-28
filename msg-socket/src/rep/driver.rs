@@ -82,7 +82,7 @@ where
                         match try_decompress_payload(request.compression_type, request.msg) {
                             Ok(decompressed) => request.msg = decompressed,
                             Err(e) => {
-                                error!("Failed to decompress message: {:?}", e);
+                                error!(err = ?e, "Failed to decompress message");
                                 continue;
                             }
                         }
@@ -91,7 +91,7 @@ where
                         let _ = this.to_socket.try_send(request);
                     }
                     Some(Err(e)) => {
-                        error!("Error receiving message from peer {:?}: {:?}", peer, e);
+                        error!(err = ?e, "Error receiving message from peer {:?}", peer);
                     }
                     None => {
                         warn!("Peer {:?} disconnected", peer);
@@ -122,7 +122,7 @@ where
                         );
                     }
                     Err(e) => {
-                        tracing::error!("Error authenticating client: {:?}", e);
+                        error!(err = ?e, "Error authenticating client");
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -134,15 +134,15 @@ where
                 match incoming {
                     Ok(io) => {
                         if let Err(e) = this.on_incoming(io) {
-                            error!("Error accepting incoming connection: {:?}", e);
+                            error!(err = ?e, "Error accepting incoming connection");
                             this.state.stats.decrement_active_clients();
                         }
                     }
                     Err(e) => {
-                        error!("Error accepting incoming connection: {:?}", e);
+                        error!(err = ?e, "Error accepting incoming connection");
 
-                        // Active clients have already been incremented in the initial call to `poll_accept`,
-                        // so we need to decrement them here.
+                        // Active clients have already been incremented in the initial call to
+                        // `poll_accept`, so we need to decrement them here.
                         this.state.stats.decrement_active_clients();
                     }
                 }
@@ -150,7 +150,8 @@ where
                 continue;
             }
 
-            // Finally, poll the transport for new incoming connection futures and push them to the incoming connection tasks.
+            // Finally, poll the transport for new incoming connection futures and push them to the
+            // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 if let Some(max) = this.options.max_clients {
                     if this.state.stats.active_clients() >= max {
@@ -225,11 +226,7 @@ where
                 conn.send(auth::Message::Ack).await?;
                 conn.flush().await?;
 
-                Ok(AuthResult {
-                    id,
-                    addr,
-                    stream: conn.into_inner(),
-                })
+                Ok(AuthResult { id, addr, stream: conn.into_inner() })
             });
         } else {
             self.peer_states.insert(
@@ -279,7 +276,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         }
                         Err(e) => {
                             this.state.stats.increment_failed_requests();
-                            tracing::error!("Failed to send message to socket: {:?}", e);
+                            error!(err = ?e, "Failed to send message to socket");
                             // End this stream as we can't send any more messages
                             return Poll::Ready(None);
                         }
@@ -300,12 +297,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             compression_type = compressor.compression_type() as u8;
                         }
                         Err(e) => {
-                            tracing::error!("Failed to compress message: {:?}", e);
+                            error!(err = ?e, "Failed to compress message");
                             continue;
                         }
                     }
 
-                    tracing::debug!(
+                    debug!(
                         "Compressed message {} from {} to {} bytes",
                         id,
                         len_before,
@@ -328,10 +325,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     let (tx, rx) = oneshot::channel();
 
                     // Add the pending request to the list
-                    this.pending_requests.push(PendingRequest {
-                        msg_id: msg.id(),
-                        response: rx,
-                    });
+                    this.pending_requests.push(PendingRequest { msg_id: msg.id(), response: rx });
 
                     let request = Request {
                         source: this.addr.clone(),

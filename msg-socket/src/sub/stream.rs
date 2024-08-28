@@ -76,12 +76,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Stream for PublisherStream<Io> {
 
                 // TODO: this will allocate. Can we just return the `Cow`?
                 let topic = String::from_utf8_lossy(&topic).to_string();
-                TopicMessage {
-                    compression_type,
-                    timestamp,
-                    topic,
-                    payload,
-                }
+                TopicMessage { compression_type, timestamp, topic, payload }
             })));
         }
 

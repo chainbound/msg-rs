@@ -23,10 +23,8 @@ impl Compressor for GzipCompressor {
 
     fn compress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         // Optimistically allocate the compressed buffer to 1/4 of the original size.
-        let mut encoder = GzEncoder::new(
-            Vec::with_capacity(data.len() / 4),
-            Compression::new(self.level),
-        );
+        let mut encoder =
+            GzEncoder::new(Vec::with_capacity(data.len() / 4), Compression::new(self.level));
 
         encoder.write_all(data)?;
 

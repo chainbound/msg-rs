@@ -34,10 +34,7 @@ pub struct Simulator {
 
 impl Simulator {
     pub fn new() -> Self {
-        Self {
-            active_sims: HashMap::new(),
-            sim_id: 1,
-        }
+        Self { active_sims: HashMap::new(), sim_id: 1 }
     }
 
     /// Starts a new simulation on the given endpoint according to the config.
@@ -108,9 +105,8 @@ impl Simulation {
             pipe = pipe.plr(plr);
         }
 
-        let mut pf = PacketFilter::new(pipe)
-            .anchor(format!("msg-sim-{}", self.id))
-            .endpoint(self.endpoint);
+        let mut pf =
+            PacketFilter::new(pipe).anchor(format!("msg-sim-{}", self.id)).endpoint(self.endpoint);
 
         if !self.config.protocols.is_empty() {
             pf = pf.protocols(self.config.protocols.clone());

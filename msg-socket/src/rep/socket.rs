@@ -17,8 +17,7 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    rep::{driver::RepDriver, DEFAULT_BUFFER_SIZE},
-    rep::{SocketState, SocketStats},
+    rep::{driver::RepDriver, SocketState, SocketStats, DEFAULT_BUFFER_SIZE},
     Authenticator, PubError, RepOptions, Request,
 };
 
@@ -104,16 +103,13 @@ where
     pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), PubError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let mut transport = self
-            .transport
-            .take()
-            .expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("Transport has been moved already");
 
         for addr in addresses {
             match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    warn!("Failed to bind to {:?}, trying next address: {}", addr, e);
+                    warn!(err = ?e, "Failed to bind to {:?}, trying next address", addr);
                     continue;
                 }
             }
@@ -162,10 +158,6 @@ impl<T: Transport<A> + Unpin, A: Address> Stream for RepSocket<T, A> {
     type Item = Request<A>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut()
-            .from_driver
-            .as_mut()
-            .expect("Inactive socket")
-            .poll_recv(cx)
+        self.get_mut().from_driver.as_mut().expect("Inactive socket").poll_recv(cx)
     }
 }

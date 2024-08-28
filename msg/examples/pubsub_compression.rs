@@ -2,7 +2,7 @@ use bytes::Bytes;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
-use tracing::Instrument;
+use tracing::{info, info_span, warn, Instrument};
 
 use msg::{compression::GzipCompressor, tcp::Tcp, PubSocket, SubSocket};
 
@@ -24,59 +24,56 @@ async fn main() {
     pub_socket.bind("127.0.0.1:0").await.unwrap();
 
     let pub_addr = pub_socket.local_addr().unwrap();
-    tracing::info!("Publisher listening on: {}", pub_addr);
+    info!("Publisher listening on: {}", pub_addr);
 
     sub1.connect(pub_addr).await.unwrap();
 
     sub1.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
-    tracing::info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
+    info!("Subscriber 1 connected and subscribed to HELLO_TOPIC");
 
     sub2.connect(pub_addr).await.unwrap();
 
     sub2.subscribe("HELLO_TOPIC".to_string()).await.unwrap();
-    tracing::info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");
+    info!("Subscriber 2 connected and subscribed to HELLO_TOPIC");
 
     let t1 = tokio::spawn(
         async move {
             loop {
-                // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription was succesful,
-                // we should time out after the 10th message.
+                // Wait for a message to arrive, or timeout after 2 seconds. If the unsubscription
+                // was succesful, we should time out after the 10th message.
                 let Ok(Some(recv)) = timeout(Duration::from_millis(2000), sub1.next()).await else {
-                    tracing::warn!("Timeout waiting for message, stopping sub1");
+                    warn!("Timeout waiting for message, stopping sub1");
                     break;
                 };
 
                 let string = bytes_to_string(recv.clone().into_payload());
-                tracing::info!("Received message: {}", string);
+                info!("Received message: {}", string);
                 if string.contains("10") {
-                    tracing::warn!("Received message 10, unsubscribing...");
+                    warn!("Received message 10, unsubscribing...");
                     sub1.unsubscribe("HELLO_TOPIC".to_string()).await.unwrap();
                 }
             }
         }
-        .instrument(tracing::info_span!("sub1")),
+        .instrument(info_span!("sub1")),
     );
 
     let t2 = tokio::spawn(
         async move {
             loop {
                 let Ok(Some(recv)) = timeout(Duration::from_millis(1000), sub2.next()).await else {
-                    tracing::warn!("Timeout waiting for message, stopping sub2");
+                    warn!("Timeout waiting for message, stopping sub2");
                     break;
                 };
                 let string = bytes_to_string(recv.clone().into_payload());
-                tracing::info!("Received message: {}", string);
+                info!("Received message: {}", string);
             }
         }
-        .instrument(tracing::info_span!("sub2")),
+        .instrument(info_span!("sub2")),
     );
 
     for i in 0..20 {
         tokio::time::sleep(Duration::from_millis(300)).await;
-        pub_socket
-            .publish("HELLO_TOPIC".to_string(), format!("Message {i}").into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO_TOPIC".to_string(), format!("Message {i}").into()).await.unwrap();
     }
 
     let _ = tokio::join!(t1, t2);

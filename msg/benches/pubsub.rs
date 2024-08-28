@@ -43,10 +43,7 @@ impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<
             let addr = self.publisher.local_addr().unwrap();
             self.subscriber.connect_inner(addr.clone()).await.unwrap();
 
-            self.subscriber
-                .subscribe("HELLO".to_string())
-                .await
-                .unwrap();
+            self.subscriber.subscribe("HELLO".to_string()).await.unwrap();
 
             // Give some time for the background connection process to run
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -146,10 +143,7 @@ fn generate_messages(n_reqs: usize, msg_size: usize) -> Vec<Bytes> {
 fn pubsub_single_thread_tcp(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -163,9 +157,7 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -190,11 +182,8 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
 fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -208,9 +197,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -235,10 +222,7 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
 fn pubsub_single_thread_quic(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -252,9 +236,7 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -279,11 +261,8 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
 fn pubsub_multi_thread_quic(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -297,9 +276,7 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -324,10 +301,7 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
 fn pubsub_single_thread_ipc(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -341,9 +315,7 @@ fn pubsub_single_thread_ipc(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -368,11 +340,8 @@ fn pubsub_single_thread_ipc(c: &mut Criterion) {
 fn pubsub_multi_thread_ipc(c: &mut Criterion) {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap();
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
     let buffer_size = 1024 * 64;
 
@@ -386,9 +355,7 @@ fn pubsub_multi_thread_ipc(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default()
-            .read_buffer_size(buffer_size)
-            .ingress_buffer_size(N_REQS * 2),
+        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
