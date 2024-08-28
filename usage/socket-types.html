@@ -196,23 +196,23 @@ use msg::{RepSocket, ReqSocket, Tcp};
 async fn main() {
     // Initialize the reply socket (server side) with a transport
     let mut rep = RepSocket::new(Tcp::default());
-    rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     let mut req = ReqSocket::new(Tcp::default());
-    req.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {
-        // Receive the request and respond with &quot;world&quot;
+        // Receive the request and respond with "world"
         // (RepSocket implements `Stream`)
         let req = rep.next().await.unwrap();
-        println!(&quot;Message: {:?}&quot;, req.msg());
+        println!("Message: {:?}", req.msg());
 
-        req.respond(Bytes::from(&quot;world&quot;)).unwrap();
+        req.respond(Bytes::from("world")).unwrap();
     });
 
-    let res: Bytes = req.request(Bytes::from(&quot;hello&quot;)).await.unwrap();
-    println!(&quot;Response: {:?}&quot;, res);
+    let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
+    println!("Response: {:?}", res);
 }</code></pre></pre>
 <h2 id="publishsubscribe"><a class="header" href="#publishsubscribe">Publish/Subscribe</a></h2>
 <p>The publish/subscribe socket type is used for sending a message to multiple subscribers.
@@ -229,24 +229,24 @@ use msg::{PubSocket, SubSocket, Tcp};
 async fn main() {
     // Initialize the publisher socket (server side) with a transport
     let mut pub_socket = PubSocket::new(Tcp::default());
-    pub_socket.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    pub_socket.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the subscriber socket (client side) with a transport
     let mut sub_socket = SubSocket::new(Tcp::default());
-    sub_socket.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    sub_socket.connect("0.0.0.0:4444").await.unwrap();
 
-    let topic = &quot;some_interesting_topic&quot;.to_string();
+    let topic = "some_interesting_topic".to_string();
 
     // Subscribe to a topic
     sub_socket.subscribe(topic.clone()).await.unwrap();
 
     tokio::spawn(async move {
         // Values are `bytes::Bytes`
-        pub_socket.publish(topic, Bytes::from(&quot;hello_world&quot;)).await.unwrap();
+        pub_socket.publish(topic, Bytes::from("hello_world")).await.unwrap();
     });
 
     let msg = sub_socket.next().await.unwrap();
-    println!(&quot;Received message: {:?}&quot;, msg);
+    println!("Received message: {:?}", msg);
 }</code></pre></pre>
 <!-- External -->
 <!-- MSG links -->

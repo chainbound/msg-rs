@@ -203,7 +203,7 @@ struct Auth;
 
 impl Authenticator for Auth {
     fn authenticate(&amp;self, id: &amp;Bytes) -&gt; bool {
-        println!(&quot;Auth request from: {:?}&quot;, id);
+        println!("Auth request from: {:?}", id);
         // Custom authentication logic goes here
         // ...
         true
@@ -215,14 +215,14 @@ async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and an authenticator that we just implemented:
     let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
-    rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     // and an identifier. This will implicitly turn on client authentication.
     // The identifier will be sent to the server when the connection is established.
     let mut req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default().auth_token(Bytes::from(&quot;client1&quot;)),
+        ReqOptions::default().auth_token(Bytes::from("client1")),
     );
 
     ...

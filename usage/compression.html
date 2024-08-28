@@ -195,7 +195,7 @@ async fn main() {
             // Enable Gzip compression (compression level 6).
             .with_compressor(GzipCompressor::new(6));
 
-    rep.bind(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
     let mut req = ReqSocket::new(Tcp::default())
@@ -204,7 +204,7 @@ async fn main() {
             // use the same compression algorithm or level.
             .with_compressor(GzipCompressor::new(6));
 
-    req.connect(&quot;0.0.0.0:4444&quot;).await.unwrap();
+    req.connect("0.0.0.0:4444").await.unwrap();
 
     // ...
 }</code></pre></pre>
@@ -224,8 +224,8 @@ async fn main() {
 
     // ...
 }</code></pre></pre>
-<p>By looking at this example, you might be wondering: &quot;how does the subscriber know that the
-publisher is compressing messages, if the subscriber is not configured with Gzip compression?&quot;</p>
+<p>By looking at this example, you might be wondering: "how does the subscriber know that the
+publisher is compressing messages, if the subscriber is not configured with Gzip compression?"</p>
 <p>The answer is that in MSG, compression is defined by the publisher for each message that is sent.
 In practice, each message contains info in its <code>Header</code> that tells the subscriber whether the message
 payload is compressed - and if so, which compression algorithm was used. The subscriber then uses this
