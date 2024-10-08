@@ -1,4 +1,4 @@
-use std::{io, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
@@ -120,10 +120,7 @@ where
         }
 
         let Some(local_addr) = transport.local_addr() else {
-            return Err(PubError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not bind to any valid address",
-            )));
+            return Err(PubError::NoValidEndpoints);
         };
 
         debug!("Listening on {:?}", local_addr);
@@ -149,8 +146,7 @@ where
 
     /// Publishes a message to the given topic. If the topic doesn't exist, this is a no-op.
     pub async fn publish(&self, topic: impl Into<String>, message: Bytes) -> Result<(), PubError> {
-        let topic = topic.into();
-        let mut msg = PubMessage::new(topic, message);
+        let mut msg = PubMessage::new(topic.into(), message);
 
         // We compress here since that way we only have to do it once.
         // Compression is only done if the message is larger than the
@@ -159,8 +155,7 @@ where
         if len_before > self.options.min_compress_size {
             if let Some(ref compressor) = self.compressor {
                 msg.compress(compressor.as_ref())?;
-
-                trace!("Compressed message from {} to {} bytes", len_before, msg.payload().len(),);
+                trace!("Compressed message from {} to {} bytes", len_before, msg.payload().len());
             }
         }
 

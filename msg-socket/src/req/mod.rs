@@ -16,30 +16,36 @@ pub use socket::*;
 
 use self::stats::SocketStats;
 
+/// The default buffer size for the socket.
 const DEFAULT_BUFFER_SIZE: usize = 1024;
 
+/// Errors that can occur when using a request socket.
 #[derive(Debug, Error)]
 pub enum ReqError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
-    #[error("Authentication error: {0:?}")]
-    Auth(String),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] reqrep::Error),
+    #[error("Authentication error: {0}")]
+    Auth(String),
     #[error("Socket closed")]
     SocketClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
     #[error("Request timed out")]
     Timeout,
+    #[error("Could not connect to any valid endpoints")]
+    NoValidEndpoints,
 }
 
+/// Commands that can be sent to the request socket driver.
 pub enum Command {
+    /// Send a request message and wait for a response.
     Send { message: ReqMessage, response: oneshot::Sender<Result<Bytes, ReqError>> },
 }
 
+/// The request socket options.
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
+    /// Optional authentication token.
     auth_token: Option<Bytes>,
     /// Timeout duration for requests.
     timeout: std::time::Duration,
@@ -139,7 +145,6 @@ pub struct ReqMessage {
     payload: Bytes,
 }
 
-#[allow(unused)]
 impl ReqMessage {
     pub fn new(payload: Bytes) -> Self {
         Self {

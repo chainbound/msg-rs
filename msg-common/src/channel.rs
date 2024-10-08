@@ -56,11 +56,11 @@ impl<S: Send + 'static, R> Channel<S, R> {
         self.tx.send(msg).await
     }
 
-    /// Attempts to immediately send a message on this [`Sender`]
+    /// Attempts to immediately send a message on this channel.
     ///
-    /// This method differs from [`send`] by returning immediately if the channel's
+    /// This method differs from `send` by returning immediately if the channel's
     /// buffer is full or no receiver is waiting to acquire some data. Compared
-    /// with [`send`], this function has two failure cases instead of one (one for
+    /// with `send`, this function has two failure cases instead of one (one for
     /// disconnection, one for a full buffer).
     pub fn try_send(&mut self, msg: S) -> Result<(), TrySendError<S>> {
         if let Some(tx) = self.tx.get_ref() {
@@ -70,17 +70,17 @@ impl<S: Send + 'static, R> Channel<S, R> {
         }
     }
 
-    /// Receives the next value for this receiver.
+    /// Receives the next value for this channel.
     ///
     /// This method returns `None` if the channel has been closed and there are
     /// no remaining messages in the channel's buffer. This indicates that no
     /// further values can ever be received from this `Receiver`. The channel is
-    /// closed when all senders have been dropped, or when [`close`] is called.
+    /// closed when all senders have been dropped, or when `close` is called.
     ///
     /// If there are no messages in the channel's buffer, but the channel has
     /// not yet been closed, this method will sleep until a message is sent or
-    /// the channel is closed.  Note that if [`close`] is called, but there are
-    /// still outstanding [`Permits`] from before it was closed, the channel is
+    /// the channel is closed.  Note that if `close` is called, but there are
+    /// still outstanding `Permits` from before it was closed, the channel is
     /// not considered closed by `recv` until the permits are released.
     pub async fn recv(&mut self) -> Option<R> {
         self.rx.recv().await
@@ -89,10 +89,10 @@ impl<S: Send + 'static, R> Channel<S, R> {
     /// Tries to receive the next value for this receiver.
     ///
     /// This method returns the [`Empty`](TryRecvError::Empty) error if the channel is currently
-    /// empty, but there are still outstanding [senders] or [permits].
+    /// empty, but there are still outstanding senders or permits.
     ///
     /// This method returns the [`Disconnected`](TryRecvError::Disconnected) error if the channel is
-    /// currently empty, and there are no outstanding [senders] or [permits].
+    /// currently empty, and there are no outstanding senders or permits.
     ///
     /// Unlike the [`poll_recv`](Self::poll_recv) method, this method will never return an
     /// [`Empty`](TryRecvError::Empty) error spuriously.

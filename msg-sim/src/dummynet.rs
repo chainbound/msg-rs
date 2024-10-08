@@ -271,13 +271,13 @@ fn get_loopback_name() -> String {
 }
 
 /// Assert that the given status is successful, otherwise return an error with the given message.
-/// The type of the error will be `io::ErrorKind::Other`.
+/// The type of the error will be [`io::ErrorKind::Other`].
 fn assert_status<E>(status: ExitStatus, error: E) -> io::Result<()>
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     if !status.success() {
-        return Err(io::Error::new(io::ErrorKind::Other, error));
+        return Err(io::Error::other(error));
     }
 
     Ok(())

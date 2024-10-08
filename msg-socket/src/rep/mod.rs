@@ -9,10 +9,9 @@ mod stats;
 pub use socket::*;
 use stats::SocketStats;
 
-const DEFAULT_BUFFER_SIZE: usize = 1024;
-
+/// Errors that can occur when using a reply socket.
 #[derive(Debug, Error)]
-pub enum PubError {
+pub enum RepError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
@@ -21,10 +20,11 @@ pub enum PubError {
     Auth(String),
     #[error("Socket closed")]
     SocketClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not connect to any valid endpoints")]
+    NoValidEndpoints,
 }
 
+/// The reply socket options.
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
@@ -82,8 +82,8 @@ impl<A: Address> Request<A> {
     }
 
     /// Responds to the request.
-    pub fn respond(self, response: Bytes) -> Result<(), PubError> {
-        self.response.send(response).map_err(|_| PubError::SocketClosed)
+    pub fn respond(self, response: Bytes) -> Result<(), RepError> {
+        self.response.send(response).map_err(|_| RepError::SocketClosed)
     }
 }
 

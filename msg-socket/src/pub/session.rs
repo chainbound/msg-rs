@@ -14,6 +14,9 @@ use tracing::{debug, error, trace, warn};
 use super::{trie::PrefixTrie, PubMessage, SocketState};
 use msg_wire::pubsub;
 
+/// A subscriber session. This struct represents a single subscriber session, which is a
+/// connection to a subscriber. This struct is responsible for handling incoming and outgoing
+/// messages, as well as managing the connection state.
 pub(super) struct SubscriberSession<Io> {
     /// The sequence number of this session.
     pub(super) seq: u32,
@@ -36,6 +39,7 @@ pub(super) struct SubscriberSession<Io> {
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
+    /// Handles outgoing messages to the socket.
     #[inline]
     fn on_outgoing(&mut self, msg: PubMessage) {
         // Check if the message matches the topic filter
@@ -50,16 +54,17 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
         }
     }
 
+    /// Handles incoming messages from the socket.
     #[inline]
     fn on_incoming(&mut self, msg: pubsub::Message) {
         // The only incoming messages we should have are control messages.
         match msg_to_control(&msg) {
             ControlMsg::Subscribe(topic) => {
-                debug!("Subscribing to topic {:?}", topic);
+                debug!("Subscribing to topic {}", topic);
                 self.topic_filter.insert(&topic)
             }
             ControlMsg::Unsubscribe(topic) => {
-                debug!("Unsubscribing from topic {:?}", topic);
+                debug!("Unsubscribing from topic {}", topic);
                 self.topic_filter.remove(&topic)
             }
             ControlMsg::Close => {
@@ -68,6 +73,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
         }
     }
 
+    /// Checks if the connection should be flushed.
     #[inline]
     fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
         if self.should_flush {
@@ -118,7 +124,10 @@ fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
             ControlMsg::Close
         }
     } else {
-        warn!("Unkown control message topic, closing session: {:?}", msg.topic());
+        warn!(
+            "Unkown control message topic, closing session: {}",
+            String::from_utf8_lossy(msg.topic())
+        );
         ControlMsg::Close
     }
 }

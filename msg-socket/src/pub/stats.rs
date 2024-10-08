@@ -8,8 +8,6 @@ pub struct SocketStats {
     bytes_tx: AtomicUsize,
     /// Total number of active request clients
     active_clients: AtomicUsize,
-    // / Total number of dropped messages due to a slow consumer
-    // dropped_messages: AtomicUsize,
 }
 
 impl SocketStats {

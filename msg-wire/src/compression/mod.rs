@@ -2,12 +2,15 @@ use bytes::Bytes;
 use std::io;
 
 mod gzip;
-mod lz4;
-mod snappy;
-mod zstd;
 pub use gzip::*;
+
+mod lz4;
 pub use lz4::*;
+
+mod snappy;
 pub use snappy::*;
+
+mod zstd;
 pub use zstd::*;
 
 /// The possible compression type used for a message.

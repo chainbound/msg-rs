@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Statistics for a reply socket. These are shared between the driver task
-/// and the socket.
+/// Statistics for a reply socket.
+/// These are shared between the driver task and the socket.
 #[derive(Debug, Default)]
 pub struct SocketStats {
     /// Total bytes sent

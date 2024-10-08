@@ -11,10 +11,13 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Invalid wire ID: {0}")]
     WireId(u8),
+    #[error("Failed to decompress message")]
+    Decompression,
 }
 
 #[derive(Debug, Clone)]
 pub struct Message {
+    /// The message header.
     header: Header,
     /// The message payload.
     payload: Bytes,

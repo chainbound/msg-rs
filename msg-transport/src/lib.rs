@@ -45,12 +45,11 @@ pub trait Transport<A: Address> {
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;
 
-    /// A pending [`Transport::Output`] for an outbound connection,
-    /// obtained when calling [`Transport::connect`].
+    /// A pending output for an outbound connection, obtained when calling [`Transport::connect`].
     type Connect: Future<Output = Result<Self::Io, Self::Error>> + Send;
 
-    /// A pending [`Transport::Output`] for an inbound connection,
-    /// obtained when calling [`Transport::poll_accept`].
+    /// A pending output for an inbound connection, obtained when calling
+    /// [`Transport::poll_accept`].
     type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
 
     /// Returns the local address this transport is bound to (if it is bound).
@@ -64,7 +63,7 @@ pub trait Transport<A: Address> {
     fn connect(&mut self, addr: A) -> Self::Connect;
 
     /// Poll for incoming connections. If an inbound connection is received, a future representing
-    /// a pending inbound connection is returned. The future will resolve to [`Transport::Output`].
+    /// a pending inbound connection is returned. The future will resolve to [`Transport::Accept`].
     fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept>;
 }
 
