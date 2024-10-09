@@ -40,7 +40,7 @@ where
     /// Connects to the target address with the default options.
     pub async fn connect(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
         let mut addrs = lookup_host(addr).await?;
-        let endpoint = addrs.next().ok_or_else(|| ReqError::NoValidEndpoints)?;
+        let endpoint = addrs.next().ok_or(ReqError::NoValidEndpoints)?;
 
         self.try_connect(endpoint).await
     }
