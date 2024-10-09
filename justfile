@@ -1,4 +1,4 @@
-default: check doc fmt
+default: check doc fmt clippy
 
 check:
     cargo check --workspace --all-features --all-targets
@@ -6,6 +6,8 @@ check:
 doc:
     cargo doc --workspace --all-features --no-deps --document-private-items
 
+clippy:
+    cargo +nightly clippy --all --all-features -- -D warnings
 
 fmt:
     cargo +nightly fmt --all -- --check

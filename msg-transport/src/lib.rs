@@ -88,7 +88,7 @@ impl<'a, T, A> Acceptor<'a, T, A> {
     }
 }
 
-impl<'a, T, A> Future for Acceptor<'a, T, A>
+impl<T, A> Future for Acceptor<'_, T, A>
 where
     T: Transport<A> + Unpin,
     A: Address,
