@@ -17,7 +17,8 @@ use crate::{AuthResult, Authenticator};
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{auth, pubsub};
 
-#[allow(clippy::type_complexity)]
+/// The driver for the publisher socket. This is responsible for accepting incoming connections,
+/// authenticating them, and spawning new [`SubscriberSession`]s for each connection.
 pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// Session ID counter.
     pub(super) id_counter: u32,

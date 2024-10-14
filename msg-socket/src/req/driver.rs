@@ -37,7 +37,6 @@ type ConnectionCtl<Io, Addr> = ConnectionState<Framed<Io, reqrep::Codec>, Expone
 /// the the socket forward.
 pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
-    #[allow(unused)]
     pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
     pub(crate) socket_state: Arc<SocketState>,
@@ -139,6 +138,7 @@ where
     fn on_message(&mut self, msg: reqrep::Message) {
         if let Some(pending) = self.pending_requests.remove(&msg.id()) {
             let rtt = pending.start.elapsed().as_micros() as usize;
+
             let size = msg.size();
             let compression_type = msg.header().compression_type();
             let mut payload = msg.into_payload();
@@ -148,9 +148,7 @@ where
                 Ok(decompressed) => payload = decompressed,
                 Err(e) => {
                     error!(err = ?e, "Failed to decompress response payload");
-                    let _ = pending.sender.send(Err(ReqError::Wire(reqrep::Error::Io(
-                        io::Error::new(io::ErrorKind::Other, "Failed to decompress response"),
-                    ))));
+                    let _ = pending.sender.send(Err(ReqError::Wire(reqrep::Error::Decompression)));
                     return;
                 }
             }
@@ -169,6 +167,7 @@ where
             Command::Send { mut message, response } => {
                 let start = std::time::Instant::now();
 
+                // Compress the message if it's larger than the minimum size
                 let len_before = message.payload().len();
                 if len_before > self.options.min_compress_size {
                     if let Some(ref compressor) = self.compressor {
@@ -193,8 +192,11 @@ where
         }
     }
 
+    /// Check for request timeouts and notify the sender if any requests have timed out.
+    /// This is done periodically by the driver.
     fn check_timeouts(&mut self) {
         let now = Instant::now();
+
         let timed_out_ids = self
             .pending_requests
             .iter()
@@ -214,6 +216,7 @@ where
         }
     }
 
+    /// Check if the connection should be flushed.
     #[inline]
     fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
         if self.should_flush {
@@ -233,6 +236,8 @@ where
         }
     }
 
+    /// Reset the connection state to inactive, so that it will be re-tried.
+    /// This is done when the connection is closed or an error occurs.
     #[inline]
     fn reset_connection(&mut self) {
         self.conn_state = ConnectionState::Inactive {
@@ -316,10 +321,7 @@ where
                 }
                 Poll::Ready(Some(Err(err))) => {
                     if let reqrep::Error::Io(e) = err {
-                        error!(err = ?e, "Socket error");
-                        if e.kind() == std::io::ErrorKind::Other {
-                            error!(err = ?e, "Other error");
-                        }
+                        error!(err = ?e, "Socket wire error");
                     }
 
                     // set the connection to inactive, so that it will be re-tried

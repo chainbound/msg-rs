@@ -2,24 +2,31 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use msg_transport::Address;
+use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
+
+use msg_transport::Address;
 
 #[path = "pub/mod.rs"]
 mod pubs;
+pub use pubs::{PubError, PubOptions, PubSocket};
+
 mod rep;
+pub use rep::*;
+
 mod req;
+pub use req::*;
+
 mod sub;
+pub use sub::*;
 
 mod connection;
 pub use connection::*;
 
-use bytes::Bytes;
-pub use pubs::{PubError, PubOptions, PubSocket};
-pub use rep::*;
-pub use req::*;
-pub use sub::*;
+/// The default buffer size for a socket.
+const DEFAULT_BUFFER_SIZE: usize = 1024;
 
+/// A request Identifier.
 pub struct RequestId(u32);
 
 impl RequestId {
@@ -36,10 +43,12 @@ impl RequestId {
     }
 }
 
+/// An interface for authenticating clients, given their ID.
 pub trait Authenticator: Send + Sync + Unpin + 'static {
     fn authenticate(&self, id: &Bytes) -> bool;
 }
 
+/// The result of an authentication attempt.
 pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite, A: Address> {
     id: Bytes,
     addr: A,

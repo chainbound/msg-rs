@@ -1,18 +1,27 @@
-use bytes::Bytes;
 use std::io;
+
+use bytes::Bytes;
 use thiserror::Error;
 
 mod driver;
+
+mod session;
+
+mod socket;
+pub use socket::*;
+
+mod stats;
+use stats::SocketStats;
+
+mod trie;
+
 use msg_wire::{
     compression::{CompressionType, Compressor},
     pubsub,
 };
-mod session;
-mod socket;
-mod stats;
-mod trie;
-pub use socket::*;
-use stats::SocketStats;
+
+/// The default buffer size for the socket.
+const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
 pub enum PubError {
@@ -28,10 +37,8 @@ pub enum PubError {
     TopicExists,
     #[error("Unknown topic: {0}")]
     UnknownTopic(String),
-    #[error("Topic closed")]
-    TopicClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not connect to any valid endpoints")]
+    NoValidEndpoints,
 }
 
 #[derive(Debug)]
@@ -55,7 +62,7 @@ impl Default for PubOptions {
     fn default() -> Self {
         Self {
             max_clients: None,
-            session_buffer_size: 1024,
+            session_buffer_size: DEFAULT_BUFFER_SIZE,
             flush_interval: Some(std::time::Duration::from_micros(50)),
             backpressure_boundary: 8192,
             min_compress_size: 8192,

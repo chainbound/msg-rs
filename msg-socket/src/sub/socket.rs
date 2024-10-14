@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::PathBuf,
     pin::Pin,
@@ -23,6 +22,7 @@ use super::{
     DEFAULT_BUFFER_SIZE,
 };
 
+/// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
 pub struct SubSocket<T: Transport<A>, A: Address> {
     /// Command channel to the socket driver.
     to_driver: mpsc::Sender<Command<A>>,
@@ -46,10 +46,7 @@ where
     /// Connects to the given endpoint asynchronously.
     pub async fn connect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
         let mut addrs = lookup_host(endpoint).await?;
-        let mut endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "could not find any valid address",
-        )))?;
+        let mut endpoint = addrs.next().ok_or(SubError::NoValidEndpoints)?;
 
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
@@ -64,12 +61,7 @@ where
     /// Attempts to connect to the given endpoint immediately.
     pub fn try_connect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         let addr = endpoint.into();
-        let mut endpoint: SocketAddr = addr.parse().map_err(|_| {
-            SubError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            ))
-        })?;
+        let mut endpoint: SocketAddr = addr.parse().map_err(|_| SubError::NoValidEndpoints)?;
 
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
@@ -84,10 +76,7 @@ where
     /// Disconnects from the given endpoint asynchronously.
     pub async fn disconnect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
         let mut addrs = lookup_host(endpoint).await?;
-        let endpoint = addrs.next().ok_or(SubError::Io(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "could not find any valid address",
-        )))?;
+        let endpoint = addrs.next().ok_or(SubError::NoValidEndpoints)?;
 
         self.disconnect_inner(endpoint).await
     }
@@ -95,12 +84,7 @@ where
     /// Attempts to disconnect from the given endpoint immediately.
     pub fn try_disconnect(&mut self, endpoint: impl Into<String>) -> Result<(), SubError> {
         let endpoint = endpoint.into();
-        let endpoint: SocketAddr = endpoint.parse().map_err(|_| {
-            SubError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not find any valid address",
-            ))
-        })?;
+        let endpoint: SocketAddr = endpoint.parse().map_err(|_| SubError::NoValidEndpoints)?;
 
         self.try_disconnect_inner(endpoint)
     }
@@ -136,11 +120,12 @@ where
     T: Transport<A> + Send + Sync + Unpin + 'static,
     A: Address,
 {
-    #[allow(clippy::new_without_default)]
+    /// Creates a new subscriber socket with the default [`SubOptions`].
     pub fn new(transport: T) -> Self {
         Self::with_options(transport, SubOptions::default())
     }
 
+    /// Creates a new subscriber socket with the given transport and options.
     pub fn with_options(transport: T, options: SubOptions) -> Self {
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
         let (to_socket, from_driver) = mpsc::channel(options.ingress_buffer_size);
@@ -208,7 +193,9 @@ where
         self.ensure_active_driver();
 
         let topic = topic.into();
-        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+        if topic.starts_with("MSG") {
+            return Err(SubError::ReservedTopic);
+        }
 
         self.send_command(Command::Subscribe { topic }).await?;
 
@@ -220,7 +207,9 @@ where
         self.ensure_active_driver();
 
         let topic = topic.into();
-        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+        if topic.starts_with("MSG") {
+            return Err(SubError::ReservedTopic);
+        }
 
         self.try_send_command(Command::Subscribe { topic })?;
 
@@ -232,7 +221,9 @@ where
         self.ensure_active_driver();
 
         let topic = topic.into();
-        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+        if topic.starts_with("MSG") {
+            return Err(SubError::ReservedTopic);
+        }
 
         self.send_command(Command::Unsubscribe { topic }).await?;
 
@@ -244,7 +235,9 @@ where
         self.ensure_active_driver();
 
         let topic = topic.into();
-        assert!(!topic.starts_with("MSG"), "MSG is a reserved topic");
+        if topic.starts_with("MSG") {
+            return Err(SubError::ReservedTopic);
+        }
 
         self.try_send_command(Command::Unsubscribe { topic })?;
 

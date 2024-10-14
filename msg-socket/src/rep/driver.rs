@@ -17,7 +17,7 @@ use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{rep::SocketState, AuthResult, Authenticator, PubError, RepOptions, Request};
+use crate::{rep::SocketState, AuthResult, Authenticator, RepOptions, Request};
 
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{
@@ -25,6 +25,8 @@ use msg_wire::{
     compression::{try_decompress_payload, Compressor},
     reqrep,
 };
+
+use super::RepError;
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_requests: FuturesUnordered<PendingRequest>,
@@ -57,7 +59,7 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
+    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, RepError>>,
 }
 
 impl<T, A> Future for RepDriver<T, A>
@@ -65,7 +67,7 @@ where
     T: Transport<A> + Unpin + 'static,
     A: Address,
 {
-    type Output = Result<(), PubError>;
+    type Output = Result<(), RepError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -198,12 +200,13 @@ where
                 let mut conn = Framed::new(io, auth::Codec::new_server());
 
                 debug!("Waiting for auth");
+
                 // Wait for the response
                 let auth = conn
                     .next()
                     .await
-                    .ok_or(PubError::SocketClosed)?
-                    .map_err(|e| PubError::Auth(e.to_string()))?;
+                    .ok_or(RepError::SocketClosed)?
+                    .map_err(|e| RepError::Auth(e.to_string()))?;
 
                 debug!("Auth received: {:?}", auth);
 
@@ -211,7 +214,7 @@ where
                     conn.send(auth::Message::Reject).await?;
                     conn.flush().await?;
                     conn.close().await?;
-                    return Err(PubError::Auth("Invalid auth message".to_string()));
+                    return Err(RepError::Auth("Invalid auth message".to_string()));
                 };
 
                 // If authentication fails, send a reject message and close the connection
@@ -219,7 +222,7 @@ where
                     conn.send(auth::Message::Reject).await?;
                     conn.flush().await?;
                     conn.close().await?;
-                    return Err(PubError::Auth("Authentication failed".to_string()));
+                    return Err(RepError::Auth("Authentication failed".to_string()));
                 }
 
                 // Send ack
@@ -248,7 +251,7 @@ where
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
-    type Item = Result<Request<A>, PubError>;
+    type Item = Result<Request<A>, RepError>;
 
     /// Advances the state of the peer.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

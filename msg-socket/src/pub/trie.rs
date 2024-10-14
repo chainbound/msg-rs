@@ -2,6 +2,7 @@ use std::collections::hash_map::Entry;
 
 use rustc_hash::FxHashMap;
 
+/// A node in the prefix trie.
 struct Node {
     children: FxHashMap<String, Node>,
     catch_all: bool,
@@ -14,6 +15,11 @@ impl Node {
     }
 }
 
+/// A prefix trie for matching topics.
+///
+/// This trie is used to match topics in a NATS-like system. It supports wildcards:
+/// - `*` matches a single token.
+/// - `>` matches one or more tokens.
 pub(super) struct PrefixTrie {
     root: Node,
 }

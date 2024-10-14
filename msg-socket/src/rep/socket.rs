@@ -1,5 +1,4 @@
 use std::{
-    io,
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
@@ -17,8 +16,8 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    rep::{driver::RepDriver, SocketState, SocketStats, DEFAULT_BUFFER_SIZE},
-    Authenticator, PubError, RepOptions, Request,
+    rep::{driver::RepDriver, RepError, SocketState, SocketStats},
+    Authenticator, RepOptions, Request, DEFAULT_BUFFER_SIZE,
 };
 
 use msg_transport::{Address, Transport};
@@ -48,7 +47,8 @@ impl<T> RepSocket<T, SocketAddr>
 where
     T: Transport<SocketAddr> + Send + Unpin + 'static,
 {
-    pub async fn bind(&mut self, addr: impl ToSocketAddrs) -> Result<(), PubError> {
+    /// Binds the socket to the given socket address.
+    pub async fn bind(&mut self, addr: impl ToSocketAddrs) -> Result<(), RepError> {
         let addrs = lookup_host(addr).await?;
         self.try_bind(addrs.collect()).await
     }
@@ -58,7 +58,8 @@ impl<T> RepSocket<T, PathBuf>
 where
     T: Transport<PathBuf> + Send + Unpin + 'static,
 {
-    pub async fn bind(&mut self, path: impl Into<PathBuf>) -> Result<(), PubError> {
+    /// Binds the socket to the given path.
+    pub async fn bind(&mut self, path: impl Into<PathBuf>) -> Result<(), RepError> {
         let addr = path.into().clone();
         self.try_bind(vec![addr]).await
     }
@@ -100,7 +101,7 @@ where
     }
 
     /// Binds the socket to the given address. This spawns the socket driver task.
-    pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), PubError> {
+    pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), RepError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let mut transport = self.transport.take().expect("Transport has been moved already");
@@ -116,10 +117,7 @@ where
         }
 
         let Some(local_addr) = transport.local_addr() else {
-            return Err(PubError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "could not bind to any valid address",
-            )));
+            return Err(RepError::NoValidEndpoints);
         };
 
         debug!("Listening on {:?}", local_addr);
@@ -144,6 +142,7 @@ where
         Ok(())
     }
 
+    /// Returns the statistics for this socket.
     pub fn stats(&self) -> &SocketStats {
         &self.state.stats
     }

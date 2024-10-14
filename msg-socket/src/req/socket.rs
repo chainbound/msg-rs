@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
-use std::{io, marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{lookup_host, ToSocketAddrs},
     sync::{mpsc, oneshot},
@@ -40,9 +40,7 @@ where
     /// Connects to the target address with the default options.
     pub async fn connect(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
         let mut addrs = lookup_host(addr).await?;
-        let endpoint = addrs.next().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "could not find any valid address")
-        })?;
+        let endpoint = addrs.next().ok_or(ReqError::NoValidEndpoints)?;
 
         self.try_connect(endpoint).await
     }

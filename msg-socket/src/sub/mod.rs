@@ -19,13 +19,13 @@ mod stream;
 use msg_transport::Address;
 use msg_wire::pubsub;
 
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+use crate::DEFAULT_BUFFER_SIZE;
 
 #[derive(Debug, Error)]
 pub enum SubError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
-    #[error("Authentication error: {0:?}")]
+    #[error("Authentication error: {0}")]
     Auth(String),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] pubsub::Error),
@@ -33,8 +33,10 @@ pub enum SubError {
     SocketClosed,
     #[error("Command channel full")]
     ChannelFull,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not find any valid endpoints")]
+    NoValidEndpoints,
+    #[error("Reserved topic 'MSG' cannot be used")]
+    ReservedTopic,
 }
 
 #[derive(Debug)]

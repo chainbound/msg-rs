@@ -16,21 +16,21 @@ msg-transport.workspace = true
 msg-wire.workspace = true
 
 tokio.workspace = true
-bytes.workspace = true
 tokio-stream.workspace = true
 
 [dev-dependencies]
-# benchmarking
+bytes.workspace = true
 tracing-subscriber = "0.3"
-# Add jemalloc for extra perf on Linux systems.
-[target.'cfg(all(not(windows), not(target_env = "musl")))'.dependencies]
-jemallocator = { version = "0.5.0", features = ["profiling"] }
 divan = "0.1"
 futures.workspace = true
 tracing.workspace = true
 rand.workspace = true
 criterion.workspace = true
 pprof.workspace = true
+
+# Add jemalloc for extra perf on Linux systems.
+[target.'cfg(all(not(windows), not(target_env = "musl")))'.dependencies]
+jemallocator = { version = "0.5.0", features = ["profiling"] }
 
 [[bench]]
 name = "reqrep"
