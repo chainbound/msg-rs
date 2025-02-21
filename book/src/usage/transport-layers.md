@@ -32,7 +32,7 @@ be lost or corrupted.
 In MSG, here is how you can setup any socket type with the TCP transport:
 
 ```rust
-use msg::{RepSocket, ReqSocket, Tcp};
+use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
