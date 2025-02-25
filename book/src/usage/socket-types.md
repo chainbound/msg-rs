@@ -20,7 +20,7 @@ Example:
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqSocket, Tcp};
+use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -59,7 +59,7 @@ Example:
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{PubSocket, SubSocket, Tcp};
+use msg::{PubSocket, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
