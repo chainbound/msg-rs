@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html lang="en" class="light" dir="ltr">
+<html lang="en" class="light sidebar-visible" dir="ltr">
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
@@ -8,7 +8,7 @@
 
 
         <!-- Custom HTML head -->
-        
+
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
@@ -31,15 +31,17 @@
 
         <!-- Custom theme stylesheets -->
 
-    </head>
-    <body class="sidebar-visible no-js">
-    <div id="body-container">
+
         <!-- Provide site root to javascript -->
         <script>
             var path_to_root = "";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
-
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
@@ -61,19 +63,16 @@
             var theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
-            var html = document.querySelector('html');
+            const html = document.documentElement;
             html.classList.remove('light')
             html.classList.add(theme);
-            var body = document.querySelector('body');
-            body.classList.remove('no-js')
-            body.classList.add('js');
+            html.classList.add("js");
         </script>
 
         <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var body = document.querySelector('body');
             var sidebar = null;
             var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
@@ -83,45 +82,25 @@
                 sidebar = 'hidden';
             }
             sidebar_toggle.checked = sidebar === 'visible';
-            body.classList.remove('sidebar-visible');
-            body.classList.add("sidebar-" + sidebar);
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
         </script>
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
-            <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="intro.html"><strong aria-hidden="true">1.</strong> Introduction</a></li><li class="chapter-item expanded "><a href="usage/intro.html"><strong aria-hidden="true">2.</strong> Usage</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="usage/getting-started.html"><strong aria-hidden="true">2.1.</strong> Getting started</a></li><li class="chapter-item expanded "><a href="usage/socket-types.html"><strong aria-hidden="true">2.2.</strong> Socket Types</a></li><li class="chapter-item expanded "><a href="usage/transport-layers.html"><strong aria-hidden="true">2.3.</strong> Transport Layers</a></li><li class="chapter-item expanded "><a href="usage/authentication.html"><strong aria-hidden="true">2.4.</strong> Authentication</a></li><li class="chapter-item expanded "><a href="usage/compression.html"><strong aria-hidden="true">2.5.</strong> Compression</a></li><li class="chapter-item expanded "><a href="usage/encryption.html"><strong aria-hidden="true">2.6.</strong> Encryption</a></li><li class="chapter-item expanded "><a href="usage/logging.html"><strong aria-hidden="true">2.7.</strong> Logging</a></li><li class="chapter-item expanded "><a href="usage/faq.html"><strong aria-hidden="true">2.8.</strong> FAQ</a></li></ol></li><li class="chapter-item expanded "><a href="contributing.html"><strong aria-hidden="true">3.</strong> Contributing</a></li></ol>
-            </div>
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
             </div>
         </nav>
 
-        <!-- Track and set sidebar scroll position -->
-        <script>
-            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
-            sidebarScrollbox.addEventListener('click', function(e) {
-                if (e.target.tagName === 'A') {
-                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
-                }
-            }, { passive: true });
-            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
-            sessionStorage.removeItem('sidebar-scroll');
-            if (sidebarScrollTop) {
-                // preserve sidebar scroll position when navigating via links within sidebar
-                sidebarScrollbox.scrollTop = sidebarScrollTop;
-            } else {
-                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
-                var activeSection = document.querySelector('#sidebar .active');
-                if (activeSection) {
-                    activeSection.scrollIntoView({ block: 'center' });
-                }
-            }
-        </script>
-
         <div id="page-wrapper" class="page-wrapper">
 
             <div class="page">
-                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar-hover-placeholder"></div>
                 <div id="menu-bar" class="menu-bar sticky">
                     <div class="left-buttons">
                         <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
@@ -257,7 +236,7 @@ Until then, we recommend using the git dependency as shown above.</p>
 <pre><pre class="playground"><code class="language-rust">use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqSocket, Tcp};
+use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -290,7 +269,7 @@ publishers.</p>
 <pre><pre class="playground"><code class="language-rust">use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{PubSocket, SubSocket, Tcp};
+use msg::{PubSocket, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -343,7 +322,7 @@ the quality of the connection cannot be guaranteed and a significant portion of 
 be lost or corrupted.</p>
 <h3 id="how-to-use-tcp"><a class="header" href="#how-to-use-tcp">How to use TCP</a></h3>
 <p>In MSG, here is how you can setup any socket type with the TCP transport:</p>
-<pre><pre class="playground"><code class="language-rust">use msg::{RepSocket, ReqSocket, Tcp};
+<pre><pre class="playground"><code class="language-rust">use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -455,7 +434,7 @@ is established. The <code>id</code> parameter is the identity of the connecting 
 <p>Here is an example of how you can add an authenticator to a
 client-server application:</p>
 <pre><pre class="playground"><code class="language-rust">use msg::{
-    tcp::{self, Tcp},
+    tcp::{self, tcp::Tcp},
     Authenticator, ReqSocket, RepSocket,
 };
 
@@ -505,7 +484,7 @@ It can also help reduce the amount of bandwidth used by your application.</p>
 <hr />
 <h2 id="requestresponse"><a class="header" href="#requestresponse">Request/Response</a></h2>
 <p>You can also find a complete example in <a href="https://github.com/chainboudn/msg-rs/tree/main/msg/examples">msg/examples/reqrep_compression.rs</a>.</p>
-<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, ReqSocket, RepSocket, Tcp};
+<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, ReqSocket, RepSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -529,7 +508,7 @@ async fn main() {
 }</code></pre></pre>
 <h2 id="publishsubscribe-1"><a class="header" href="#publishsubscribe-1">Publish/Subscribe</a></h2>
 <p>You can also find a complete example in <a href="https://github.com/chainboudn/msg-rs/tree/main/msg/examples">msg/examples/pubsub_compression.rs</a>.</p>
-<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp};
+<pre><pre class="playground"><code class="language-rust">use msg::{compression::GzipCompressor, PubSocket, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
