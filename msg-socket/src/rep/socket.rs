@@ -151,6 +151,11 @@ where
     pub fn local_addr(&self) -> Option<&A> {
         self.local_addr.as_ref()
     }
+
+    /// Returns the next request from the socket using an unpinned interface.
+    pub fn poll_next_unpin(&mut self, cx: &mut Context<'_>) -> Poll<Option<Request<A>>> {
+        Pin::new(self).poll_next(cx)
+    }
 }
 
 impl<T: Transport<A> + Unpin, A: Address> Stream for RepSocket<T, A> {
