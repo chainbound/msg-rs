@@ -18,8 +18,8 @@ use msg_common::JoinMap;
 use msg_transport::{Address, Transport};
 
 use super::{
-    Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
-    DEFAULT_BUFFER_SIZE,
+    Command, PubMessage, SocketState, SocketStats, SocketWideStats, SubDriver, SubError,
+    SubOptions, DEFAULT_BUFFER_SIZE,
 };
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
@@ -271,6 +271,10 @@ where
 
     pub fn stats(&self) -> &SocketStats<A> {
         &self.state.stats
+    }
+
+    pub fn socket_stats(&self) -> &SocketWideStats {
+        &self.state.socket_stats
     }
 }
 

@@ -84,3 +84,42 @@ impl SessionStats {
         self.latency.load(Ordering::Relaxed)
     }
 }
+
+#[derive(Debug, Default)]
+pub struct SocketWideStats {
+    /// Total number of messages dropped due to full ingress buffer between the driver and the
+    /// socket frontend.
+    dropped_messages_total: AtomicUsize,
+    /// Total number of messages successfully received by the socket frontend from the driver.
+    messages_received_total: AtomicUsize,
+    /// Total number of commands received from the socket frontend by the driver (eg. Subscribe,
+    /// Connect)
+    commands_received_total: AtomicUsize,
+}
+
+impl SocketWideStats {
+    /// Returns the total number of messages dropped due to the ingress buffer being full.
+    pub fn dropped_messages_total(&self) -> usize {
+        self.dropped_messages_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of messages successfully received by the socket frontend.
+    pub fn messages_received_total(&self) -> usize {
+        self.messages_received_total.load(Ordering::Relaxed)
+    }
+
+    /// Returns the total number of commands processed by the socket driver.
+    pub fn commands_received_total(&self) -> usize {
+        self.commands_received_total.load(Ordering::Relaxed)
+    }
+
+    /// Increments the dropped messages counter. (Used by SubDriver)
+    pub(crate) fn increment_dropped_messages(&self) {
+        self.dropped_messages_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increments the received messages counter. (Used by SubDriver)
+    pub(crate) fn increment_messages_received(&self) {
+        self.messages_received_total.fetch_add(1, Ordering::Relaxed);
+    }
+}

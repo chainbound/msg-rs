@@ -12,7 +12,7 @@ mod socket;
 pub use socket::*;
 
 mod stats;
-use stats::SocketStats;
+use stats::{SocketStats, SocketWideStats};
 
 mod stream;
 
@@ -159,11 +159,12 @@ impl<A: Address> PubMessage<A> {
 #[derive(Debug, Default)]
 pub(crate) struct SocketState<A: Address> {
     pub(crate) stats: SocketStats<A>,
+    pub(crate) socket_stats: SocketWideStats,
 }
 
 impl<A: Address> SocketState<A> {
     pub fn new() -> Self {
-        Self { stats: SocketStats::new() }
+        Self { stats: SocketStats::new(), socket_stats: SocketWideStats::default() }
     }
 }
 

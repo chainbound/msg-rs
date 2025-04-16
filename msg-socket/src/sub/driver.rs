@@ -350,15 +350,28 @@ where
                                 }
                             };
 
-                            let msg = PubMessage::new(addr.clone(), msg.topic, msg.payload);
+                            let msg_to_send = PubMessage::new(addr.clone(), msg.topic, msg.payload);
 
-                            debug!(source = ?msg.source, ?msg, "New message");
+                            debug!(source = ?msg_to_send.source, ?msg_to_send, "New message");
                             // TODO: queuing
-                            if let Err(TrySendError::Full(msg)) = self.to_socket.try_send(msg) {
-                                error!(
-                                    topic = msg.topic,
-                                    "Slow subscriber socket, dropping message"
-                                );
+                            match self.to_socket.try_send(msg_to_send) {
+                                Ok(_) => {
+                                    // Successfully sent to socket frontend
+                                    self.state.socket_stats.increment_messages_received();
+                                }
+                                Err(TrySendError::Full(msg_back)) => {
+                                    // Failed due to full buffer
+                                    self.state.socket_stats.increment_dropped_messages();
+                                    error!(
+                                        topic = msg_back.topic,
+                                        "Slow subscriber socket, dropping message"
+                                    );
+                                }
+                                Err(TrySendError::Closed(_)) => {
+                                    error!("SubSocket frontend channel closed unexpectedly while driver is active.");
+                                    // Consider shutting down or marking as inactive?
+                                    // For now, just log. No counter increment.
+                                }
                             }
 
                             progress = true;
