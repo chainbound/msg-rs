@@ -7,6 +7,8 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 use msg_transport::Address;
 
+pub mod stats;
+
 #[path = "pub/mod.rs"]
 mod pubs;
 pub use pubs::{PubError, PubOptions, PubSocket};
