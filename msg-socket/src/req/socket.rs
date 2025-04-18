@@ -9,9 +9,9 @@ use tokio::{
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
-use super::{Command, ReqDriver, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
+use super::{Command, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
 use crate::{
-    req::{stats::SocketStats, SocketState},
+    req::{driver::ReqDriver, stats::ReqStats, SocketState},
     ConnectionState, ExponentialBackoff, ReqMessage,
 };
 
@@ -82,8 +82,8 @@ where
         self
     }
 
-    pub fn stats(&self) -> &SocketStats {
-        &self.state.stats
+    pub fn stats(&self) -> &ReqStats {
+        &self.state.stats.specific
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

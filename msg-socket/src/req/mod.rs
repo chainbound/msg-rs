@@ -11,10 +11,10 @@ use msg_wire::{
 mod driver;
 mod socket;
 mod stats;
-use driver::*;
 pub use socket::*;
 
-use self::stats::SocketStats;
+use crate::stats::SocketStats;
+use stats::ReqStats;
 
 /// The default buffer size for the socket.
 const DEFAULT_BUFFER_SIZE: usize = 1024;
@@ -182,5 +182,5 @@ impl ReqMessage {
 /// The request socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+    pub(crate) stats: SocketStats<ReqStats>,
 }
