@@ -6,8 +6,9 @@ use tokio::sync::oneshot;
 mod driver;
 mod socket;
 mod stats;
+use crate::stats::SocketStats;
 pub use socket::*;
-use stats::SocketStats;
+use stats::RepStats;
 
 /// Errors that can occur when using a reply socket.
 #[derive(Debug, Error)]
@@ -55,7 +56,7 @@ impl RepOptions {
 /// The request socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+    pub(crate) stats: SocketStats<RepStats>,
 }
 
 /// A request received by the socket.

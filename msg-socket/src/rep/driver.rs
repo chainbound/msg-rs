@@ -89,7 +89,7 @@ where
                             }
                         }
 
-                        this.state.stats.increment_rx(size);
+                        this.state.stats.specific.increment_rx(size);
                         let _ = this.to_socket.try_send(request);
                     }
                     Some(Err(e)) => {
@@ -97,7 +97,7 @@ where
                     }
                     None => {
                         warn!("Peer {:?} disconnected", peer);
-                        this.state.stats.decrement_active_clients();
+                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
@@ -125,7 +125,7 @@ where
                     }
                     Err(e) => {
                         error!(err = ?e, "Error authenticating client");
-                        this.state.stats.decrement_active_clients();
+                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
@@ -137,7 +137,7 @@ where
                     Ok(io) => {
                         if let Err(e) = this.on_incoming(io) {
                             error!(err = ?e, "Error accepting incoming connection");
-                            this.state.stats.decrement_active_clients();
+                            this.state.stats.specific.decrement_active_clients();
                         }
                     }
                     Err(e) => {
@@ -145,7 +145,7 @@ where
 
                         // Active clients have already been incremented in the initial call to
                         // `poll_accept`, so we need to decrement them here.
-                        this.state.stats.decrement_active_clients();
+                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
@@ -156,7 +156,7 @@ where
             // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 if let Some(max) = this.options.max_clients {
-                    if this.state.stats.active_clients() >= max {
+                    if this.state.stats.specific.active_clients() >= max {
                         warn!(
                             "Max connections reached ({}), rejecting new incoming connection",
                             max
@@ -168,7 +168,7 @@ where
 
                 // Increment the active clients counter. If the authentication fails, this counter
                 // will be decremented.
-                this.state.stats.increment_active_clients();
+                this.state.stats.specific.increment_active_clients();
 
                 this.conn_tasks.push(accept);
 
@@ -271,14 +271,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     let msg_len = msg.size();
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.state.stats.increment_tx(msg_len);
+                            this.state.stats.specific.increment_tx(msg_len);
                             this.should_flush = true;
 
                             // We might be able to send more queued messages
                             continue;
                         }
                         Err(e) => {
-                            this.state.stats.increment_failed_requests();
+                            this.state.stats.specific.increment_failed_requests();
                             error!(err = ?e, "Failed to send message to socket");
                             // End this stream as we can't send any more messages
                             return Poll::Ready(None);
