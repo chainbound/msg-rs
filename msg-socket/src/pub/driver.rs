@@ -79,7 +79,7 @@ where
                     }
                     Err(e) => {
                         error!(err = ?e, "Error authenticating client");
-                        this.state.stats.decrement_active_clients();
+                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
@@ -93,7 +93,7 @@ where
                     Ok(io) => {
                         if let Err(e) = this.on_incoming(io) {
                             error!(err = ?e, "Error accepting incoming connection");
-                            this.state.stats.decrement_active_clients();
+                            this.state.stats.specific.decrement_active_clients();
                         }
                     }
                     Err(e) => {
@@ -101,7 +101,7 @@ where
 
                         // Active clients have already been incremented in the initial call to
                         // `poll_accept`, so we need to decrement them here.
-                        this.state.stats.decrement_active_clients();
+                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
@@ -112,7 +112,7 @@ where
             // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 if let Some(max) = this.options.max_clients {
-                    if this.state.stats.active_clients() >= max {
+                    if this.state.stats.specific.active_clients() >= max {
                         warn!("Max connections reached ({}), rejecting incoming connection", max);
                         continue;
                     }
@@ -120,7 +120,7 @@ where
 
                 // Increment the active clients counter. If the authentication fails,
                 // this counter will be decremented.
-                this.state.stats.increment_active_clients();
+                this.state.stats.specific.increment_active_clients();
 
                 this.conn_tasks.push(accept);
 
