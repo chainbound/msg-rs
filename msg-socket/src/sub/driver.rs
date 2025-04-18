@@ -42,7 +42,7 @@ pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     pub(super) subscribed_topics: HashSet<String>,
     /// All publisher sessions for this subscriber socket, keyed by address.
     pub(super) publishers: FxHashMap<A, ConnectionState<PubChannel, ExponentialBackoff, A>>,
-    /// Socket state. This is shared with the backend task.
+    /// Socket state. This is shared with the backend task. Contains the unified stats struct.
     pub(super) state: Arc<SocketState<A>>,
 }
 
@@ -65,6 +65,9 @@ where
 
             // Then, poll the socket for new commands.
             if let Poll::Ready(Some(cmd)) = this.from_socket.poll_recv(cx) {
+                // MODIFIED: Access stats via state.stats.specific
+                this.state.stats.specific.increment_commands_received();
+                // Process the command
                 this.on_command(cmd);
 
                 continue;
@@ -214,7 +217,7 @@ where
             Command::Disconnect { endpoint } => {
                 if self.publishers.remove(&endpoint).is_some() {
                     debug!(?endpoint, "Disconnected from publisher");
-                    self.state.stats.remove(&endpoint);
+                    self.state.stats.specific.remove_session(&endpoint);
                 } else {
                     debug!(?endpoint, "Not connected to publisher");
                 };
@@ -320,7 +323,7 @@ where
         self.publishers
             .insert(addr.clone(), ConnectionState::Active { channel: publisher_channel });
 
-        self.state.stats.insert(addr, session_stats);
+        self.state.stats.specific.insert_session(addr, session_stats);
     }
 
     /// Polls all the publisher channels for new messages. On new messages, forwards them to the
@@ -351,17 +354,16 @@ where
                             };
 
                             let msg_to_send = PubMessage::new(addr.clone(), msg.topic, msg.payload);
-
                             debug!(source = ?msg_to_send.source, ?msg_to_send, "New message");
-                            // TODO: queuing
+
                             match self.to_socket.try_send(msg_to_send) {
                                 Ok(_) => {
                                     // Successfully sent to socket frontend
-                                    self.state.socket_stats.increment_messages_received();
+                                    self.state.stats.specific.increment_messages_received();
                                 }
                                 Err(TrySendError::Full(msg_back)) => {
                                     // Failed due to full buffer
-                                    self.state.socket_stats.increment_dropped_messages();
+                                    self.state.stats.specific.increment_dropped_messages();
                                     error!(
                                         topic = msg_back.topic,
                                         "Slow subscriber socket, dropping message"
