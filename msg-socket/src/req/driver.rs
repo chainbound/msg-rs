@@ -156,8 +156,8 @@ where
             let _ = pending.sender.send(Ok(payload));
 
             // Update stats
-            self.socket_state.stats.update_rtt(rtt);
-            self.socket_state.stats.increment_rx(size);
+            self.socket_state.stats.specific.update_rtt(rtt);
+            self.socket_state.stats.specific.increment_rx(size);
         }
     }
 
@@ -346,7 +346,7 @@ where
                     debug!("Sending msg {}", msg.id());
                     match channel.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.socket_state.stats.increment_tx(size);
+                            this.socket_state.stats.specific.increment_tx(size);
                             this.should_flush = true;
                         }
                         Err(e) => {

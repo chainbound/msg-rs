@@ -17,8 +17,18 @@ use tokio::{
 use msg_common::JoinMap;
 use msg_transport::{Address, Transport};
 
+// ADDED: Import the specific SubStats struct for the API
+use super::stats::SubStats;
+// Import the rest from the parent module (sub/mod.rs)
 use super::{
-    Command, PubMessage, SocketState, SocketStats, SubDriver, SubError, SubOptions,
+    // REMOVED: Old/removed stats structs
+    // Command, PubMessage, SocketState, SocketStats, SocketWideStats, SubDriver, SubError,
+    Command,
+    PubMessage,
+    SocketState,
+    SubDriver,
+    SubError,
+    SubOptions,
     DEFAULT_BUFFER_SIZE,
 };
 
@@ -33,7 +43,7 @@ pub struct SubSocket<T: Transport<A>, A: Address> {
     options: Arc<SubOptions>,
     /// The pending driver.
     driver: Option<SubDriver<T, A>>,
-    /// Socket state. This is shared with the socket frontend.
+    /// Socket state. This is shared with the socket frontend. Contains the unified stats.
     state: Arc<SocketState<A>>,
     /// Marker for the transport type.
     _marker: std::marker::PhantomData<T>,
@@ -132,7 +142,7 @@ where
 
         let options = Arc::new(options);
 
-        let state = Arc::new(SocketState::new());
+        let state = Arc::new(SocketState::default()); // SocketState uses default
 
         let mut publishers = FxHashMap::default();
         publishers.reserve(32);
@@ -269,8 +279,9 @@ where
         }
     }
 
-    pub fn stats(&self) -> &SocketStats<A> {
-        &self.state.stats
+    /// Returns the statistics specific to the subscriber socket.
+    pub fn stats(&self) -> &SubStats<A> {
+        &self.state.stats.specific
     }
 }
 

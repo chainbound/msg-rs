@@ -12,7 +12,9 @@ mod socket;
 pub use socket::*;
 
 mod stats;
-use stats::SocketStats;
+
+use crate::stats::SocketStats;
+use stats::SubStats;
 
 mod stream;
 
@@ -155,15 +157,15 @@ impl<A: Address> PubMessage<A> {
     }
 }
 
-/// The request socket state, shared between the backend task and the socket.
-#[derive(Debug, Default)]
+/// The subscriber socket state, shared between the backend task and the socket frontend.
+#[derive(Debug)] // Should derive default fine now
 pub(crate) struct SocketState<A: Address> {
-    pub(crate) stats: SocketStats<A>,
+    pub(crate) stats: SocketStats<SubStats<A>>,
 }
 
-impl<A: Address> SocketState<A> {
-    pub fn new() -> Self {
-        Self { stats: SocketStats::new() }
+impl<A: Address> Default for SocketState<A> {
+    fn default() -> Self {
+        Self { stats: SocketStats::default() }
     }
 }
 

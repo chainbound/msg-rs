@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Statistics for a request socket. These are shared between the backend task
 /// and the socket.
 #[derive(Debug, Default)]
-pub struct SocketStats {
+pub struct ReqStats {
     /// Total bytes sent
     bytes_tx: AtomicUsize,
     /// Total bytes received
@@ -14,7 +14,7 @@ pub struct SocketStats {
     rtt_idx: AtomicUsize,
 }
 
-impl SocketStats {
+impl ReqStats {
     #[inline]
     /// Atomically updates the RTT according to the CA formula:
     /// CA = (rtt + n * prev_ca) / (n + 1)

@@ -11,7 +11,8 @@ mod socket;
 pub use socket::*;
 
 mod stats;
-use stats::SocketStats;
+use crate::stats::SocketStats;
+use stats::PubStats;
 
 mod trie;
 
@@ -167,7 +168,7 @@ impl PubMessage {
 /// The publisher socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+    pub(crate) stats: SocketStats<PubStats>,
 }
 
 #[cfg(test)]

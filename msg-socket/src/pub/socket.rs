@@ -9,14 +9,14 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
-use super::{driver::PubDriver, stats::SocketStats, PubError, PubMessage, PubOptions, SocketState};
+use super::{driver::PubDriver, stats::PubStats, PubError, PubMessage, PubOptions, SocketState};
 use crate::Authenticator;
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PubSocket<T: Transport<A>, A: Address> {
     /// The reply socket options, shared with the driver.
     options: Arc<PubOptions>,
@@ -190,8 +190,8 @@ where
         Ok(())
     }
 
-    pub fn stats(&self) -> &SocketStats {
-        &self.state.stats
+    pub fn stats(&self) -> &PubStats {
+        &self.state.stats.specific
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.

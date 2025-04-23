@@ -96,7 +96,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
 
 impl<Io> Drop for SubscriberSession<Io> {
     fn drop(&mut self) {
-        self.state.stats.decrement_active_clients();
+        self.state.stats.specific.decrement_active_clients();
     }
 }
 
@@ -157,7 +157,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.state.stats.increment_tx(msg_len);
+                            this.state.stats.specific.increment_tx(msg_len);
 
                             this.should_flush = true;
                             // We might be able to send more queued messages

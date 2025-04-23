@@ -16,15 +16,16 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    rep::{driver::RepDriver, RepError, SocketState, SocketStats},
+    rep::{driver::RepDriver, RepError, SocketState},
     Authenticator, RepOptions, Request, DEFAULT_BUFFER_SIZE,
 };
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
+use super::stats::RepStats;
+
 /// A reply socket. This socket implements [`Stream`] and yields incoming [`Request`]s.
-#[derive(Default)]
 pub struct RepSocket<T: Transport<A>, A: Address> {
     /// The reply socket options, shared with the driver.
     options: Arc<RepOptions>,
@@ -143,8 +144,8 @@ where
     }
 
     /// Returns the statistics for this socket.
-    pub fn stats(&self) -> &SocketStats {
-        &self.state.stats
+    pub fn stats(&self) -> &RepStats {
+        &self.state.stats.specific
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.
