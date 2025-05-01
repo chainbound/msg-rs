@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Statistics for a reply socket. These are shared between the driver task
-/// and the socket.
+/// Statistics for a reply socket.
+/// These are shared between the driver task and the socket.
 #[derive(Debug, Default)]
-pub struct SocketStats {
+pub struct RepStats {
     /// Total bytes sent
     bytes_tx: AtomicUsize,
     /// Total bytes received
@@ -14,7 +14,7 @@ pub struct SocketStats {
     failed_requests: AtomicUsize,
 }
 
-impl SocketStats {
+impl RepStats {
     #[inline]
     pub(crate) fn increment_tx(&self, bytes: usize) {
         self.bytes_tx.fetch_add(bytes, Ordering::Relaxed);

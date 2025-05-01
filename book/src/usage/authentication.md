@@ -26,7 +26,7 @@ client-server application:
 
 ```rust
 use msg::{
-    tcp::{self, Tcp},
+    tcp::{self, tcp::Tcp},
     Authenticator, ReqSocket, RepSocket,
 };
 

@@ -1,26 +1,33 @@
+use std::{fmt, time::Duration};
+
 use bytes::Bytes;
-use core::fmt;
-use msg_wire::pubsub;
-use std::{net::SocketAddr, time::Duration};
 use thiserror::Error;
 
 mod driver;
+use driver::SubDriver;
+
 mod session;
+
 mod socket;
+pub use socket::*;
+
 mod stats;
+
+use crate::stats::SocketStats;
+use stats::SubStats;
+
 mod stream;
 
-use driver::SubDriver;
-pub use socket::*;
-use stats::SocketStats;
+use msg_transport::Address;
+use msg_wire::pubsub;
 
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+use crate::DEFAULT_BUFFER_SIZE;
 
 #[derive(Debug, Error)]
 pub enum SubError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
-    #[error("Authentication error: {0:?}")]
+    #[error("Authentication error: {0}")]
     Auth(String),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] pubsub::Error),
@@ -28,20 +35,22 @@ pub enum SubError {
     SocketClosed,
     #[error("Command channel full")]
     ChannelFull,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not find any valid endpoints")]
+    NoValidEndpoints,
+    #[error("Reserved topic 'MSG' cannot be used")]
+    ReservedTopic,
 }
 
 #[derive(Debug)]
-enum Command {
+enum Command<A: Address> {
     /// Subscribe to a topic.
     Subscribe { topic: String },
     /// Unsubscribe from a topic.
     Unsubscribe { topic: String },
     /// Connect to a publisher socket.
-    Connect { endpoint: SocketAddr },
+    Connect { endpoint: A },
     /// Disconnect from a publisher socket.
-    Disconnect { endpoint: SocketAddr },
+    Disconnect { endpoint: A },
     /// Shut down the driver.
     Shutdown,
 }
@@ -67,8 +76,9 @@ impl SubOptions {
         self
     }
 
-    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be buffered.
-    /// If the consumer cannot keep up with the incoming messages, messages will start being dropped.
+    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be
+    /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
+    /// being dropped.
     pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
         self.ingress_buffer_size = ingress_buffer_size;
         self
@@ -101,17 +111,17 @@ impl Default for SubOptions {
 /// A message received from a publisher.
 /// Includes the source, topic, and payload.
 #[derive(Clone)]
-pub struct PubMessage {
+pub struct PubMessage<A: Address> {
     /// The source address of the publisher. We need this because
     /// a subscriber can connect to multiple publishers.
-    source: SocketAddr,
+    source: A,
     /// The topic of the message.
     topic: String,
     /// The message payload.
     payload: Bytes,
 }
 
-impl fmt::Debug for PubMessage {
+impl<A: Address> fmt::Debug for PubMessage<A> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PubMessage")
             .field("source", &self.source)
@@ -121,18 +131,14 @@ impl fmt::Debug for PubMessage {
     }
 }
 
-impl PubMessage {
-    pub fn new(source: SocketAddr, topic: String, payload: Bytes) -> Self {
-        Self {
-            source,
-            topic,
-            payload,
-        }
+impl<A: Address> PubMessage<A> {
+    pub fn new(source: A, topic: String, payload: Bytes) -> Self {
+        Self { source, topic, payload }
     }
 
     #[inline]
-    pub fn source(&self) -> SocketAddr {
-        self.source
+    pub fn source(&self) -> &A {
+        &self.source
     }
 
     #[inline]
@@ -151,21 +157,29 @@ impl PubMessage {
     }
 }
 
-/// The request socket state, shared between the backend task and the socket.
-#[derive(Debug, Default)]
-pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+/// The subscriber socket state, shared between the backend task and the socket frontend.
+#[derive(Debug)] // Should derive default fine now
+pub(crate) struct SocketState<A: Address> {
+    pub(crate) stats: SocketStats<SubStats<A>>,
+}
+
+impl<A: Address> Default for SocketState<A> {
+    fn default() -> Self {
+        Self { stats: SocketStats::default() }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+
     use msg_transport::tcp::Tcp;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
     };
     use tokio_stream::StreamExt;
-    use tracing::Instrument;
+    use tracing::{info, info_span, Instrument};
 
     use super::*;
 
@@ -182,11 +196,11 @@ mod tests {
                 let b = socket.read(&mut buf).await.unwrap();
                 let read = &buf[..b];
 
-                tracing::info!("Received bytes: {:?}", read);
+                info!("Received bytes: {:?}", read);
                 socket.write_all(read).await.unwrap();
                 socket.flush().await.unwrap();
             }
-            .instrument(tracing::info_span!("listener")),
+            .instrument(info_span!("listener")),
         );
 
         addr

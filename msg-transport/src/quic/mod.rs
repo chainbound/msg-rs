@@ -1,5 +1,3 @@
-use futures::future::BoxFuture;
-use quinn::{self, Endpoint};
 use std::{
     io,
     net::{SocketAddr, UdpSocket},
@@ -7,21 +5,23 @@ use std::{
     sync::Arc,
     task::{ready, Poll},
 };
+
+use futures::future::BoxFuture;
 use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
-use tracing::error;
-
-use msg_common::async_error;
+use tracing::{debug, error};
 
 use crate::{Acceptor, Transport, TransportExt};
 
-mod config;
-mod stream;
-mod tls;
+use msg_common::async_error;
 
+mod config;
 pub use config::{Config, ConfigBuilder};
-pub use quinn::congestion;
+
+mod stream;
 use stream::QuicStream;
+
+mod tls;
 
 /// A QUIC error.
 #[derive(Debug, Error)]
@@ -36,14 +36,16 @@ pub enum Error {
     ClosedEndpoint,
 }
 
-/// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`] traits.
+/// A QUIC implementation built with [quinn] that implements the [`Transport`] and [`TransportExt`]
+/// traits.
 ///
 /// # Note on multiplexing
-/// This implementation does not yet support multiplexing. This means that each connection only supports a single
-/// bi-directional stream, which is returned as the I/O object when connecting or accepting.
+/// This implementation does not yet support multiplexing. This means that each connection only
+/// supports a single bi-directional stream, which is returned as the I/O object when connecting or
+/// accepting.
 ///
-/// In a future release, we will add support for multiplexing, which will allow multiple streams per connection based on
-/// socket requirements / semantics.
+/// In a future release, we will add support for multiplexing, which will allow multiple streams per
+/// connection based on socket requirements / semantics.
 #[derive(Debug, Default)]
 pub struct Quic {
     config: Config,
@@ -56,20 +58,16 @@ pub struct Quic {
 impl Quic {
     /// Creates a new QUIC transport with the given configuration.
     pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            endpoint: None,
-            incoming: None,
-        }
+        Self { config, endpoint: None, incoming: None }
     }
 
-    /// Creates a new [`quinn::Endpoint`] with the given configuration and a Tokio runtime. If no `addr` is given,
-    /// the endpoint will be bound to the default address.
+    /// Creates a new [`quinn::Endpoint`] with the given configuration and a Tokio runtime. If no
+    /// `addr` is given, the endpoint will be bound to the default address.
     fn new_endpoint(
         &self,
         addr: Option<SocketAddr>,
         server_config: Option<quinn::ServerConfig>,
-    ) -> Result<Endpoint, Error> {
+    ) -> Result<quinn::Endpoint, Error> {
         let socket = UdpSocket::bind(addr.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))))?;
 
         let endpoint = quinn::Endpoint::new(
@@ -84,7 +82,7 @@ impl Quic {
 }
 
 #[async_trait::async_trait]
-impl Transport for Quic {
+impl Transport<SocketAddr> for Quic {
     type Io = QuicStream;
 
     type Error = Error;
@@ -99,15 +97,15 @@ impl Transport for Quic {
 
     /// Binds a QUIC endpoint to the given address.
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
-        let endpoint = Endpoint::server(self.config.server_config.clone(), addr)?;
+        let endpoint = quinn::Endpoint::server(self.config.server_config.clone(), addr)?;
 
         self.endpoint = Some(endpoint);
 
         Ok(())
     }
 
-    /// Connects to the given address, returning a future representing a pending outbound connection.
-    /// If the endpoint is not bound, it will be bound to the default address.
+    /// Connects to the given address, returning a future representing a pending outbound
+    /// connection. If the endpoint is not bound, it will be bound to the default address.
     fn connect(&mut self, addr: SocketAddr) -> Self::Connect {
         // If we have an endpoint, use it. Otherwise, create a new one.
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
@@ -128,22 +126,17 @@ impl Transport for Quic {
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
-            let connection = endpoint
-                .connect_with(client_config, addr, "l")?
-                .await
-                .map_err(Error::from)?;
+            let connection =
+                endpoint.connect_with(client_config, addr, "l")?.await.map_err(Error::from)?;
 
-            tracing::debug!("Connected to {}, opening stream", addr);
+            debug!("Connected to {}, opening stream", addr);
 
-            // Open a bi-directional stream and return it. We'll think about multiplexing per topic later.
+            // Open a bi-directional stream and return it. We'll think about multiplexing per topic
+            // later.
             connection
                 .open_bi()
                 .await
-                .map(|(send, recv)| QuicStream {
-                    peer: addr,
-                    send,
-                    recv,
-                })
+                .map(|(send, recv)| QuicStream { peer: addr, send, recv })
                 .map_err(Error::from)
         })
     }
@@ -159,17 +152,18 @@ impl Transport for Quic {
                     Some(Ok(connecting)) => {
                         let peer = connecting.remote_address();
 
-                        tracing::debug!("New incoming connection from {}", peer);
+                        debug!("New incoming connection from {}", peer);
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
                             let connection = connecting.await.map_err(Error::from)?;
-                            tracing::debug!(
+                            debug!(
                                 "Accepted connection from {}, opening stream",
                                 connection.remote_address()
                             );
 
-                            // Accept a bi-directional stream and return it. We'll think about multiplexing per topic later.
+                            // Accept a bi-directional stream and return it. We'll think about
+                            // multiplexing per topic later.
                             connection
                                 .accept_bi()
                                 .await
@@ -185,8 +179,8 @@ impl Transport for Quic {
                     }
                 }
             } else {
-                // We need to set the incoming channel and spawn a task to accept incoming connections
-                // on the endpoint.
+                // We need to set the incoming channel and spawn a task to accept incoming
+                // connections on the endpoint.
 
                 // Check if there's an endpoint bound.
                 let Some(endpoint) = this.endpoint.clone() else {
@@ -217,8 +211,8 @@ impl Transport for Quic {
     }
 }
 
-impl TransportExt for Quic {
-    fn accept(&mut self) -> crate::Acceptor<'_, Self>
+impl TransportExt<SocketAddr> for Quic {
+    fn accept(&mut self) -> crate::Acceptor<'_, Self, SocketAddr>
     where
         Self: Sized + Unpin,
     {
@@ -235,6 +229,7 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         sync::oneshot,
     };
+    use tracing::info;
 
     use super::*;
 
@@ -245,13 +240,10 @@ mod tests {
         let config = Config::default();
 
         let mut server = Quic::new(config.clone());
-        server
-            .bind(SocketAddr::from(([127, 0, 0, 1], 0)))
-            .await
-            .unwrap();
+        server.bind(SocketAddr::from(([127, 0, 0, 1], 0))).await.unwrap();
 
         let server_addr = server.local_addr().unwrap();
-        tracing::info!("Server bound on {:?}", server_addr);
+        info!("Server bound on {:?}", server_addr);
 
         let (tx, rx) = oneshot::channel();
 
@@ -260,7 +252,7 @@ mod tests {
 
             let mut stream = server.accept().await.unwrap();
 
-            tracing::info!("Accepted connection");
+            info!("Accepted connection");
 
             let mut dst = [0u8; 5];
 
@@ -273,13 +265,13 @@ mod tests {
         let mut client = Quic::new(config);
 
         let mut stream = client.connect(server_addr).await.unwrap();
-        tracing::info!("Connected to remote");
+        info!("Connected to remote");
 
         let item = b"Hello";
         stream.write_all(item).await.unwrap();
         stream.flush().await.unwrap();
 
-        tracing::info!("Wrote to remote");
+        info!("Wrote to remote");
         let rcv = rx.await.unwrap();
 
         assert_eq!(rcv, *item);
@@ -299,7 +291,7 @@ mod tests {
 
         tokio::spawn(async move {
             let _stream = client.connect(addr).await.unwrap();
-            tracing::info!("Connected to remote");
+            info!("Connected to remote");
         });
 
         tokio::time::sleep(Duration::from_secs(17)).await;

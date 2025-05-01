@@ -1,7 +1,9 @@
-use quinn::{congestion::ControllerFactory, IdleTimeout};
 use std::{sync::Arc, time::Duration};
 
+use quinn::{congestion::ControllerFactory, IdleTimeout};
+
 use super::tls::{self_signed_certificate, unsafe_client_config};
+
 use msg_common::constants::MiB;
 
 #[derive(Debug, Clone)]
@@ -111,11 +113,7 @@ where
 
         client_config.transport_config(transport);
 
-        Config {
-            endpoint_config: quinn::EndpointConfig::default(),
-            client_config,
-            server_config,
-        }
+        Config { endpoint_config: quinn::EndpointConfig::default(), client_config, server_config }
     }
 }
 
@@ -168,10 +166,6 @@ impl Default for Config {
 
         client_config.transport_config(transport);
 
-        Self {
-            endpoint_config: quinn::EndpointConfig::default(),
-            client_config,
-            server_config,
-        }
+        Self { endpoint_config: quinn::EndpointConfig::default(), client_config, server_config }
     }
 }

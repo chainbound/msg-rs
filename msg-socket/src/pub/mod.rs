@@ -1,18 +1,28 @@
-use bytes::Bytes;
 use std::io;
+
+use bytes::Bytes;
 use thiserror::Error;
 
 mod driver;
+
+mod session;
+
+mod socket;
+pub use socket::*;
+
+mod stats;
+use crate::stats::SocketStats;
+use stats::PubStats;
+
+mod trie;
+
 use msg_wire::{
     compression::{CompressionType, Compressor},
     pubsub,
 };
-mod session;
-mod socket;
-mod stats;
-mod trie;
-pub use socket::*;
-use stats::SocketStats;
+
+/// The default buffer size for the socket.
+const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 #[derive(Debug, Error)]
 pub enum PubError {
@@ -28,10 +38,8 @@ pub enum PubError {
     TopicExists,
     #[error("Unknown topic: {0}")]
     UnknownTopic(String),
-    #[error("Topic closed")]
-    TopicClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not connect to any valid endpoints")]
+    NoValidEndpoints,
 }
 
 #[derive(Debug)]
@@ -55,7 +63,7 @@ impl Default for PubOptions {
     fn default() -> Self {
         Self {
             max_clients: None,
-            session_buffer_size: 1024,
+            session_buffer_size: DEFAULT_BUFFER_SIZE,
             flush_interval: Some(std::time::Duration::from_micros(50)),
             backpressure_boundary: 8192,
             min_compress_size: 8192,
@@ -91,8 +99,8 @@ impl PubOptions {
         self
     }
 
-    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller than
-    /// this threshold, it will not be compressed.
+    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
+    /// than this threshold, it will not be compressed.
     pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
@@ -160,7 +168,7 @@ impl PubMessage {
 /// The publisher socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+    pub(crate) stats: SocketStats<PubStats>,
 }
 
 #[cfg(test)]
@@ -170,6 +178,7 @@ mod tests {
     use futures::StreamExt;
     use msg_transport::{quic::Quic, tcp::Tcp};
     use msg_wire::compression::GzipCompressor;
+    use tracing::info;
 
     use crate::{Authenticator, SubOptions, SubSocket};
 
@@ -179,7 +188,7 @@ mod tests {
 
     impl Authenticator for Auth {
         fn authenticate(&self, id: &Bytes) -> bool {
-            tracing::info!("Auth request from: {:?}", id);
+            info!("Auth request from: {:?}", id);
             true
         }
     }
@@ -199,13 +208,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -228,13 +234,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -257,13 +260,10 @@ mod tests {
         sub_socket.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), "WORLD".into())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), "WORLD".into()).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -287,18 +287,15 @@ mod tests {
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -324,18 +321,15 @@ mod tests {
 
         let original_msg = Bytes::from("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORLD");
 
-        pub_socket
-            .publish("HELLO".to_string(), original_msg.clone())
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), original_msg.clone()).await.unwrap();
 
         let msg = sub1.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
 
         let msg = sub2.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!(original_msg, msg.payload());
     }
@@ -356,13 +350,10 @@ mod tests {
         pub_socket.bind("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -383,13 +374,10 @@ mod tests {
         pub_socket.bind("0.0.0.0:6662").await.unwrap();
         tokio::time::sleep(Duration::from_millis(2000)).await;
 
-        pub_socket
-            .publish("HELLO".to_string(), Bytes::from("WORLD"))
-            .await
-            .unwrap();
+        pub_socket.publish("HELLO".to_string(), Bytes::from("WORLD")).await.unwrap();
 
         let msg = sub_socket.next().await.unwrap();
-        tracing::info!("Received message: {:?}", msg);
+        info!("Received message: {:?}", msg);
         assert_eq!("HELLO", msg.topic());
         assert_eq!("WORLD", msg.payload());
     }
@@ -403,9 +391,9 @@ mod tests {
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
 
-        let mut sub1 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
+        let mut sub1 = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
-        let mut sub2 = SubSocket::<Tcp>::with_options(Tcp::default(), SubOptions::default());
+        let mut sub2 = SubSocket::with_options(Tcp::default(), SubOptions::default());
 
         let addr = pub_socket.local_addr().unwrap();
 

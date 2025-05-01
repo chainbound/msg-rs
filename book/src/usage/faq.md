@@ -15,4 +15,4 @@ Until then, we recommend using the git dependency as shown in the [Getting start
 
 ## What is the minimum supported Rust version (MSRV)?
 
-MSG-RS currently supports Rust 1.70 or later.
+MSG-RS currently supports Rust 1.75 or later.

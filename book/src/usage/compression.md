@@ -18,7 +18,7 @@ In MSG, compression is handled by the socket type:
 You can also find a complete example in [msg/examples/reqrep_compression.rs][examples].
 
 ```rust
-use msg::{compression::GzipCompressor, ReqSocket, RepSocket, Tcp};
+use msg::{compression::GzipCompressor, ReqSocket, RepSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -47,7 +47,7 @@ async fn main() {
 You can also find a complete example in [msg/examples/pubsub_compression.rs][examples].
 
 ```rust
-use msg::{compression::GzipCompressor, PubSocket, SubSocket, Tcp};
+use msg::{compression::GzipCompressor, PubSocket, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -77,6 +77,7 @@ with the default compression methods:
 - Gzip
 - Zstd
 - Snappy
+- LZ4
 
 If you wish to use a custom compression algorithm, this is not exposed with a public API yet.
 If you need this, please [open an issue][new-issue] on Github and we will prioritize it!

@@ -18,35 +18,41 @@
 `msg-rs` is a messaging library that was inspired by projects like [ZeroMQ](https://zeromq.org/) and [Nanomsg](https://nanomsg.org/).
 It was built because we needed a Rust-native messaging library like those above.
 
-> MSG is still in ALPHA and is not ready for production use.
-
 ## Documentation
 
-The [MSG-RS Book][book] contains detailed information on how to use the library.
+The 📖 [MSG-RS Book][book] contains detailed information on how to use the library.
 
 ## Features
 
-- [ ] Multiple socket types
+- Multiple socket types
   - [x] Request/Reply
   - [x] Publish/Subscribe
+- Pluggable transport layers
+  - [x] TCP
+  - [x] QUIC
+  - [x] IPC
+- Useful stats: latency, throughput, packet drops
+- Durable IO abstraction (built-in retries and reconnections)
+- Custom wire protocol with support for authentication and compression
+- Network simulation mode with dummynet & pfctl
+- Extensive benchmarks
+- Integration tests
+
+<!-- TODO:
+- Socket types
   - [ ] Channel
   - [ ] Push/Pull
   - [ ] Survey/Respond
-- [ ] Stats (RTT, throughput, packet drops etc.)
-- [x] Request/Reply basic stats
-- [ ] Queuing
-- [ ] Pluggable transport layer
-  - [x] TCP
+- Queuing
+- Transport layers
   - [ ] TLS
-  - [ ] IPC
   - [ ] UDP
   - [ ] Inproc
-- [x] Durable IO abstraction (built-in retries and reconnections)
-- [ ] Simulation modes with [Turmoil](https://github.com/tokio-rs/turmoil)
+-->
 
 ## MSRV
 
-The minimum supported Rust version is 1.70.
+The minimum supported Rust version is 1.75.
 
 ## Contributions & Bug Reports
 
@@ -58,6 +64,12 @@ Additionally, you can reach out to us on [Discord][discord] if you have any ques
 ## License
 
 This project is licensed under the Open Source [MIT license][mit-license].
+
+## Disclaimer
+
+<sub>
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
+</sub>
 
 <!-- Links -->
 

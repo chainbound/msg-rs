@@ -5,6 +5,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::net::{TcpListener, TcpStream};
+use tracing::debug;
 
 use msg_common::async_error;
 
@@ -22,21 +23,18 @@ pub struct Tcp {
 
 impl Tcp {
     pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            listener: None,
-        }
+        Self { config, listener: None }
     }
 }
 
-impl PeerAddress for TcpStream {
+impl PeerAddress<SocketAddr> for TcpStream {
     fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.peer_addr()
     }
 }
 
 #[async_trait::async_trait]
-impl Transport for Tcp {
+impl Transport<SocketAddr> for Tcp {
     type Io = TcpStream;
 
     type Error = io::Error;
@@ -74,7 +72,7 @@ impl Transport for Tcp {
 
         match listener.poll_accept(cx) {
             Poll::Ready(Ok((io, addr))) => {
-                tracing::debug!("Accepted connection from {}", addr);
+                debug!("Accepted connection from {}", addr);
 
                 Poll::Ready(Box::pin(async move {
                     io.set_nodelay(true)?;
@@ -88,8 +86,8 @@ impl Transport for Tcp {
 }
 
 #[async_trait::async_trait]
-impl TransportExt for Tcp {
-    fn accept(&mut self) -> Acceptor<'_, Self>
+impl TransportExt<SocketAddr> for Tcp {
+    fn accept(&mut self) -> Acceptor<'_, Self, SocketAddr>
     where
         Self: Sized + Unpin,
     {

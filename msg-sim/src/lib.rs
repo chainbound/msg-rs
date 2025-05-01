@@ -1,6 +1,10 @@
-pub use protocol::Protocol;
+#![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use std::{collections::HashMap, io, net::IpAddr, time::Duration};
+
 mod protocol;
+pub use protocol::Protocol;
 
 #[cfg(target_os = "macos")]
 pub mod dummynet;
@@ -45,11 +49,7 @@ pub struct Simulator {
 
 impl Simulator {
     pub fn new(id: u8) -> Self {
-        Self {
-            active_sims: HashMap::new(),
-            active_sim_count: 1,
-            id,
-        }
+        Self { active_sims: HashMap::new(), active_sim_count: 1, id }
     }
 
     /// Starts a new simulation on the given endpoint according to the config.
@@ -150,13 +150,7 @@ impl Simulation {
         ip_tc::spin_up_device(&veth_namespace, Some(&network_namespace))?;
         ip_tc::spin_up_device("lo", Some(&network_namespace))?;
 
-        let delay = format!(
-            "{}ms",
-            self.config
-                .latency
-                .unwrap_or(Duration::new(0, 0))
-                .as_millis()
-        );
+        let delay = format!("{}ms", self.config.latency.unwrap_or(Duration::new(0, 0)).as_millis());
 
         let loss = format!("{}%", self.config.plr.unwrap_or(0_f64));
 
@@ -225,9 +219,8 @@ impl Simulation {
             pipe = pipe.plr(plr);
         }
 
-        let mut pf = PacketFilter::new(pipe)
-            .anchor(format!("msg-sim-{}", self.id))
-            .endpoint(self.endpoint);
+        let mut pf =
+            PacketFilter::new(pipe).anchor(format!("msg-sim-{}", self.id)).endpoint(self.endpoint);
 
         if !self.config.protocols.is_empty() {
             pf = pf.protocols(self.config.protocols.clone());
@@ -248,14 +241,10 @@ impl Drop for Simulation {
         let network_namespace = self.namespace_name();
 
         // The only thing we have to do in the host to delete the veth device
-        let _ = Command::new("sudo")
-            .args(["ip", "link", "del", &veth_host])
-            .status();
+        let _ = Command::new("sudo").args(["ip", "link", "del", &veth_host]).status();
         // Deleting the network namespace where the simulated endpoint lives
         // drops everything in there
-        let _ = Command::new("sudo")
-            .args(["ip", "netns", "del", &network_namespace])
-            .status();
+        let _ = Command::new("sudo").args(["ip", "netns", "del", &network_namespace]).status();
     }
 
     #[cfg(target_os = "macos")]

@@ -1,18 +1,18 @@
 use bytes::Bytes;
-use std::net::SocketAddr;
+use msg_transport::Address;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
 mod driver;
 mod socket;
 mod stats;
+use crate::stats::SocketStats;
 pub use socket::*;
-use stats::SocketStats;
+use stats::RepStats;
 
-const DEFAULT_BUFFER_SIZE: usize = 1024;
-
+/// Errors that can occur when using a reply socket.
 #[derive(Debug, Error)]
-pub enum PubError {
+pub enum RepError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
@@ -21,10 +21,11 @@ pub enum PubError {
     Auth(String),
     #[error("Socket closed")]
     SocketClosed,
-    #[error("Transport error: {0:?}")]
-    Transport(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("Could not connect to any valid endpoints")]
+    NoValidEndpoints,
 }
 
+/// The reply socket options.
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
@@ -33,10 +34,7 @@ pub struct RepOptions {
 
 impl Default for RepOptions {
     fn default() -> Self {
-        Self {
-            max_clients: None,
-            min_compress_size: 8192,
-        }
+        Self { max_clients: None, min_compress_size: 8192 }
     }
 }
 
@@ -58,13 +56,13 @@ impl RepOptions {
 /// The request socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats,
+    pub(crate) stats: SocketStats<RepStats>,
 }
 
 /// A request received by the socket.
-pub struct Request {
+pub struct Request<A: Address> {
     /// The source address of the request.
-    source: SocketAddr,
+    source: A,
     /// The compression type used for the request payload
     compression_type: u8,
     /// The oneshot channel to respond to the request.
@@ -73,10 +71,10 @@ pub struct Request {
     msg: Bytes,
 }
 
-impl Request {
+impl<A: Address> Request<A> {
     /// Returns the source address of the request.
-    pub fn source(&self) -> SocketAddr {
-        self.source
+    pub fn source(&self) -> &A {
+        &self.source
     }
 
     /// Returns a reference to the message.
@@ -85,21 +83,20 @@ impl Request {
     }
 
     /// Responds to the request.
-    pub fn respond(self, response: Bytes) -> Result<(), PubError> {
-        self.response
-            .send(response)
-            .map_err(|_| PubError::SocketClosed)
+    pub fn respond(self, response: Bytes) -> Result<(), RepError> {
+        self.response.send(response).map_err(|_| RepError::SocketClosed)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{net::SocketAddr, time::Duration};
 
     use futures::StreamExt;
     use msg_transport::tcp::Tcp;
     use msg_wire::compression::{GzipCompressor, SnappyCompressor};
     use rand::Rng;
+    use tracing::{debug, info};
 
     use crate::{req::ReqSocket, Authenticator, ReqOptions};
 
@@ -142,7 +139,7 @@ mod tests {
             // println!("Response: {:?} {:?}", _res, req_start.elapsed());
         }
         let elapsed = start.elapsed();
-        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+        info!("{} reqs in {:?}", n_reqs, elapsed);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -186,7 +183,7 @@ mod tests {
 
         impl Authenticator for Auth {
             fn authenticate(&self, _id: &Bytes) -> bool {
-                tracing::info!("{:?}", _id);
+                info!("{:?}", _id);
                 true
             }
         }
@@ -203,12 +200,12 @@ mod tests {
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
 
-        tracing::info!("Connected to rep");
+        info!("Connected to rep");
 
         tokio::spawn(async move {
             loop {
                 let req = rep.next().await.unwrap();
-                tracing::debug!("Received request");
+                debug!("Received request");
 
                 req.respond(Bytes::from("hello")).unwrap();
             }
@@ -229,7 +226,7 @@ mod tests {
             let _res = req.request(msg).await.unwrap();
         }
         let elapsed = start.elapsed();
-        tracing::info!("{} reqs in {:?}", n_reqs, elapsed);
+        info!("{} reqs in {:?}", n_reqs, elapsed);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -1,10 +1,11 @@
-use futures::{Future, SinkExt, StreamExt};
 use std::{
     borrow::Cow,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
+
+use futures::{Future, SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::codec::Framed;
@@ -13,6 +14,9 @@ use tracing::{debug, error, trace, warn};
 use super::{trie::PrefixTrie, PubMessage, SocketState};
 use msg_wire::pubsub;
 
+/// A subscriber session. This struct represents a single subscriber session, which is a
+/// connection to a subscriber. This struct is responsible for handling incoming and outgoing
+/// messages, as well as managing the connection state.
 pub(super) struct SubscriberSession<Io> {
     /// The sequence number of this session.
     pub(super) seq: u32,
@@ -22,8 +26,7 @@ pub(super) struct SubscriberSession<Io> {
     pub(super) from_socket_bcast: BroadcastStream<PubMessage>,
     /// Messages queued to be sent on the connection
     pub(super) pending_egress: Option<pubsub::Message>,
-    /// Session request sender.
-    // to_driver: mpsc::Sender<SessionRequest>,
+    /// The socket state, shared between the backend task and the socket.
     pub(super) state: Arc<SocketState>,
     /// The framed connection.
     pub(super) conn: Framed<Io, pubsub::Codec>,
@@ -36,42 +39,41 @@ pub(super) struct SubscriberSession<Io> {
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
+    /// Handles outgoing messages to the socket.
     #[inline]
     fn on_outgoing(&mut self, msg: PubMessage) {
         // Check if the message matches the topic filter
         if self.topic_filter.contains(msg.topic()) {
-            trace!(
-                topic = msg.topic(),
-                "Message matches topic filter, adding to egress queue"
-            );
+            trace!(topic = msg.topic(), "Message matches topic filter, adding to egress queue");
 
             // Generate the wire message and increment the sequence number
             self.pending_egress = Some(msg.into_wire(self.seq));
             self.seq = self.seq.wrapping_add(1);
+        } else {
+            trace!(topic = msg.topic(), "Message does not match topic filter, discarding");
         }
     }
 
+    /// Handles incoming messages from the socket.
     #[inline]
     fn on_incoming(&mut self, msg: pubsub::Message) {
         // The only incoming messages we should have are control messages.
         match msg_to_control(&msg) {
             ControlMsg::Subscribe(topic) => {
-                debug!("Subscribing to topic {:?}", topic);
+                debug!("Subscribing to topic {}", topic);
                 self.topic_filter.insert(&topic)
             }
             ControlMsg::Unsubscribe(topic) => {
-                debug!("Unsubscribing from topic {:?}", topic);
+                debug!("Unsubscribing from topic {}", topic);
                 self.topic_filter.remove(&topic)
             }
             ControlMsg::Close => {
-                debug!(
-                    "Closing session after receiving close message {}",
-                    self.session_id
-                );
+                debug!("Closing session after receiving close message {}", self.session_id);
             }
         }
     }
 
+    /// Checks if the connection should be flushed.
     #[inline]
     fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
         if self.should_flush {
@@ -94,7 +96,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
 
 impl<Io> Drop for SubscriberSession<Io> {
     fn drop(&mut self) {
-        self.state.stats.decrement_active_clients();
+        self.state.stats.specific.decrement_active_clients();
     }
 }
 
@@ -122,9 +124,9 @@ fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
             ControlMsg::Close
         }
     } else {
-        tracing::warn!(
-            "Unkown control message topic, closing session: {:?}",
-            msg.topic()
+        warn!(
+            "Unkown control message topic, closing session: {}",
+            String::from_utf8_lossy(msg.topic())
         );
         ControlMsg::Close
     }
@@ -139,8 +141,8 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
         loop {
             // First check if we should flush the connection. We only do this if we have written
-            // some data and the flush interval has elapsed. Only when we have succesfully flushed the data
-            // will we reset the `should_flush` flag.
+            // some data and the flush interval has elapsed. Only when we have succesfully flushed
+            // the data will we reset the `should_flush` flag.
             if this.should_flush(cx) {
                 if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
                     this.should_flush = false;
@@ -150,19 +152,19 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
                 if let Some(msg) = this.pending_egress.take() {
-                    tracing::debug!("Sending message: {:?}", msg);
+                    debug!(?msg, "Sending message");
                     let msg_len = msg.size();
 
                     match this.conn.start_send_unpin(msg) {
                         Ok(_) => {
-                            this.state.stats.increment_tx(msg_len);
+                            this.state.stats.specific.increment_tx(msg_len);
 
                             this.should_flush = true;
                             // We might be able to send more queued messages
                             continue;
                         }
                         Err(e) => {
-                            tracing::error!("Failed to send message to socket: {:?}", e);
+                            error!(err = ?e, "Failed to send message to socket");
                             let _ = this.conn.poll_close_unpin(cx);
                             // End this stream as we can't send any more messages
                             return Poll::Ready(());
@@ -181,10 +183,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                         continue;
                     }
                     Some(Err(e)) => {
-                        warn!(
-                            session_id = this.session_id,
-                            "Receiver lagging behind: {:?}", e
-                        );
+                        warn!(err = ?e, session_id = this.session_id, "Receiver lagging behind");
                         continue;
                     }
                     None => {
@@ -199,23 +198,17 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
             if let Poll::Ready(item) = this.conn.poll_next_unpin(cx) {
                 match item {
                     Some(Ok(msg)) => {
-                        debug!("Incoming message: {:?}", msg);
+                        debug!(?msg, "Incoming message");
                         this.on_incoming(msg);
                         continue;
                     }
                     Some(Err(e)) => {
-                        error!(
-                            session_id = this.session_id,
-                            "Error reading from socket: {:?}", e
-                        );
+                        error!(err = ?e, session_id = this.session_id, "Error reading from socket");
                         let _ = this.conn.poll_close_unpin(cx);
                         return Poll::Ready(());
                     }
                     None => {
-                        warn!(
-                            "Connection closed, shutting down session {}",
-                            this.session_id
-                        );
+                        warn!("Connection closed, shutting down session {}", this.session_id);
                         return Poll::Ready(());
                     }
                 }

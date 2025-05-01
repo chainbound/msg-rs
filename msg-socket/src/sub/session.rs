@@ -1,14 +1,17 @@
+use std::{
+    collections::VecDeque,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+
 use bytes::Bytes;
 use futures::{Future, StreamExt};
-use std::collections::VecDeque;
-use std::net::SocketAddr;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, error, warn};
 
 use msg_common::{unix_micros, Channel};
+use msg_transport::Address;
 use msg_wire::pubsub;
 
 use super::{
@@ -23,23 +26,23 @@ pub(super) enum SessionCommand {
 
 /// Manages the state of a single publisher, represented as a [`Future`].
 #[must_use = "This future must be spawned"]
-pub(super) struct PublisherSession<Io> {
+pub(super) struct PublisherSession<Io, A: Address> {
     /// The addr of the publisher
-    addr: SocketAddr,
+    addr: A,
     /// The egress queue (for subscribe / unsubscribe messages)
     egress: VecDeque<pubsub::Message>,
     /// The inner stream
     stream: PublisherStream<Io>,
     /// The session stats
     stats: Arc<SessionStats>,
-    /// Channel for bi-directional communication with the driver. Sends new messages from the associated
-    /// publisher and receives subscribe / unsubscribe commands.
+    /// Channel for bi-directional communication with the driver. Sends new messages from the
+    /// associated publisher and receives subscribe / unsubscribe commands.
     driver_channel: Channel<TopicMessage, SessionCommand>,
 }
 
-impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherSession<Io> {
+impl<Io: AsyncRead + AsyncWrite + Unpin, A: Address> PublisherSession<Io, A> {
     pub(super) fn new(
-        addr: SocketAddr,
+        addr: A,
         stream: PublisherStream<Io>,
         channel: Channel<TopicMessage, SessionCommand>,
     ) -> Self {
@@ -60,19 +63,17 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherSession<Io> {
     /// Queues a subscribe message for this publisher.
     /// On the next poll, the message will be attempted to be sent.
     fn subscribe(&mut self, topic: String) {
-        self.egress
-            .push_back(pubsub::Message::new_sub(Bytes::from(topic)));
+        self.egress.push_back(pubsub::Message::new_sub(Bytes::from(topic)));
     }
 
     /// Queues an unsubscribe message for this publisher.
     /// On the next poll, the message will be attempted to be sent.
     fn unsubscribe(&mut self, topic: String) {
-        self.egress
-            .push_back(pubsub::Message::new_unsub(Bytes::from(topic)));
+        self.egress.push_back(pubsub::Message::new_unsub(Bytes::from(topic)));
     }
 
-    /// Handles incoming messages. On a successful message, the session stats are updated and the message
-    /// is forwarded to the driver.
+    /// Handles incoming messages. On a successful message, the session stats are updated and the
+    /// message is forwarded to the driver.
     fn on_incoming(&mut self, incoming: Result<TopicMessage, pubsub::Error>) {
         match incoming {
             Ok(msg) => {
@@ -81,12 +82,12 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherSession<Io> {
                 self.stats.increment_rx(msg.payload.len());
                 self.stats.update_latency(now.saturating_sub(msg.timestamp));
 
-                if self.driver_channel.try_send(msg).is_err() {
-                    warn!(addr = %self.addr, "Failed to send message to driver");
+                if let Err(e) = self.driver_channel.try_send(msg) {
+                    warn!(err = ?e, addr = ?self.addr, "Failed to send message to driver");
                 }
             }
             Err(e) => {
-                error!(addr = %self.addr, "Error receiving message: {:?}", e);
+                error!(err = ?e, addr = ?self.addr, "Error receiving message");
             }
         }
     }
@@ -99,7 +100,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> PublisherSession<Io> {
     }
 }
 
-impl<Io: AsyncRead + AsyncWrite + Unpin> Future for PublisherSession<Io> {
+impl<Io: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Future for PublisherSession<Io, A> {
     type Output = ();
 
     /// This poll implementation prioritizes incoming messages over outgoing messages.
@@ -116,7 +117,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for PublisherSession<Io> {
                     continue;
                 }
                 Poll::Ready(None) => {
-                    error!(addr = %this.addr, "Publisher stream closed");
+                    error!(addr = ?this.addr, "Publisher stream closed");
                     return Poll::Ready(());
                 }
                 Poll::Pending => {}
@@ -145,7 +146,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for PublisherSession<Io> {
                         continue;
                     }
                     None => {
-                        warn!(addr = %this.addr, "Driver channel closed, shutting down session");
+                        warn!(addr = ?this.addr, "Driver channel closed, shutting down session");
                         return Poll::Ready(());
                     }
                 }
