@@ -13,3 +13,4 @@ repository.workspace = true
 
 [dependencies]
 pnet.workspace = true
+nix.workspace = true

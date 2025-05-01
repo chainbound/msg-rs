@@ -16,6 +16,8 @@ msg-transport.workspace = true
 msg-wire.workspace = true
 
 tokio.workspace = true
+bytes.workspace = true
+nix.workspace = true
 tokio-stream.workspace = true
 
 [dev-dependencies]
