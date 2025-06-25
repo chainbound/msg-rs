@@ -7,9 +7,6 @@ pub struct SocketStats<S> {
 
 impl<S: Default> Default for SocketStats<S> {
     fn default() -> Self {
-        Self {
-            specific: S::default(),
-        }
+        Self { specific: S::default() }
     }
 }
-
