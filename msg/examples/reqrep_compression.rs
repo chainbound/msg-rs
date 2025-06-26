@@ -36,5 +36,5 @@ async fn main() {
     });
 
     let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
-    println!("Response: {:?}", res);
+    println!("Response: {res:?}");
 }

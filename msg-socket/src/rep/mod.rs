@@ -146,7 +146,7 @@ mod tests {
     async fn reqrep_durable() {
         let _ = tracing_subscriber::fmt::try_init();
         let random_port = rand::random::<u16>() + 10000;
-        let addr = format!("0.0.0.0:{}", random_port);
+        let addr = format!("0.0.0.0:{random_port}");
 
         // Initialize the request socket (client side) with a transport
         let mut req = ReqSocket::new(Tcp::default());

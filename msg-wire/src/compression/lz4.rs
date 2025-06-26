@@ -26,7 +26,7 @@ pub struct Lz4Decompressor;
 impl Decompressor for Lz4Decompressor {
     fn decompress(&self, data: &[u8]) -> Result<Bytes, io::Error> {
         let bytes = decompress_size_prepended(data).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, format!("Lz4 decompression failed: {}", e))
+            io::Error::new(io::ErrorKind::InvalidData, format!("Lz4 decompression failed: {e}"))
         })?;
 
         Ok(Bytes::from(bytes))
