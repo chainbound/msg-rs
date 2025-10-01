@@ -179,7 +179,7 @@ mod tests {
         net::TcpListener,
     };
     use tokio_stream::StreamExt;
-    use tracing::{info, info_span, Instrument};
+    use tracing::{Instrument, info, info_span};
 
     use super::*;
 

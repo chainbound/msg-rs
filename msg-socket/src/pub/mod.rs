@@ -319,7 +319,9 @@ mod tests {
         sub2.subscribe("HELLO".to_string()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        let original_msg = Bytes::from("WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORLD");
+        let original_msg = Bytes::from(
+            "WOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOORLD",
+        );
 
         pub_socket.publish("HELLO".to_string(), original_msg.clone()).await.unwrap();
 

@@ -5,13 +5,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{stream::FuturesUnordered, Future, SinkExt, StreamExt};
+use futures::{Future, SinkExt, StreamExt, stream::FuturesUnordered};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
 use super::{
-    session::SubscriberSession, trie::PrefixTrie, PubError, PubMessage, PubOptions, SocketState,
+    PubError, PubMessage, PubOptions, SocketState, session::SubscriberSession, trie::PrefixTrie,
 };
 use crate::{AuthResult, Authenticator};
 use msg_transport::{Address, PeerAddress, Transport};

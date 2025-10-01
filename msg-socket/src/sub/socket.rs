@@ -10,7 +10,7 @@ use std::{
 use futures::Stream;
 use rustc_hash::FxHashMap;
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
 };
 
@@ -24,12 +24,12 @@ use super::{
     // REMOVED: Old/removed stats structs
     // Command, PubMessage, SocketState, SocketStats, SocketWideStats, SubDriver, SubError,
     Command,
+    DEFAULT_BUFFER_SIZE,
     PubMessage,
     SocketState,
     SubDriver,
     SubError,
     SubOptions,
-    DEFAULT_BUFFER_SIZE,
 };
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.

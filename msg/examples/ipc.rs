@@ -3,7 +3,7 @@ use std::env::temp_dir;
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{ipc::Ipc, RepSocket, ReqSocket};
+use msg::{RepSocket, ReqSocket, ipc::Ipc};
 
 #[tokio::main]
 async fn main() {

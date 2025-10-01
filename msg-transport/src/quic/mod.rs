@@ -3,7 +3,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     pin::Pin,
     sync::Arc,
-    task::{ready, Poll},
+    task::{Poll, ready},
 };
 
 use futures::future::BoxFuture;
@@ -198,7 +198,9 @@ impl Transport<SocketAddr> for Quic {
                             endpoint.accept().await.ok_or(Error::ClosedEndpoint);
 
                         if tx.send(connection_result).await.is_err() {
-                            error!("Failed to notify new incoming connection, channel closed. Shutting down task.");
+                            error!(
+                                "Failed to notify new incoming connection, channel closed. Shutting down task."
+                            );
                             break;
                         };
                     }

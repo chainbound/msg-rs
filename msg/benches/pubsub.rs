@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion,
-    Throughput,
+    BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
+    measurement::WallTime,
 };
 use futures::StreamExt;
-use msg::{ipc::Ipc, Address};
+use msg::{Address, ipc::Ipc};
 use pprof::criterion::{Output, PProfProfiler};
 use rand::Rng;
 use std::{
@@ -14,7 +14,7 @@ use std::{
 use tokio::runtime::Runtime;
 
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
-use msg_transport::{quic::Quic, tcp::Tcp, Transport};
+use msg_transport::{Transport, quic::Quic, tcp::Tcp};
 
 const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;

@@ -5,9 +5,8 @@ use std::{
 
 use futures::{Sink, SinkExt, Stream};
 use tokio::sync::mpsc::{
-    self,
+    self, Receiver,
     error::{TryRecvError, TrySendError},
-    Receiver,
 };
 use tokio_util::sync::{PollSendError, PollSender};
 

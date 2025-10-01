@@ -3,7 +3,7 @@ use std::{
     io,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::{Duration, Instant},
 };
 
@@ -18,12 +18,12 @@ use tokio_util::codec::Framed;
 use tracing::{debug, error, trace};
 
 use super::{Command, ReqError, ReqOptions};
-use crate::{req::SocketState, ConnectionState, ExponentialBackoff};
+use crate::{ConnectionState, ExponentialBackoff, req::SocketState};
 
 use msg_transport::{Address, Transport};
 use msg_wire::{
     auth,
-    compression::{try_decompress_payload, Compressor},
+    compression::{Compressor, try_decompress_payload},
     reqrep,
 };
 

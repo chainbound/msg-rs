@@ -11,7 +11,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, trace, warn};
 
-use super::{trie::PrefixTrie, PubMessage, SocketState};
+use super::{PubMessage, SocketState, trie::PrefixTrie};
 use msg_wire::pubsub;
 
 /// A subscriber session. This struct represents a single subscriber session, which is a

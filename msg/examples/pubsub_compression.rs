@@ -2,9 +2,9 @@ use bytes::Bytes;
 use std::time::Duration;
 use tokio::time::timeout;
 use tokio_stream::StreamExt;
-use tracing::{info, info_span, warn, Instrument};
+use tracing::{Instrument, info, info_span, warn};
 
-use msg::{compression::GzipCompressor, tcp::Tcp, PubSocket, SubSocket};
+use msg::{PubSocket, SubSocket, compression::GzipCompressor, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
