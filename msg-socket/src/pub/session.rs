@@ -112,7 +112,7 @@ enum ControlMsg<'a> {
 /// Converts the message to a control message. If the message is not a control message,
 /// the session is closed.
 #[inline]
-fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
+fn msg_to_control(msg: &pubsub::Message) -> ControlMsg<'_> {
     if msg.payload_size() == 0 {
         if msg.topic().starts_with(b"MSG.SUB.") {
             let topic = msg.topic().strip_prefix(b"MSG.SUB.").unwrap();
