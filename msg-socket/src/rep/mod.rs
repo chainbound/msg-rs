@@ -98,7 +98,7 @@ mod tests {
     use rand::Rng;
     use tracing::{debug, info};
 
-    use crate::{req::ReqSocket, Authenticator, ReqOptions};
+    use crate::{Authenticator, ReqOptions, req::ReqSocket};
 
     use super::*;
 

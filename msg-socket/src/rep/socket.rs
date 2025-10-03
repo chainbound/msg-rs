@@ -6,9 +6,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{stream::FuturesUnordered, Stream};
+use futures::{Stream, stream::FuturesUnordered};
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
     task::JoinSet,
 };
@@ -16,8 +16,8 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    rep::{driver::RepDriver, RepError, SocketState},
-    Authenticator, RepOptions, Request, DEFAULT_BUFFER_SIZE,
+    Authenticator, DEFAULT_BUFFER_SIZE, RepOptions, Request,
+    rep::{RepError, SocketState, driver::RepDriver},
 };
 
 use msg_transport::{Address, Transport};

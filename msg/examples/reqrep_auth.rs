@@ -2,7 +2,7 @@ use bytes::Bytes;
 use msg_socket::ReqOptions;
 use tokio_stream::StreamExt;
 
-use msg::{tcp::Tcp, Authenticator, RepSocket, ReqSocket};
+use msg::{Authenticator, RepSocket, ReqSocket, tcp::Tcp};
 
 #[derive(Default)]
 struct Auth;

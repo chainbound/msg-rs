@@ -3,9 +3,9 @@ use futures::StreamExt;
 use msg_socket::SubOptions;
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{info, info_span, warn, Instrument};
+use tracing::{Instrument, info, info_span, warn};
 
-use msg::{tcp::Tcp, Authenticator, PubSocket, SubSocket};
+use msg::{Authenticator, PubSocket, SubSocket, tcp::Tcp};
 
 #[derive(Default)]
 struct Auth;

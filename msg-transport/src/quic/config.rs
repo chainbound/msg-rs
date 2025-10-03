@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use quinn::{congestion::ControllerFactory, IdleTimeout};
+use quinn::{IdleTimeout, congestion::ControllerFactory};
 
 use super::tls::{self_signed_certificate, unsafe_client_config};
 

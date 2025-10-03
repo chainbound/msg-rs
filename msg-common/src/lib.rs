@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use futures::future::BoxFuture;
 
 mod channel;
-pub use channel::{channel, Channel};
+pub use channel::{Channel, channel};
 
 mod task;
 pub use task::JoinMap;

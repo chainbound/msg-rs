@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use std::io::{self, Read, Write};
 
 use super::{CompressionType, Compressor, Decompressor};

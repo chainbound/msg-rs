@@ -13,13 +13,13 @@ use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
 use super::{
+    Command, PubMessage, SocketState, SubOptions,
     session::{PublisherSession, SessionCommand},
     stream::{PublisherStream, TopicMessage},
-    Command, PubMessage, SocketState, SubOptions,
 };
 use crate::{ConnectionState, ExponentialBackoff};
 
-use msg_common::{channel, Channel, JoinMap};
+use msg_common::{Channel, JoinMap, channel};
 use msg_transport::{Address, Transport};
 use msg_wire::{auth, compression::try_decompress_payload, pubsub};
 
@@ -370,7 +370,9 @@ where
                                     );
                                 }
                                 Err(TrySendError::Closed(_)) => {
-                                    error!("SubSocket frontend channel closed unexpectedly while driver is active.");
+                                    error!(
+                                        "SubSocket frontend channel closed unexpectedly while driver is active."
+                                    );
                                     // Consider shutting down or marking as inactive?
                                     // For now, just log. No counter increment.
                                 }
@@ -401,7 +403,10 @@ where
                                 debug!(backoff = ?duration, "Not retrying connection to {:?} as there is already a connection task", addr);
                             }
                         } else {
-                            error!("Exceeded maximum number of retries for {:?}, terminating connection", addr);
+                            error!(
+                                "Exceeded maximum number of retries for {:?}, terminating connection",
+                                addr
+                            );
                             to_terminate.push(addr.clone());
                         }
                     }
@@ -424,10 +429,6 @@ where
             self.publishers.remove(&addr);
         }
 
-        if progress {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
+        if progress { Poll::Ready(()) } else { Poll::Pending }
     }
 }

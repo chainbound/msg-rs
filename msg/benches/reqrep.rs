@@ -2,14 +2,14 @@ use std::{env::temp_dir, time::Duration};
 
 use bytes::Bytes;
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, BenchmarkId, Criterion,
-    Throughput,
+    BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
+    measurement::WallTime,
 };
 use futures::StreamExt;
 use pprof::criterion::Output;
 use rand::Rng;
 
-use msg::{ipc::Ipc, Address, Transport};
+use msg::{Address, Transport, ipc::Ipc};
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::tcp::Tcp;
 use tokio::runtime::Runtime;

@@ -11,7 +11,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, trace, warn};
 
-use super::{trie::PrefixTrie, PubMessage, SocketState};
+use super::{PubMessage, SocketState, trie::PrefixTrie};
 use msg_wire::pubsub;
 
 /// A subscriber session. This struct represents a single subscriber session, which is a
@@ -112,7 +112,7 @@ enum ControlMsg<'a> {
 /// Converts the message to a control message. If the message is not a control message,
 /// the session is closed.
 #[inline]
-fn msg_to_control(msg: &pubsub::Message) -> ControlMsg {
+fn msg_to_control(msg: &pubsub::Message) -> ControlMsg<'_> {
     if msg.payload_size() == 0 {
         if msg.topic().starts_with(b"MSG.SUB.") {
             let topic = msg.topic().strip_prefix(b"MSG.SUB.").unwrap();

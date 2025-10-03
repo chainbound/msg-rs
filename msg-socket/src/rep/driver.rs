@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{stream::FuturesUnordered, Future, FutureExt, SinkExt, Stream, StreamExt};
+use futures::{Future, FutureExt, SinkExt, Stream, StreamExt, stream::FuturesUnordered};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{mpsc, oneshot},
@@ -17,12 +17,12 @@ use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{rep::SocketState, AuthResult, Authenticator, RepOptions, Request};
+use crate::{AuthResult, Authenticator, RepOptions, Request, rep::SocketState};
 
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{
     auth,
-    compression::{try_decompress_payload, Compressor},
+    compression::{Compressor, try_decompress_payload},
     reqrep,
 };
 

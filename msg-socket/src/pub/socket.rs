@@ -3,13 +3,13 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::broadcast,
     task::JoinSet,
 };
 use tracing::{debug, trace, warn};
 
-use super::{driver::PubDriver, stats::PubStats, PubError, PubMessage, PubOptions, SocketState};
+use super::{PubError, PubMessage, PubOptions, SocketState, driver::PubDriver, stats::PubStats};
 use crate::Authenticator;
 
 use msg_transport::{Address, Transport};
