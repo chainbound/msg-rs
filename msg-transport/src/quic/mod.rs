@@ -23,6 +23,8 @@ use stream::QuicStream;
 
 mod tls;
 
+pub(crate) const ALPN_PROTOCOL: &[u8] = b"msg";
+
 /// A QUIC error.
 #[derive(Debug, Error)]
 pub enum Error {
@@ -52,7 +54,7 @@ pub struct Quic {
     endpoint: Option<quinn::Endpoint>,
 
     /// A receiver for incoming connections waiting to be handled.
-    incoming: Option<Receiver<Result<quinn::Connecting, Error>>>,
+    incoming: Option<Receiver<Result<quinn::Incoming, Error>>>,
 }
 
 impl Quic {

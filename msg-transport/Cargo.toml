@@ -22,7 +22,11 @@ thiserror = { workspace = true, optional = true }
 
 # QUIC
 quinn = { workspace = true, optional = true }
-rustls = { workspace = true, optional = true }
+rustls = { workspace = true, optional = true, features = [
+    "std",
+    "aws_lc_rs",
+    "tls12",
+] }
 rcgen = { workspace = true, optional = true }
 
 [dev-dependencies]
