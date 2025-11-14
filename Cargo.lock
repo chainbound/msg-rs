@@ -891,6 +891,7 @@ dependencies = [
  "msg-sim",
  "msg-transport",
  "msg-wire",
+ "openssl",
  "parking_lot",
  "rand 0.8.5",
  "rustc-hash 1.1.0",

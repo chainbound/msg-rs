@@ -29,6 +29,7 @@ parking_lot.workspace = true
 [dev-dependencies]
 rand.workspace = true
 msg-transport = { workspace = true, features = ["quic"] }
+openssl.workspace = true
 
 msg-sim.workspace = true
 
