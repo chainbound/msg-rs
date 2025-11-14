@@ -21,6 +21,7 @@ pub mod ipc;
 #[cfg(feature = "quic")]
 pub mod quic;
 pub mod tcp;
+pub mod tcp_tls;
 
 /// A trait for address types that can be used by any transport.
 pub trait Address: Clone + Debug + Send + Sync + Unpin + Hash + Eq + 'static {}

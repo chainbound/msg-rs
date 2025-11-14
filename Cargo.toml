@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "msg",
-    "msg-socket",
-    "msg-wire",
-    "msg-transport",
-    "msg-common",
-    "msg-sim",
+  "msg",
+  "msg-socket",
+  "msg-wire",
+  "msg-transport",
+  "msg-common",
+  "msg-sim",
 ]
 resolver = "2"
 
@@ -19,19 +19,19 @@ authors = ["Chainbound Developers <dev@chainbound.io>"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
 keywords = [
-    "messaging",
-    "distributed",
-    "systems",
-    "networking",
-    "quic",
-    "quinn",
-    "tokio",
-    "async",
-    "simulation",
-    "pnet",
-    "udp",
-    "tcp",
-    "socket",
+  "messaging",
+  "distributed",
+  "systems",
+  "networking",
+  "quic",
+  "quinn",
+  "tokio",
+  "async",
+  "simulation",
+  "pnet",
+  "udp",
+  "tcp",
+  "socket",
 ]
 
 [workspace.dependencies]
@@ -45,8 +45,9 @@ msg-sim = { path = "./msg-sim" }
 async-trait = "0.1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
-futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-openssl = { version = "0.6" }
+futures = "0.3"
 parking_lot = "0.12"
 
 # general
@@ -55,10 +56,19 @@ thiserror = "1"
 tracing = "0.1"
 rustc-hash = "1"
 rand = "0.8"
+derive_more = { version = "2.0.1", features = [
+  "from",
+  "into",
+  "deref",
+  "deref_mut",
+] }
 
 # networking
 quinn = "0.11.9"
 rcgen = "0.14"
+# (rustls needs to be the same version as the one used by quinn)
+rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
+openssl = { version = "0.10" }
 
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
