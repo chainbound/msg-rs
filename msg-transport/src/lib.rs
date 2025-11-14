@@ -18,6 +18,7 @@ use futures::{Future, FutureExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod ipc;
+#[cfg(feature = "quic")]
 pub mod quic;
 pub mod tcp;
 
