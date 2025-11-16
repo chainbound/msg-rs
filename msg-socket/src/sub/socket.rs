@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::PathBuf,
     pin::Pin,
     sync::Arc,
@@ -61,8 +61,11 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            // TODO: support IPv6
-            endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            let localhost = match endpoint.ip() {
+                IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            };
+            endpoint.set_ip(localhost);
         }
 
         self.connect_inner(endpoint).await
@@ -76,8 +79,11 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            // TODO: support IPv6
-            endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            let localhost = match endpoint.ip() {
+                IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            };
+            endpoint.set_ip(localhost);
         }
 
         self.try_connect_inner(endpoint)
