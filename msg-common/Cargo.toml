@@ -11,6 +11,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+rand.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
