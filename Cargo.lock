@@ -857,6 +857,7 @@ dependencies = [
  "msg-socket",
  "msg-transport",
  "msg-wire",
+ "openssl",
  "pprof",
  "rand 0.8.5",
  "tokio",
