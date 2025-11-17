@@ -16,13 +16,14 @@ use crate::MeteredIo;
 impl MeteredIo<TcpStream, TcpMetrics, SocketAddr> {
     #[inline]
     fn maybe_refresh(&mut self) {
-        if self.next_refresh <= Instant::now() {
+        let now = Instant::now();
+        if self.next_refresh <= now {
             match TcpMetrics::gather(&self.inner) {
                 Ok(metrics) => *self.metrics.write().unwrap() = metrics,
                 Err(e) => tracing::error!(err = ?e, "failed to gather TCP metrics"),
             }
 
-            self.next_refresh = Instant::now() + self.refresh_interval;
+            self.next_refresh = now + self.refresh_interval;
         }
     }
 }
