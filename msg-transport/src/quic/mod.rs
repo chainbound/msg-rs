@@ -125,13 +125,14 @@ impl Transport<SocketAddr> for Quic {
         let client_config = self.config.client_config.clone();
 
         Box::pin(async move {
+            debug!(target = %addr, "Initiating connection");
+
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
-            let connection =
-                endpoint.connect_with(client_config, addr, "l")?.await.map_err(Error::from)?;
+            let connection = endpoint.connect_with(client_config, addr, "localhost")?.await?;
 
-            debug!("Connected to {}, opening stream", addr);
+            debug!(target = %addr, "Connected, opening stream...");
 
             // Open a bi-directional stream and return it. We'll think about multiplexing per topic
             // later.
@@ -158,7 +159,8 @@ impl Transport<SocketAddr> for Quic {
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
-                            let connection = connecting.await.map_err(Error::from)?;
+                            debug!(client = %peer, "Accepting connection...");
+                            let connection = connecting.await?;
                             debug!(
                                 "Accepted connection from {}, opening stream",
                                 connection.remote_address()
@@ -238,7 +240,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_quic_connection() {
+    async fn test_quic_connection_simple() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let config = Config::default();
@@ -252,7 +254,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            // tokio::time::sleep(Duration::from_secs(1)).await;
 
             let mut stream = server.accept().await.unwrap();
 
