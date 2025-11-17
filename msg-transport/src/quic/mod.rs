@@ -13,7 +13,7 @@ use tracing::{debug, error};
 
 use crate::{Acceptor, Transport, TransportExt};
 
-use msg_common::async_error;
+use msg_common::{SocketAddrExt, async_error};
 
 mod config;
 pub use config::{Config, ConfigBuilder};
@@ -67,10 +67,10 @@ impl Quic {
     /// `addr` is given, the endpoint will be bound to the default address.
     fn new_endpoint(
         &self,
-        addr: Option<SocketAddr>,
+        addr: SocketAddr,
         server_config: Option<quinn::ServerConfig>,
     ) -> Result<quinn::Endpoint, Error> {
-        let socket = UdpSocket::bind(addr.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))))?;
+        let socket = UdpSocket::bind(addr)?;
 
         let endpoint = quinn::Endpoint::new(
             self.config.endpoint_config.clone(),
@@ -113,7 +113,7 @@ impl Transport<SocketAddr> for Quic {
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
             endpoint
         } else {
-            let Ok(mut endpoint) = self.new_endpoint(None, None) else {
+            let Ok(mut endpoint) = self.new_endpoint(addr.as_unspecified(), None) else {
                 return async_error(Error::ClosedEndpoint);
             };
 
