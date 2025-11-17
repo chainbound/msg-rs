@@ -16,12 +16,17 @@ msg-common.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
+tokio-openssl.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
+derive_more.workspace = true
 
 # QUIC
 quinn = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
+
+# TLS
+openssl = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
@@ -29,3 +34,4 @@ tracing-subscriber = "0.3"
 [features]
 default = []
 quic = ["dep:quinn", "dep:rcgen"]
+tcp-tls = ["dep:openssl"]
