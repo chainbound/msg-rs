@@ -84,8 +84,7 @@ async fn reqrep_works() {
 async fn reqrep_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let server_config =
-        tcp_tls::config::Server { ssl_acceptor: helpers::default_acceptor_builder().build() };
+    let server_config = tcp_tls::config::Server::new(helpers::default_acceptor_builder().build());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 
@@ -120,7 +119,7 @@ async fn reqrep_mutual_tls_works() {
     acceptor_builder.set_verify(
         openssl::ssl::SslVerifyMode::PEER | openssl::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
     );
-    let server_config = tcp_tls::config::Server { ssl_acceptor: acceptor_builder.build() };
+    let server_config = tcp_tls::config::Server::new(acceptor_builder.build());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 

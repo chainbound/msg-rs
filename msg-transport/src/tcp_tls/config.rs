@@ -30,6 +30,12 @@ pub struct Server {
     pub ssl_acceptor: SslAcceptor,
 }
 
+impl Server {
+    pub fn new(ssl_acceptor: SslAcceptor) -> Self {
+        Self { ssl_acceptor }
+    }
+}
+
 impl fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Server").field("ssl_acceptor", &"SslAcceptor").finish()

@@ -19,7 +19,7 @@ use crate::{Acceptor, PeerAddress, Transport, TransportExt};
 
 pub mod config;
 
-/// An invalid operation, due to using as a server or viceversa.
+/// An invalid operation, due to using a client as a server or viceversa.
 #[derive(Debug, Clone, Copy, thiserror::Error)]
 pub enum InvalidOperation {
     #[error("tried to bind as a client")]
@@ -48,8 +48,14 @@ pub enum Error {
 }
 
 /// A TCP-TLS client.
-#[derive(Debug, Clone, From, Deref, DerefMut)]
+#[derive(Debug, Clone, Deref, DerefMut)]
 pub struct Client(config::Client);
+
+impl Client {
+    pub fn new(config: config::Client) -> Self {
+        Self(config)
+    }
+}
 
 /// A TCP-TLS server.
 pub struct Server {
@@ -57,6 +63,12 @@ pub struct Server {
     listener: Option<TcpListener>,
     /// The OpenSSL acceptor for TLS handshake requests.
     acceptor: Arc<SslAcceptor>,
+}
+
+impl Server {
+    pub fn new(acceptor: SslAcceptor) -> Self {
+        Self { listener: None, acceptor: Arc::new(acceptor) }
+    }
 }
 
 impl fmt::Debug for Server {
@@ -78,12 +90,12 @@ pub enum TcpTls {
 impl TcpTls {
     /// Create a new instance of the transport with client configuration.
     pub fn new_client(config: config::Client) -> Self {
-        TcpTls::Client(config.into())
+        TcpTls::Client(Client::new(config))
     }
 
     /// Create a new instance of the transport with server configuration.
     pub fn new_server(config: config::Server) -> Self {
-        TcpTls::Server(Server { listener: None, acceptor: Arc::new(config.ssl_acceptor) })
+        TcpTls::Server(Server::new(config.ssl_acceptor))
     }
 
     pub fn as_client(&self) -> Option<&Client> {
@@ -219,7 +231,7 @@ impl Transport<SocketAddr> for TcpTls {
 
         match listener.poll_accept(cx) {
             Poll::Ready(Ok((io, addr))) => {
-                debug!("accepted connection from {}", addr);
+                debug!(%addr, "accepted connection");
 
                 Poll::Ready(Box::pin(async move {
                     io.set_nodelay(true)?;
