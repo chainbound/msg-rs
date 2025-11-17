@@ -15,7 +15,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT"
 description = "A flexible and lightweight messaging library for distributed systems"
-authors = ["Jonas Bostoen", "Nicolas Racchi"]
+authors = ["Chainbound Developers <dev@chainbound.io>"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
 keywords = [
@@ -57,10 +57,8 @@ rustc-hash = "1"
 rand = "0.8"
 
 # networking
-quinn = "0.10"
-# (rustls needs to be the same version as the one used by quinn)
-rustls = { version = "0.21", features = ["quic", "dangerous_configuration"] }
-rcgen = "0.12"
+quinn = "0.11.9"
+rcgen = "0.14"
 
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
