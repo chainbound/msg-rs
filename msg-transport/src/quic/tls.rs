@@ -119,7 +119,7 @@ pub(crate) fn self_signed_certificate() -> (Vec<CertificateDer<'static>>, Privat
     let cert_der = CertificateDer::from(cert.cert);
     let priv_key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
 
-    (vec![CertificateDer::from(cert_der)], priv_key.into())
+    (vec![cert_der], priv_key.into())
 }
 
 #[cfg(test)]
