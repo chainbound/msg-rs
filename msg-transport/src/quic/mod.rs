@@ -254,7 +254,7 @@ mod tests {
         let (tx, rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            // tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
 
             let mut stream = server.accept().await.unwrap();
 

@@ -78,12 +78,17 @@ pub trait TransportExt<A: Address>: Transport<A> {
     }
 }
 
+/// An `await`-friendly interface for accepting inbound connections.
+///
+/// This struct is used to accept inbound connections from a transport. It is
+/// created using the [`TransportExt::accept`] method.
 pub struct Acceptor<'a, T, A>
 where
     T: Transport<A>,
     A: Address,
 {
     inner: &'a mut T,
+    /// The pending [`Transport::Accept`] future.
     pending: Option<T::Accept>,
     _marker: PhantomData<A>,
 }
@@ -109,6 +114,7 @@ where
         let this = self.get_mut();
 
         loop {
+            // If there's a pending accept future, poll it to completion
             if let Some(pending) = this.pending.as_mut() {
                 match pending.poll_unpin(cx) {
                     Poll::Ready(res) => {
@@ -119,6 +125,7 @@ where
                 }
             }
 
+            // Otherwise, poll the transport for a new accept future
             match Pin::new(&mut *this.inner).poll_accept(cx) {
                 Poll::Ready(accept) => {
                     this.pending = Some(accept);

@@ -30,7 +30,7 @@ impl ServerCertVerifier for SkipServerVerification {
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        tracing::debug!(target = "quic.tls", "Skipping server verification");
+        tracing::debug!("skipping server verification");
         Ok(ServerCertVerified::assertion())
     }
 
@@ -40,7 +40,7 @@ impl ServerCertVerifier for SkipServerVerification {
         cert: &rustls::pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        tracing::debug!(target = "quic.tls", "Verifying TLS 1.2 signature");
+        tracing::debug!("verifying TLS 1.2 signature");
         rustls::crypto::verify_tls12_signature(
             message,
             cert,
@@ -55,7 +55,7 @@ impl ServerCertVerifier for SkipServerVerification {
         cert: &rustls::pki_types::CertificateDer<'_>,
         dss: &rustls::DigitallySignedStruct,
     ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        tracing::debug!(target = "quic.tls", "Verifying TLS 1.3 signature");
+        tracing::debug!("verifying TLS 1.3 signature");
         rustls::crypto::verify_tls13_signature(
             message,
             cert,
@@ -65,11 +65,6 @@ impl ServerCertVerifier for SkipServerVerification {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        tracing::debug!(
-            target = "quic.tls",
-            "Supported verify schemes: {:?}",
-            self.0.signature_verification_algorithms.supported_schemes()
-        );
         self.0.signature_verification_algorithms.supported_schemes()
     }
 }
