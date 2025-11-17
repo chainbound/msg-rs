@@ -113,8 +113,7 @@ impl Transport<SocketAddr> for Quic {
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
             endpoint
         } else {
-            let endpoint_addr = SocketAddr::unspecified_compatible_with(&addr);
-            let Ok(mut endpoint) = self.new_endpoint(endpoint_addr, None) else {
+            let Ok(mut endpoint) = self.new_endpoint(addr.as_unspecified(), None) else {
                 return async_error(Error::ClosedEndpoint);
             };
 

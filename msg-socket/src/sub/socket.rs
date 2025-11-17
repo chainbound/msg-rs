@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::SocketAddr,
     path::PathBuf,
     pin::Pin,
     sync::Arc,
@@ -14,7 +14,7 @@ use tokio::{
     sync::mpsc,
 };
 
-use msg_common::JoinMap;
+use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
 // ADDED: Import the specific SubStats struct for the API
@@ -61,11 +61,7 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            let localhost = match endpoint.ip() {
-                IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
-                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-            };
-            endpoint.set_ip(localhost);
+            endpoint.set_ip(endpoint.ip().as_localhost());
         }
 
         self.connect_inner(endpoint).await
@@ -79,11 +75,7 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            let localhost = match endpoint.ip() {
-                IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::LOCALHOST),
-                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
-            };
-            endpoint.set_ip(localhost);
+            endpoint.set_ip(endpoint.ip().as_localhost());
         }
 
         self.try_connect_inner(endpoint)
