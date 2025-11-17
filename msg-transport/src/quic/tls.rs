@@ -5,7 +5,7 @@ use quinn::{
     rustls::{
         self, SignatureScheme,
         client::danger::{ServerCertVerified, ServerCertVerifier},
-        pki_types::{CertificateDer, PrivateKeyDer},
+        pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
     },
 };
 
@@ -81,7 +81,7 @@ pub(crate) fn unsafe_client_config() -> QuicClientConfig {
 
     let mut rustls_config = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
-        .expect("aws_lc_rs provider supports TLS 1.3")
+        .expect("ring provider supports TLS 1.3")
         .dangerous()
         .with_custom_certificate_verifier(SkipServerVerification::new())
         .with_no_client_auth();
@@ -100,7 +100,7 @@ pub(crate) fn tls_server_config() -> QuicServerConfig {
 
     let mut rustls_config = rustls::ServerConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
-        .expect("aws_lc_rs provider supports TLS 1.3")
+        .expect("ring provider supports TLS 1.3")
         .with_no_client_auth()
         .with_single_cert(cert_chain, key_der)
         .expect("Valid rustls config");
@@ -113,12 +113,13 @@ pub(crate) fn tls_server_config() -> QuicServerConfig {
 
 /// Generates a self-signed certificate chain and private key.
 pub(crate) fn self_signed_certificate() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
-    let cert = rcgen::generate_simple_self_signed(vec![]).expect("Generates valid certificate");
-    let cert_der = cert.serialize_der().expect("Serializes certificate");
-    let priv_key =
-        PrivateKeyDer::try_from(cert.serialize_private_key_der()).expect("Serializes private key");
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
+        .expect("Generates valid certificate");
 
-    (vec![CertificateDer::from(cert_der)], priv_key)
+    let cert_der = CertificateDer::from(cert.cert);
+    let priv_key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
+
+    (vec![CertificateDer::from(cert_der)], priv_key.into())
 }
 
 #[cfg(test)]

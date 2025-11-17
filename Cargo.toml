@@ -58,7 +58,7 @@ rand = "0.8"
 
 # networking
 quinn = "0.11.9"
-rcgen = "0.12"
+rcgen = "0.14"
 
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }

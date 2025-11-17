@@ -113,16 +113,16 @@ impl Transport<SocketAddr> for Quic {
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
             endpoint
         } else {
-            let Ok(endpoint) = self.new_endpoint(None, None) else {
+            let Ok(mut endpoint) = self.new_endpoint(None, None) else {
                 return async_error(Error::ClosedEndpoint);
             };
+
+            endpoint.set_default_client_config(self.config.client_config.clone());
 
             self.endpoint = Some(endpoint.clone());
 
             endpoint
         };
-
-        let client_config = self.config.client_config.clone();
 
         Box::pin(async move {
             debug!(target = %addr, "Initiating connection");
@@ -130,7 +130,7 @@ impl Transport<SocketAddr> for Quic {
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
-            let connection = endpoint.connect_with(client_config, addr, "localhost")?.await?;
+            let connection = endpoint.connect(addr, "l")?.await?;
 
             debug!(target = %addr, "Connected, opening stream...");
 
@@ -152,15 +152,15 @@ impl Transport<SocketAddr> for Quic {
             if let Some(ref mut incoming) = this.incoming {
                 // Incoming channel and task are spawned, so we can poll it.
                 match ready!(incoming.poll_recv(cx)) {
-                    Some(Ok(connecting)) => {
-                        let peer = connecting.remote_address();
+                    Some(Ok(incoming)) => {
+                        let peer = incoming.remote_address();
 
                         debug!("New incoming connection from {}", peer);
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
                             debug!(client = %peer, "Accepting connection...");
-                            let connection = connecting.await?;
+                            let connection = incoming.accept()?.await?;
                             debug!(
                                 "Accepted connection from {}, opening stream",
                                 connection.remote_address()

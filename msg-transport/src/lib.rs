@@ -78,14 +78,23 @@ pub trait TransportExt<A: Address>: Transport<A> {
     }
 }
 
-pub struct Acceptor<'a, T, A> {
+pub struct Acceptor<'a, T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
     inner: &'a mut T,
+    pending: Option<T::Accept>,
     _marker: PhantomData<A>,
 }
 
-impl<'a, T, A> Acceptor<'a, T, A> {
+impl<'a, T, A> Acceptor<'a, T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
     fn new(inner: &'a mut T) -> Self {
-        Self { inner, _marker: PhantomData }
+        Self { inner, pending: None, _marker: PhantomData }
     }
 }
 
@@ -97,13 +106,26 @@ where
     type Output = Result<T::Io, T::Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match Pin::new(&mut *self.get_mut().inner).poll_accept(cx) {
-            Poll::Ready(mut accept) => match accept.poll_unpin(cx) {
-                Poll::Ready(Ok(output)) => Poll::Ready(Ok(output)),
-                Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
-                Poll::Pending => Poll::Pending,
-            },
-            Poll::Pending => Poll::Pending,
+        let this = self.get_mut();
+
+        loop {
+            if let Some(pending) = this.pending.as_mut() {
+                match pending.poll_unpin(cx) {
+                    Poll::Ready(res) => {
+                        this.pending = None;
+                        return Poll::Ready(res);
+                    }
+                    Poll::Pending => return Poll::Pending,
+                }
+            }
+
+            match Pin::new(&mut *this.inner).poll_accept(cx) {
+                Poll::Ready(accept) => {
+                    this.pending = Some(accept);
+                    continue;
+                }
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
