@@ -55,6 +55,7 @@ thiserror = "1"
 tracing = "0.1"
 rustc-hash = "1"
 rand = "0.8"
+libc = "0.2"
 
 # networking
 quinn = "0.11.9"

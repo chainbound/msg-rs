@@ -34,7 +34,7 @@ type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Se
 type ConnectionCtl<Io, Addr> = ConnectionState<Framed<Io, reqrep::Codec>, ExponentialBackoff, Addr>;
 
 /// The request socket driver. Endless future that drives
-/// the the socket forward.
+/// the socket forward.
 pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(crate) options: Arc<ReqOptions>,

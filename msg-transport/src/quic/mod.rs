@@ -16,12 +16,11 @@ use crate::{Acceptor, Transport, TransportExt};
 use msg_common::async_error;
 
 mod config;
-pub use config::{Config, ConfigBuilder};
-
 mod stream;
-use stream::QuicStream;
-
 mod tls;
+
+pub use config::{Config, ConfigBuilder};
+use stream::QuicStream;
 
 pub(crate) const ALPN_PROTOCOL: &[u8] = b"msg";
 

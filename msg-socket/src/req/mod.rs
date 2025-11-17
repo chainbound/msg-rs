@@ -57,7 +57,8 @@ pub struct ReqOptions {
     /// Default is `None`, and the connection is flushed after every send.
     flush_interval: Option<std::time::Duration>,
     /// The maximum number of bytes that can be buffered in the session before being flushed.
-    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    /// This internally sets
+    /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed::set_backpressure_boundary).
     backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
@@ -182,5 +183,6 @@ impl ReqMessage {
 /// The request socket state, shared between the backend task and the socket.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState {
+    /// The socket stats.
     pub(crate) stats: SocketStats<ReqStats>,
 }

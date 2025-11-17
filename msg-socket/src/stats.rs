@@ -1,7 +1,9 @@
 use std::fmt::Debug;
 
+/// Statistics for a socket
 #[derive(Debug)]
 pub struct SocketStats<S> {
+    /// Socket-specific stats.
     pub(crate) specific: S,
 }
 

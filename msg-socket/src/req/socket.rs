@@ -13,6 +13,7 @@ use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, ExponentialBackoff, ReqMessage,
     req::{SocketState, driver::ReqDriver, stats::ReqStats},
+    stats::SocketStats,
 };
 
 /// The request socket.
@@ -82,8 +83,9 @@ where
         self
     }
 
-    pub fn stats(&self) -> &ReqStats {
-        &self.state.stats.specific
+    /// Returns the socket stats.
+    pub fn stats(&self) -> &SocketStats<ReqStats> {
+        &self.state.stats
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

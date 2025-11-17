@@ -1,5 +1,6 @@
 use std::{
     io,
+    os::fd::{AsRawFd, RawFd},
     path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
@@ -49,6 +50,12 @@ impl Ipc {
 pub struct IpcStream {
     peer: PathBuf,
     stream: UnixStream,
+}
+
+impl AsRawFd for IpcStream {
+    fn as_raw_fd(&self) -> RawFd {
+        self.stream.as_raw_fd()
+    }
 }
 
 impl IpcStream {

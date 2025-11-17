@@ -10,7 +10,9 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -30,6 +32,85 @@ impl Address for SocketAddr {}
 
 /// File system path, used for IPC transport.
 impl Address for PathBuf {}
+
+/// A wrapper around an `Io` object that provides transport-specific metrics.
+///
+/// # Reasoning
+/// One reason of using a wrapper around the IO object here is that it metrics should be on a
+/// per-connection (or stream) basis. This is a clean way to achieve this without polluting the
+/// [`Transport`] trait or any higher-level users of the transport.
+pub struct MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    /// The inner IO object.
+    inner: Io,
+    /// The shareable metrics for the inner IO object.
+    metrics: Arc<RwLock<M>>,
+    /// The next time the metrics should be refreshed.
+    next_refresh: Instant,
+    /// The interval at which the metrics should be refreshed.
+    refresh_interval: Duration,
+
+    _marker: PhantomData<A>,
+}
+
+impl<Io, M, A> std::ops::Deref for MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    type Target = Io;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<Io, M, A> std::ops::DerefMut for MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<Io, M, A> PeerAddress<A> for MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    fn peer_addr(&self) -> Result<A, io::Error> {
+        self.inner.peer_addr()
+    }
+}
+
+impl<Io, M, A> MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+    M: Default,
+{
+    /// Creates a new `MeteredIo` wrapper around the given `Io` object, and initializes default
+    /// metrics.
+    pub fn new(inner: Io) -> Self {
+        Self {
+            inner,
+            metrics: Default::default(),
+            _marker: PhantomData,
+            next_refresh: Instant::now(),
+            refresh_interval: Duration::from_secs(2),
+        }
+    }
+
+    /// Returns a shared reference to the metrics.
+    pub fn metrics(&self) -> Arc<RwLock<M>> {
+        Arc::clone(&self.metrics)
+    }
+}
 
 /// A transport provides connection-oriented communication between two peers through
 /// ordered and reliable streams of bytes.
