@@ -52,7 +52,7 @@ impl Pipe {
         cmd.arg("dnctl").arg("pipe").arg(self.id.to_string()).arg("config");
 
         if let Some(bandwidth) = self.bandwidth {
-            let bw = format!("{}Kbit/s", bandwidth);
+            let bw = format!("{bandwidth}Kbit/s");
 
             cmd.args(["bw", &bw]);
         }
@@ -237,7 +237,7 @@ impl PacketFilter {
         let endpoint = self.endpoint.expect("No endpoint set");
         let pipe_id = self.pipe.id();
 
-        let echo_command = format!("dummynet in from any to {} pipe {}", endpoint, pipe_id);
+        let echo_command = format!("dummynet in from any to {endpoint} pipe {pipe_id}");
 
         // Set up the echo command
         let mut echo = Command::new("echo").arg(echo_command).stdout(Stdio::piped()).spawn()?;

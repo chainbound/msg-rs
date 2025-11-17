@@ -52,7 +52,7 @@ The 📖 [MSG-RS Book][book] contains detailed information on how to use the lib
 
 ## MSRV
 
-The minimum supported Rust version is 1.75.
+The minimum supported Rust version is 1.85 (in accordance with Edition 2024 crates).
 
 ## Contributions & Bug Reports
 

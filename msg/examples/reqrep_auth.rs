@@ -2,14 +2,14 @@ use bytes::Bytes;
 use msg_socket::ReqOptions;
 use tokio_stream::StreamExt;
 
-use msg::{tcp::Tcp, Authenticator, RepSocket, ReqSocket};
+use msg::{Authenticator, RepSocket, ReqSocket, tcp::Tcp};
 
 #[derive(Default)]
 struct Auth;
 
 impl Authenticator for Auth {
     fn authenticate(&self, id: &Bytes) -> bool {
-        println!("Auth request from: {:?}", id);
+        println!("Auth request from: {id:?}");
         // Custom authentication logic
         true
     }
@@ -41,5 +41,5 @@ async fn main() {
     });
 
     let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
-    println!("Response: {:?}", res);
+    println!("Response: {res:?}");
 }

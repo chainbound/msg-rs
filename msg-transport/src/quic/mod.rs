@@ -3,7 +3,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     pin::Pin,
     sync::Arc,
-    task::{ready, Poll},
+    task::{Poll, ready},
 };
 
 use futures::future::BoxFuture;
@@ -13,7 +13,7 @@ use tracing::{debug, error};
 
 use crate::{Acceptor, Transport, TransportExt};
 
-use msg_common::async_error;
+use msg_common::{SocketAddrExt, async_error};
 
 mod config;
 pub use config::{Config, ConfigBuilder};
@@ -22,6 +22,8 @@ mod stream;
 use stream::QuicStream;
 
 mod tls;
+
+pub(crate) const ALPN_PROTOCOL: &[u8] = b"msg";
 
 /// A QUIC error.
 #[derive(Debug, Error)]
@@ -52,7 +54,7 @@ pub struct Quic {
     endpoint: Option<quinn::Endpoint>,
 
     /// A receiver for incoming connections waiting to be handled.
-    incoming: Option<Receiver<Result<quinn::Connecting, Error>>>,
+    incoming: Option<Receiver<Result<quinn::Incoming, Error>>>,
 }
 
 impl Quic {
@@ -65,10 +67,10 @@ impl Quic {
     /// `addr` is given, the endpoint will be bound to the default address.
     fn new_endpoint(
         &self,
-        addr: Option<SocketAddr>,
+        addr: SocketAddr,
         server_config: Option<quinn::ServerConfig>,
     ) -> Result<quinn::Endpoint, Error> {
-        let socket = UdpSocket::bind(addr.unwrap_or(SocketAddr::from(([0, 0, 0, 0], 0))))?;
+        let socket = UdpSocket::bind(addr)?;
 
         let endpoint = quinn::Endpoint::new(
             self.config.endpoint_config.clone(),
@@ -111,25 +113,26 @@ impl Transport<SocketAddr> for Quic {
         let endpoint = if let Some(endpoint) = self.endpoint.clone() {
             endpoint
         } else {
-            let Ok(endpoint) = self.new_endpoint(None, None) else {
+            let Ok(mut endpoint) = self.new_endpoint(addr.as_unspecified(), None) else {
                 return async_error(Error::ClosedEndpoint);
             };
+
+            endpoint.set_default_client_config(self.config.client_config.clone());
 
             self.endpoint = Some(endpoint.clone());
 
             endpoint
         };
 
-        let client_config = self.config.client_config.clone();
-
         Box::pin(async move {
+            debug!(target = %addr, "Initiating connection");
+
             // This `"l"` seems necessary because an empty string is an invalid domain
             // name. While we don't use domain names, the underlying rustls library
             // is based upon the assumption that we do.
-            let connection =
-                endpoint.connect_with(client_config, addr, "l")?.await.map_err(Error::from)?;
+            let connection = endpoint.connect(addr, "l")?.await?;
 
-            debug!("Connected to {}, opening stream", addr);
+            debug!(target = %addr, "Connected, opening stream...");
 
             // Open a bi-directional stream and return it. We'll think about multiplexing per topic
             // later.
@@ -149,14 +152,15 @@ impl Transport<SocketAddr> for Quic {
             if let Some(ref mut incoming) = this.incoming {
                 // Incoming channel and task are spawned, so we can poll it.
                 match ready!(incoming.poll_recv(cx)) {
-                    Some(Ok(connecting)) => {
-                        let peer = connecting.remote_address();
+                    Some(Ok(incoming)) => {
+                        let peer = incoming.remote_address();
 
                         debug!("New incoming connection from {}", peer);
 
                         // Return a future that resolves to the output.
                         return Poll::Ready(Box::pin(async move {
-                            let connection = connecting.await.map_err(Error::from)?;
+                            debug!(client = %peer, "Accepting connection...");
+                            let connection = incoming.accept()?.await?;
                             debug!(
                                 "Accepted connection from {}, opening stream",
                                 connection.remote_address()
@@ -198,7 +202,9 @@ impl Transport<SocketAddr> for Quic {
                             endpoint.accept().await.ok_or(Error::ClosedEndpoint);
 
                         if tx.send(connection_result).await.is_err() {
-                            error!("Failed to notify new incoming connection, channel closed. Shutting down task.");
+                            error!(
+                                "Failed to notify new incoming connection, channel closed. Shutting down task."
+                            );
                             break;
                         };
                     }
@@ -234,7 +240,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_quic_connection() {
+    async fn test_quic_connection_simple() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let config = Config::default();

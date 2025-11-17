@@ -13,4 +13,4 @@ fmt:
     cargo +nightly fmt --all -- --check
 
 test:
-    cargo nextest run --workspace --retries 3
+    cargo nextest run --workspace --all-features --retries 3 

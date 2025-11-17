@@ -1,10 +1,12 @@
+//! An example of a REQ/REP socket pair communicating over TCP with client authentication i.e.
+//! mutual TLS (mTLS).
+
 use bytes::Bytes;
-use msg_socket::{RepSocket, ReqSocket};
-use msg_transport::{
-    tcp::Tcp,
+use msg::{
+    RepSocket, ReqSocket,
     tcp_tls::{self, TcpTls},
 };
-use tokio_stream::StreamExt;
+use tokio_stream::StreamExt as _;
 
 /// Helper functions.
 mod helpers {
@@ -57,61 +59,8 @@ mod helpers {
     }
 }
 
-#[tokio::test]
-async fn reqrep_works() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let mut rep = RepSocket::new(Tcp::default());
-    let mut req = ReqSocket::new(Tcp::default());
-
-    rep.bind("0.0.0.0:0").await.unwrap();
-
-    req.connect(rep.local_addr().unwrap()).await.unwrap();
-
-    tokio::spawn(async move {
-        while let Some(request) = rep.next().await {
-            let msg = request.msg().clone();
-            request.respond(msg).unwrap();
-        }
-    });
-
-    let hello = Bytes::from_static(b"hello");
-    let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
-}
-
-#[tokio::test]
-async fn reqrep_tls_works() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let server_config = tcp_tls::config::Server::new(helpers::default_acceptor_builder().build());
-    let tcp_tls_server = TcpTls::new_server(server_config);
-    let mut rep = RepSocket::new(tcp_tls_server);
-
-    rep.bind("0.0.0.0:0").await.unwrap();
-
-    let domain = "localhost".to_string();
-    let ssl_connector = helpers::default_connector_builder().build();
-    let tcp_tls_client =
-        TcpTls::new_client(tcp_tls::config::Client::new(domain).with_ssl_connector(ssl_connector));
-    let mut req = ReqSocket::new(tcp_tls_client);
-
-    req.connect(rep.local_addr().unwrap()).await.unwrap();
-
-    tokio::spawn(async move {
-        while let Some(request) = rep.next().await {
-            let msg = request.msg().clone();
-            request.respond(msg).unwrap();
-        }
-    });
-
-    let hello = Bytes::from_static(b"hello");
-    let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
-}
-
-#[tokio::test]
-async fn reqrep_mutual_tls_works() {
+#[tokio::main]
+async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
     let mut acceptor_builder = helpers::default_acceptor_builder();

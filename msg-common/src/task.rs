@@ -1,7 +1,7 @@
-use futures::{future::poll_fn, Future};
+use futures::{Future, future::poll_fn};
 use std::{
     collections::HashSet,
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
 };
 use tokio::task::{JoinError, JoinSet};
 

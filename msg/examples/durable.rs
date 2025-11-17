@@ -4,8 +4,8 @@ use bytes::Bytes;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 
-use msg::{tcp::Tcp, Authenticator, RepSocket, ReqOptions, ReqSocket};
-use tracing::{error, info, info_span, instrument, warn, Instrument};
+use msg::{Authenticator, RepSocket, ReqOptions, ReqSocket, tcp::Tcp};
+use tracing::{Instrument, error, info, info_span, instrument, warn};
 
 #[derive(Default)]
 struct Auth;

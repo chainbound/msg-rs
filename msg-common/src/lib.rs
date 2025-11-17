@@ -4,12 +4,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::time::SystemTime;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    time::SystemTime,
+};
 
 use futures::future::BoxFuture;
 
 mod channel;
-pub use channel::{channel, Channel};
+pub use channel::{Channel, channel};
 
 mod task;
 pub use task::JoinMap;
@@ -32,4 +35,48 @@ pub mod constants {
     pub const KiB: u32 = 1024;
     pub const MiB: u32 = 1024 * KiB;
     pub const GiB: u32 = 1024 * MiB;
+}
+
+/// Extension trait for `SocketAddr`.
+pub trait SocketAddrExt: Sized {
+    /// Returns the unspecified IPv4 socket address, bound to port 0.
+    fn unspecified_v4() -> Self;
+
+    /// Returns the unspecified IPv6 socket address, bound to port 0.
+    fn unspecified_v6() -> Self;
+
+    /// Returns the unspecified socket address of the same family as `other`, bound to port 0.
+    fn as_unspecified(&self) -> Self;
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn unspecified_v4() -> Self {
+        Self::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
+    }
+
+    fn unspecified_v6() -> Self {
+        Self::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0))
+    }
+
+    fn as_unspecified(&self) -> Self {
+        match self {
+            Self::V4(_) => Self::unspecified_v4(),
+            Self::V6(_) => Self::unspecified_v6(),
+        }
+    }
+}
+
+/// Extension trait for IP addresses.
+pub trait IpAddrExt: Sized {
+    /// Returns the localhost address of the same family as `other`.
+    fn as_localhost(&self) -> Self;
+}
+
+impl IpAddrExt for IpAddr {
+    fn as_localhost(&self) -> Self {
+        match self {
+            Self::V4(_) => Self::V4(Ipv4Addr::LOCALHOST),
+            Self::V6(_) => Self::V6(Ipv6Addr::LOCALHOST),
+        }
+    }
 }

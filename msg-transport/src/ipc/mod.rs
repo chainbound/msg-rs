@@ -110,8 +110,7 @@ impl Transport<PathBuf> for Ipc {
             debug!("Socket file already exists. Attempting to remove.");
             if let Err(e) = std::fs::remove_file(&addr) {
                 return Err(io::Error::other(format!(
-                    "Failed to remove existing socket file, {:?}",
-                    e
+                    "Failed to remove existing socket file, {e:?}"
                 )));
             }
         }

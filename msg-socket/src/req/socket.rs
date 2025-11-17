@@ -2,17 +2,17 @@ use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
-use super::{Command, ReqError, ReqOptions, DEFAULT_BUFFER_SIZE};
+use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
-    req::{driver::ReqDriver, stats::ReqStats, SocketState},
     ConnectionState, ExponentialBackoff, ReqMessage,
+    req::{SocketState, driver::ReqDriver, stats::ReqStats},
 };
 
 /// The request socket.

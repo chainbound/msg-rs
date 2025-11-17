@@ -1,10 +1,10 @@
 use bytes::Bytes;
 use futures::StreamExt;
-use msg_transport::{quic::Quic, Transport};
+use msg_transport::{Transport, quic::Quic};
 use std::time::{Duration, Instant};
 use tracing::info;
 
-use msg::{tcp::Tcp, Address, PubOptions, PubSocket, SubOptions, SubSocket};
+use msg::{Address, PubOptions, PubSocket, SubOptions, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {

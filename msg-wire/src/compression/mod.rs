@@ -173,37 +173,37 @@ mod tests {
 
         let gzip = GzipCompressor::new(6);
         let (gzip_time, gzip_perf, gzip_comp) = compression_test(&data, gzip);
-        println!("gzip compression shrank the data by {:.2}% in {:?}", gzip_perf, gzip_time);
+        println!("gzip compression shrank the data by {gzip_perf:.2}% in {gzip_time:?}");
 
         let zstd = ZstdCompressor::new(6);
         let (zstd_time, zstd_perf, zstd_comp) = compression_test(&data, zstd);
-        println!("zstd compression shrank the data by {:.2}% in {:?}", zstd_perf, zstd_time);
+        println!("zstd compression shrank the data by {zstd_perf:.2}% in {zstd_time:?}");
 
         let snappy = SnappyCompressor;
         let (snappy_time, snappy_perf, snappy_comp) = compression_test(&data, snappy);
-        println!("snappy compression shrank the data by {:.2}% in {:?}", snappy_perf, snappy_time);
+        println!("snappy compression shrank the data by {snappy_perf:.2}% in {snappy_time:?}");
 
         let lz4 = Lz4Compressor;
         let (lz4_time, lz4_perf, lz4_comp) = compression_test(&data, lz4);
-        println!("lz4 compression shrank the data by {:.2}% in {:?}", lz4_perf, lz4_time);
+        println!("lz4 compression shrank the data by {lz4_perf:.2}% in {lz4_time:?}");
 
         println!("------ SSZ BLOCK -------");
 
         let gzip = GzipDecompressor;
         let gzip_time = decompression_test(&gzip_comp, gzip);
-        println!("gzip decompression took {:?}", gzip_time);
+        println!("gzip decompression took {gzip_time:?}");
 
         let zstd = ZstdDecompressor;
         let zstd_time = decompression_test(&zstd_comp, zstd);
-        println!("zstd decompression took {:?}", zstd_time);
+        println!("zstd decompression took {zstd_time:?}");
 
         let snappy = SnappyDecompressor;
         let snappy_time = decompression_test(&snappy_comp, snappy);
-        println!("snappy decompression took {:?}", snappy_time);
+        println!("snappy decompression took {snappy_time:?}");
 
         let lz4 = Lz4Decompressor;
         let lz4_time = decompression_test(&lz4_comp, lz4);
-        println!("lz4 decompression took {:?}", lz4_time);
+        println!("lz4 decompression took {lz4_time:?}");
     }
 
     #[test]
@@ -216,36 +216,36 @@ mod tests {
 
         let gzip = GzipCompressor::new(6);
         let (gzip_time, gzip_perf, gzip_comp) = compression_test(&data, gzip);
-        println!("gzip compression shrank the data by {:.2}% in {:?}", gzip_perf, gzip_time);
+        println!("gzip compression shrank the data by {gzip_perf:.2}% in {gzip_time:?}");
 
         let zstd = ZstdCompressor::new(6);
         let (zstd_time, zstd_perf, zstd_comp) = compression_test(&data, zstd);
-        println!("zstd compression shrank the data by {:.2}% in {:?}", zstd_perf, zstd_time);
+        println!("zstd compression shrank the data by {zstd_perf:.2}% in {zstd_time:?}");
 
         let snappy = SnappyCompressor;
         let (snappy_time, snappy_perf, snappy_comp) = compression_test(&data, snappy);
-        println!("snappy compression shrank the data by {:.2}% in {:?}", snappy_perf, snappy_time);
+        println!("snappy compression shrank the data by {snappy_perf:.2}% in {snappy_time:?}");
 
         let lz4 = Lz4Compressor;
         let (lz4_time, lz4_perf, lz4_comp) = compression_test(&data, lz4);
-        println!("lz4 compression shrank the data by {:.2}% in {:?}", lz4_perf, lz4_time);
+        println!("lz4 compression shrank the data by {lz4_perf:.2}% in {lz4_time:?}");
 
         println!("------ BLOB TX ------");
 
         let gzip = GzipDecompressor;
         let gzip_time = decompression_test(&gzip_comp, gzip);
-        println!("gzip decompression took {:?}", gzip_time);
+        println!("gzip decompression took {gzip_time:?}");
 
         let zstd = ZstdDecompressor;
         let zstd_time = decompression_test(&zstd_comp, zstd);
-        println!("zstd decompression took {:?}", zstd_time);
+        println!("zstd decompression took {zstd_time:?}");
 
         let snappy = SnappyDecompressor;
         let snappy_time = decompression_test(&snappy_comp, snappy);
-        println!("snappy decompression took {:?}", snappy_time);
+        println!("snappy decompression took {snappy_time:?}");
 
         let lz4 = Lz4Decompressor;
         let lz4_time = decompression_test(&lz4_comp, lz4);
-        println!("lz4 decompression took {:?}", lz4_time);
+        println!("lz4 decompression took {lz4_time:?}");
     }
 }

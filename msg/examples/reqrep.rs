@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{tcp::Tcp, RepSocket, ReqSocket};
+use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +23,7 @@ async fn main() {
     });
 
     let res: Bytes = req.request(Bytes::from("helloooo!")).await.unwrap();
-    println!("Response: {:?}", res);
+    println!("Response: {res:?}");
 
     // Access the socket statistics
     let stats = req.stats();

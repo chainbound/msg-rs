@@ -10,7 +10,7 @@ use futures::{Future, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, error, warn};
 
-use msg_common::{unix_micros, Channel};
+use msg_common::{Channel, unix_micros};
 use msg_transport::Address;
 use msg_wire::pubsub;
 

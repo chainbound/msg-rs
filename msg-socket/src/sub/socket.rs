@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     path::PathBuf,
     pin::Pin,
     sync::Arc,
@@ -10,11 +10,11 @@ use std::{
 use futures::Stream;
 use rustc_hash::FxHashMap;
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
 };
 
-use msg_common::JoinMap;
+use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
 // ADDED: Import the specific SubStats struct for the API
@@ -24,12 +24,12 @@ use super::{
     // REMOVED: Old/removed stats structs
     // Command, PubMessage, SocketState, SocketStats, SocketWideStats, SubDriver, SubError,
     Command,
+    DEFAULT_BUFFER_SIZE,
     PubMessage,
     SocketState,
     SubDriver,
     SubError,
     SubOptions,
-    DEFAULT_BUFFER_SIZE,
 };
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
@@ -61,8 +61,7 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            // TODO: support IPv6
-            endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            endpoint.set_ip(endpoint.ip().as_localhost());
         }
 
         self.connect_inner(endpoint).await
@@ -76,8 +75,7 @@ where
         // Some transport implementations (e.g. Quinn) can't dial an unspecified
         // IP address, so replace it with localhost.
         if endpoint.ip().is_unspecified() {
-            // TODO: support IPv6
-            endpoint.set_ip(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            endpoint.set_ip(endpoint.ip().as_localhost());
         }
 
         self.try_connect_inner(endpoint)

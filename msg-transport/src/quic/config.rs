@@ -1,8 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use quinn::{congestion::ControllerFactory, IdleTimeout};
+use quinn::{IdleTimeout, congestion::ControllerFactory};
 
-use super::tls::{self_signed_certificate, unsafe_client_config};
+use crate::quic::tls::tls_server_config;
+
+use super::tls::unsafe_client_config;
 
 use msg_common::constants::MiB;
 
@@ -96,17 +98,13 @@ where
             .min_mtu(self.initial_mtu)
             .allow_spin(false)
             .stream_receive_window((8 * stream_rwnd).into())
-            .congestion_controller_factory(self.cc)
+            .congestion_controller_factory(Arc::new(self.cc))
             .initial_rtt(Duration::from_millis(self.expected_rtt.into()))
             .send_window((8 * stream_rwnd).into());
 
         let transport = Arc::new(transport);
-        let (cert, key) = self_signed_certificate();
 
-        let mut server_config =
-            quinn::ServerConfig::with_single_cert(cert, key).expect("Valid rustls config");
-
-        server_config.use_retry(true);
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_server_config()));
         server_config.transport_config(Arc::clone(&transport));
 
         let mut client_config = quinn::ClientConfig::new(Arc::new(unsafe_client_config()));
@@ -154,12 +152,9 @@ impl Default for Config {
             .send_window((8 * STREAM_RWND).into());
 
         let transport = Arc::new(transport);
-        let (cert, key) = self_signed_certificate();
 
-        let mut server_config =
-            quinn::ServerConfig::with_single_cert(cert, key).expect("Valid rustls config");
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_server_config()));
 
-        server_config.use_retry(true);
         server_config.transport_config(Arc::clone(&transport));
 
         let mut client_config = quinn::ClientConfig::new(Arc::new(unsafe_client_config()));

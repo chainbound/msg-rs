@@ -8,7 +8,7 @@ use tracing::info;
 
 use msg_sim::{Protocol, Simulation, SimulationConfig, Simulator};
 use msg_socket::{PubSocket, SubSocket};
-use msg_transport::{quic::Quic, tcp::Tcp, Address, Transport};
+use msg_transport::{Address, Transport, quic::Quic, tcp::Tcp};
 
 #[cfg(target_os = "linux")]
 use msg_sim::namepsace::run_on_namespace;

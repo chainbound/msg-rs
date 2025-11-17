@@ -3,7 +3,7 @@ use msg_socket::{RepOptions, ReqOptions};
 use msg_wire::compression::GzipCompressor;
 use tokio_stream::StreamExt;
 
-use msg::{tcp::Tcp, RepSocket, ReqSocket};
+use msg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -36,5 +36,5 @@ async fn main() {
     });
 
     let res: Bytes = req.request(Bytes::from("hello")).await.unwrap();
-    println!("Response: {:?}", res);
+    println!("Response: {res:?}");
 }
