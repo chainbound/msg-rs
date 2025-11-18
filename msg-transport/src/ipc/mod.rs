@@ -96,9 +96,7 @@ type NoStats = ();
 
 impl From<&IpcStream> for NoStats {
     // TODO: Implement stats for IPC
-    fn from(_: &IpcStream) -> Self {
-        ()
-    }
+    fn from(_: &IpcStream) -> Self {}
 }
 
 #[async_trait]
