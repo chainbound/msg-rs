@@ -46,3 +46,7 @@ harness = false
 [[bench]]
 name = "pubsub"
 harness = false
+
+[[example]]
+name = "quic_vs_tcp"
+required-features = ["quic"]

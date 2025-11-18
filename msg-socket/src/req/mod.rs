@@ -1,5 +1,6 @@
+use arc_swap::ArcSwap;
 use bytes::Bytes;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -57,7 +58,8 @@ pub struct ReqOptions {
     /// Default is `None`, and the connection is flushed after every send.
     flush_interval: Option<std::time::Duration>,
     /// The maximum number of bytes that can be buffered in the session before being flushed.
-    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    /// This internally sets
+    /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed::set_backpressure_boundary).
     backpressure_boundary: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
@@ -180,7 +182,19 @@ impl ReqMessage {
 }
 
 /// The request socket state, shared between the backend task and the socket.
+/// Generic over the transport-level stats type.
 #[derive(Debug, Default)]
-pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats<ReqStats>,
+pub(crate) struct SocketState<S: Default> {
+    /// The socket stats.
+    pub(crate) stats: Arc<SocketStats<ReqStats>>,
+    /// The transport-level stats. We wrap the inner stats in an `Arc`
+    /// for cheap clone on read.
+    pub(crate) transport_stats: Arc<ArcSwap<S>>,
+}
+
+// Manual clone implementation needed here because `S` is not `Clone`.
+impl<S: Default> Clone for SocketState<S> {
+    fn clone(&self) -> Self {
+        Self { stats: Arc::clone(&self.stats), transport_stats: self.transport_stats.clone() }
+    }
 }

@@ -158,7 +158,7 @@ impl<A: Address> PubMessage<A> {
 }
 
 /// The subscriber socket state, shared between the backend task and the socket frontend.
-#[derive(Debug)] // Should derive default fine now
+#[derive(Debug)]
 pub(crate) struct SocketState<A: Address> {
     pub(crate) stats: SocketStats<SubStats<A>>,
 }
@@ -184,7 +184,7 @@ mod tests {
     use super::*;
 
     async fn spawn_listener() -> SocketAddr {
-        let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let listener = TcpListener::bind("[::]:0").await.unwrap();
 
         let addr = listener.local_addr().unwrap();
 

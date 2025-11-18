@@ -9,6 +9,7 @@ pub struct QuicStream {
     pub(super) peer: SocketAddr,
     pub(super) send: quinn::SendStream,
     pub(super) recv: quinn::RecvStream,
+    pub(super) conn: quinn::Connection,
 }
 
 impl AsyncRead for QuicStream {

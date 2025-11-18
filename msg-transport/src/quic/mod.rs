@@ -16,12 +16,11 @@ use crate::{Acceptor, Transport, TransportExt};
 use msg_common::{SocketAddrExt, async_error};
 
 mod config;
-pub use config::{Config, ConfigBuilder};
-
 mod stream;
-use stream::QuicStream;
-
 mod tls;
+
+pub use config::{Config, ConfigBuilder};
+use stream::QuicStream;
 
 pub(crate) const ALPN_PROTOCOL: &[u8] = b"msg";
 
@@ -83,8 +82,17 @@ impl Quic {
     }
 }
 
+impl TryFrom<&QuicStream> for quinn::ConnectionStats {
+    type Error = std::io::Error;
+
+    fn try_from(stream: &QuicStream) -> Result<Self, Self::Error> {
+        Ok(stream.conn.stats())
+    }
+}
+
 #[async_trait::async_trait]
 impl Transport<SocketAddr> for Quic {
+    type Stats = quinn::ConnectionStats;
     type Io = QuicStream;
 
     type Error = Error;
@@ -139,7 +147,7 @@ impl Transport<SocketAddr> for Quic {
             connection
                 .open_bi()
                 .await
-                .map(|(send, recv)| QuicStream { peer: addr, send, recv })
+                .map(|(send, recv)| QuicStream { peer: addr, send, recv, conn: connection })
                 .map_err(Error::from)
         })
     }
@@ -171,7 +179,12 @@ impl Transport<SocketAddr> for Quic {
                             connection
                                 .accept_bi()
                                 .await
-                                .map(|(send, recv)| QuicStream { peer, send, recv })
+                                .map(|(send, recv)| QuicStream {
+                                    peer,
+                                    send,
+                                    recv,
+                                    conn: connection,
+                                })
                                 .map_err(Error::from)
                         }));
                     }

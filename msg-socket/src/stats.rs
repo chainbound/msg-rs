@@ -1,7 +1,11 @@
 use std::fmt::Debug;
 
-#[derive(Debug)]
+use derive_more::Deref;
+
+/// Statistics for a socket.
+#[derive(Debug, Deref)]
 pub struct SocketStats<S> {
+    /// Socket-specific stats.
     pub(crate) specific: S,
 }
 

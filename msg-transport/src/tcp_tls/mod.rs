@@ -15,7 +15,7 @@ use tracing::debug;
 
 use msg_common::async_error;
 
-use crate::{Acceptor, PeerAddress, Transport, TransportExt};
+use crate::{Acceptor, PeerAddress, Transport, TransportExt, tcp::TcpStats};
 
 pub mod config;
 
@@ -165,8 +165,17 @@ impl PeerAddress<SocketAddr> for TcpTlsStream {
     }
 }
 
+impl TryFrom<&TcpTlsStream> for TcpStats {
+    type Error = std::io::Error;
+
+    fn try_from(stream: &TcpTlsStream) -> Result<Self, Self::Error> {
+        TcpStats::try_from(stream.get_ref())
+    }
+}
+
 #[async_trait::async_trait]
 impl Transport<SocketAddr> for TcpTls {
+    type Stats = TcpStats;
     type Io = TcpTlsStream;
 
     type Error = Error;

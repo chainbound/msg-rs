@@ -1,11 +1,11 @@
 [workspace]
 members = [
-  "msg",
-  "msg-socket",
-  "msg-wire",
-  "msg-transport",
-  "msg-common",
-  "msg-sim",
+    "msg",
+    "msg-socket",
+    "msg-wire",
+    "msg-transport",
+    "msg-common",
+    "msg-sim",
 ]
 resolver = "2"
 
@@ -19,19 +19,19 @@ authors = ["Chainbound Developers <dev@chainbound.io>"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
 keywords = [
-  "messaging",
-  "distributed",
-  "systems",
-  "networking",
-  "quic",
-  "quinn",
-  "tokio",
-  "async",
-  "simulation",
-  "pnet",
-  "udp",
-  "tcp",
-  "socket",
+    "messaging",
+    "distributed",
+    "systems",
+    "networking",
+    "quic",
+    "quinn",
+    "tokio",
+    "async",
+    "simulation",
+    "pnet",
+    "udp",
+    "tcp",
+    "socket",
 ]
 
 [workspace.dependencies]
@@ -56,12 +56,14 @@ thiserror = "1"
 tracing = "0.1"
 rustc-hash = "1"
 rand = "0.8"
+libc = "0.2"
 derive_more = { version = "2.0.1", features = [
-  "from",
-  "into",
-  "deref",
-  "deref_mut",
+    "from",
+    "into",
+    "deref",
+    "deref_mut",
 ] }
+arc-swap = "1.7.1"
 
 # networking
 quinn = "0.11.9"
