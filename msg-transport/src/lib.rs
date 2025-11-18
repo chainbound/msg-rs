@@ -33,7 +33,7 @@ impl Address for SocketAddr {}
 /// File system path, used for IPC transport.
 impl Address for PathBuf {}
 
-/// A wrapper around an `Io` object that provides transport-specific metrics.
+/// A wrapper around an `Io` object that records and provides transport-specific metrics.
 ///
 /// # Reasoning
 /// One reason of using a wrapper around the IO object here is that it metrics should be on a
