@@ -12,6 +12,7 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Check for GitHub Actions updates
   - package-ecosystem: github-actions
     directory: /
     schedule:
