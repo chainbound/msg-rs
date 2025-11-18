@@ -1,0 +1,18 @@
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#package-ecosystem-
+
+version: 2
+updates:
+  # Check for Cargo package updates
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+  # Check for Rust toolchain updates
+  - package-ecosystem: rust-toolchain
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
