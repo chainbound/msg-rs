@@ -1,7 +1,10 @@
 use bytes::Bytes;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
 use thiserror::Error;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 
 use msg_wire::{
     compression::{CompressionType, Compressor},
@@ -185,8 +188,7 @@ impl ReqMessage {
 pub(crate) struct SocketState<S> {
     /// The socket stats.
     pub(crate) stats: Arc<SocketStats<ReqStats>>,
-    /// The transport stats. This is None until a connection is established.
-    pub(crate) transport: (watch::Sender<Arc<S>>, watch::Receiver<Arc<S>>),
+    pub(crate) transport: Arc<RwLock<Arc<S>>>,
 }
 
 // Manual clone implementation needed here because `S` is n`.

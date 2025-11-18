@@ -279,8 +279,7 @@ where
                     if let Ok(io) = result {
                         tracing::debug!(target = ?io.peer_addr(), "new connection");
 
-                        let tx = this.socket_state.transport.0.clone();
-                        let metered = MeteredIo::new(io, tx);
+                        let metered = MeteredIo::new(io, Arc::clone(&this.socket_state.transport));
 
                         let mut framed = Framed::new(metered, reqrep::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);

@@ -3,10 +3,7 @@ use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
-    sync::{
-        mpsc, oneshot,
-        watch::{self},
-    },
+    sync::{mpsc, oneshot},
 };
 
 use msg_transport::{Address, Transport};
@@ -76,7 +73,7 @@ where
             options: Arc::new(options),
             state: SocketState {
                 stats: Arc::new(SocketStats::default()),
-                transport: watch::channel(Arc::new(T::Stats::default())),
+                transport: Default::default(),
             },
             compressor: None,
             _marker: PhantomData,
@@ -96,9 +93,7 @@ where
 
     /// Borrow the latest transport-level stats snapshot.
     pub fn transport_stats(&self) -> Arc<T::Stats> {
-        // NOTE: We clone the Arc here because purely borrowing the inner stats
-        // would lock the channel.
-        self.state.transport.1.borrow().clone()
+        Arc::clone(&self.state.transport.read().unwrap())
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

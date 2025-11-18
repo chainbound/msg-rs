@@ -10,17 +10,14 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::watch,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod ipc;
 #[cfg(feature = "quic")]
@@ -47,7 +44,7 @@ where
     /// The inner IO object.
     inner: Io,
     /// The sender for the stats.
-    sender: watch::Sender<Arc<S>>,
+    stats: Arc<RwLock<Arc<S>>>,
     /// The next time the stats should be refreshed.
     next_refresh: Instant,
     /// The interval at which the stats should be refreshed.
@@ -130,10 +127,10 @@ where
     /// stats. The `sender` is used to send the latest stats to the caller.
     ///
     /// TODO: Specify configuration options.
-    pub fn new(inner: Io, sender: watch::Sender<Arc<S>>) -> Self {
+    pub fn new(inner: Io, stats: Arc<RwLock<Arc<S>>>) -> Self {
         Self {
             inner,
-            sender,
+            stats,
             _marker: PhantomData,
             next_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
@@ -146,9 +143,7 @@ where
         if self.next_refresh <= now {
             match S::try_from(&self.inner) {
                 Ok(stats) => {
-                    if let Err(e) = self.sender.send(Arc::new(stats)) {
-                        tracing::error!(err = ?e, "failed to update transport stats");
-                    }
+                    *self.stats.write().unwrap() = Arc::new(stats);
                 }
                 Err(e) => tracing::error!(errror = ?e, "failed to gather transport stats"),
             }
