@@ -1,5 +1,5 @@
+use arc_swap::ArcSwap;
 use bytes::Bytes;
-use parking_lot::RwLock;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -189,7 +189,7 @@ pub(crate) struct SocketState<S: Default> {
     pub(crate) stats: Arc<SocketStats<ReqStats>>,
     /// The transport-level stats. We wrap the inner stats in an `Arc`
     /// for cheap clone on read.
-    pub(crate) transport_stats: Arc<RwLock<Arc<S>>>,
+    pub(crate) transport_stats: Arc<ArcSwap<S>>,
 }
 
 // Manual clone implementation needed here because `S` is not `Clone`.

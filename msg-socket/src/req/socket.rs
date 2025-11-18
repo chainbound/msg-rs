@@ -1,3 +1,4 @@
+use arc_swap::Guard;
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -89,8 +90,8 @@ where
     }
 
     /// Get the latest transport-level stats snapshot.
-    pub fn transport_stats(&self) -> Arc<T::Stats> {
-        Arc::clone(&self.state.transport_stats.read())
+    pub fn transport_stats(&self) -> Guard<Arc<T::Stats>> {
+        self.state.transport_stats.load()
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

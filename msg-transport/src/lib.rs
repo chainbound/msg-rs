@@ -15,9 +15,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
-use parking_lot::RwLock;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod ipc;
@@ -47,7 +47,7 @@ where
     /// The inner IO object.
     inner: Io,
     /// The sender for the stats.
-    stats: Arc<RwLock<Arc<S>>>,
+    stats: Arc<ArcSwap<S>>,
     /// The next time the stats should be refreshed.
     next_refresh: Instant,
     /// The interval at which the stats should be refreshed.
@@ -130,7 +130,7 @@ where
     /// stats. The `sender` is used to send the latest stats to the caller.
     ///
     /// TODO: Specify configuration options.
-    pub fn new(inner: Io, stats: Arc<RwLock<Arc<S>>>) -> Self {
+    pub fn new(inner: Io, stats: Arc<ArcSwap<S>>) -> Self {
         Self {
             inner,
             stats,
@@ -146,7 +146,7 @@ where
         if self.next_refresh <= now {
             match S::try_from(&self.inner) {
                 Ok(stats) => {
-                    *self.stats.write() = Arc::new(stats);
+                    self.stats.store(Arc::new(stats));
                 }
                 Err(e) => tracing::error!(errror = ?e, "failed to gather transport stats"),
             }

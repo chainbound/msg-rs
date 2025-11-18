@@ -25,6 +25,7 @@ rustc-hash.workspace = true
 tracing.workspace = true
 tokio-stream.workspace = true
 parking_lot.workspace = true
+arc-swap.workspace = true
 
 derive_more = { workspace = true, features = ["deref"] }
 
