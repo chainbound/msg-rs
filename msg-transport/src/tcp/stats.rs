@@ -32,29 +32,6 @@ pub struct TcpStats {
     pub retransmission_timeout: Duration,
 }
 
-/// Helper function to get a socket option from a TCP stream.
-fn getsockopt<T>(stream: &TcpStream) -> std::io::Result<T> {
-    let mut info = unsafe { std::mem::zeroed::<T>() };
-    let mut len = std::mem::size_of::<T>() as libc::socklen_t;
-    let dst = &mut info as *mut _ as *mut _;
-
-    let result = unsafe {
-        libc::getsockopt(
-            stream.as_raw_fd(),
-            libc::IPPROTO_TCP,
-            libc::TCP_CONNECTION_INFO,
-            dst,
-            &mut len,
-        )
-    };
-
-    if result != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    Ok(info)
-}
-
 #[cfg(target_os = "macos")]
 impl TryFrom<&TcpStream> for TcpStats {
     type Error = std::io::Error;
@@ -62,7 +39,7 @@ impl TryFrom<&TcpStream> for TcpStats {
     /// Gathers stats from the given TCP socket file descriptor, sourced from the OS with
     /// [`libc::getsockopt`].
     fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let info = getsockopt::<libc::tcp_connection_info>(stream)?;
+        let info = getsockopt::<libc::tcp_connection_info>(stream, libc::TCP_CONNECTION_INFO)?;
 
         Ok(info.into())
     }
@@ -114,7 +91,7 @@ impl TryFrom<&TcpStream> for TcpStats {
     /// Gathers stats from the given TCP socket file descriptor, sourced from the OS with
     /// [`libc::getsockopt`].
     fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let info = getsockopt::<libc::tcp_info>(stream)?;
+        let info = getsockopt::<libc::tcp_info>(stream, libc::TCP_INFO)?;
 
         Ok(info.into())
     }
@@ -149,4 +126,20 @@ impl From<libc::tcp_info> for TcpStats {
             retransmission_timeout,
         }
     }
+}
+
+/// Helper function to get a socket option from a TCP stream.
+fn getsockopt<T>(stream: &TcpStream, option: libc::c_int) -> std::io::Result<T> {
+    let mut info = unsafe { std::mem::zeroed::<T>() };
+    let mut len = std::mem::size_of::<T>() as libc::socklen_t;
+    let dst = &mut info as *mut _ as *mut _;
+
+    let result =
+        unsafe { libc::getsockopt(stream.as_raw_fd(), libc::IPPROTO_TCP, option, dst, &mut len) };
+
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(info)
 }
