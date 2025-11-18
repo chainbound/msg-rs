@@ -92,11 +92,12 @@ impl PeerAddress<PathBuf> for IpcStream {
     }
 }
 
-impl TryFrom<&IpcStream> for () {
-    type Error = std::io::Error;
+type NoStats = ();
 
-    fn try_from(_: &IpcStream) -> Result<Self, Self::Error> {
-        Ok(())
+impl From<&IpcStream> for NoStats {
+    // TODO: Implement stats for IPC
+    fn from(_: &IpcStream) -> Self {
+        ()
     }
 }
 

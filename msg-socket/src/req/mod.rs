@@ -182,16 +182,19 @@ impl ReqMessage {
 }
 
 /// The request socket state, shared between the backend task and the socket.
+/// Generic over the transport-level stats type.
 #[derive(Debug, Default)]
 pub(crate) struct SocketState<S: Default> {
     /// The socket stats.
     pub(crate) stats: Arc<SocketStats<ReqStats>>,
-    pub(crate) transport: Arc<RwLock<Arc<S>>>,
+    /// The transport-level stats. We wrap the inner stats in an `Arc`
+    /// for cheap clone on read.
+    pub(crate) transport_stats: Arc<RwLock<Arc<S>>>,
 }
 
 // Manual clone implementation needed here because `S` is not `Clone`.
 impl<S: Default> Clone for SocketState<S> {
     fn clone(&self) -> Self {
-        Self { stats: Arc::clone(&self.stats), transport: self.transport.clone() }
+        Self { stats: Arc::clone(&self.stats), transport_stats: self.transport_stats.clone() }
     }
 }

@@ -90,7 +90,7 @@ where
 
     /// Get the latest transport-level stats snapshot.
     pub fn transport_stats(&self) -> Arc<T::Stats> {
-        Arc::clone(&self.state.transport.read())
+        Arc::clone(&self.state.transport_stats.read())
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
