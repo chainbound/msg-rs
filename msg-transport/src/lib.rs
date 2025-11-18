@@ -10,14 +10,16 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, RwLock},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    sync::watch,
+};
 
 pub mod ipc;
 #[cfg(feature = "quic")]
@@ -39,42 +41,74 @@ impl Address for PathBuf {}
 /// One reason of using a wrapper around the IO object here is that it metrics should be on a
 /// per-connection (or stream) basis. This is a clean way to achieve this without polluting the
 /// [`Transport`] trait or any higher-level users of the transport.
-pub struct MeteredIo<Io, M, A>
+pub struct MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A>,
     A: Address,
 {
     /// The inner IO object.
     inner: Io,
-    /// The shareable metrics for the inner IO object.
-    metrics: Arc<RwLock<M>>,
-    /// The next time the metrics should be refreshed.
+    /// The sender for the stats.
+    sender: watch::Sender<S>,
+    /// The next time the stats should be refreshed.
     next_refresh: Instant,
-    /// The interval at which the metrics should be refreshed.
+    /// The interval at which the stats should be refreshed.
     refresh_interval: Duration,
 
     _marker: PhantomData<A>,
 }
 
-impl<Io, M, A> std::ops::Deref for MeteredIo<Io, M, A>
+impl<Io, S, A> AsyncRead for MeteredIo<Io, S, A>
 where
-    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
     A: Address,
+    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
 {
-    type Target = Io;
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
 
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_read(cx, buf)
     }
 }
 
-impl<Io, M, A> std::ops::DerefMut for MeteredIo<Io, M, A>
+impl<Io, S, A> AsyncWrite for MeteredIo<Io, S, A>
 where
-    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
     A: Address,
+    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
 {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_shutdown(cx)
     }
 }
 
@@ -88,27 +122,39 @@ where
     }
 }
 
-impl<Io, M, A> MeteredIo<Io, M, A>
+impl<Io, S, A> MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A>,
     A: Address,
-    M: Default,
+    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
 {
     /// Creates a new `MeteredIo` wrapper around the given `Io` object, and initializes default
-    /// metrics.
-    pub fn new(inner: Io) -> Self {
+    /// stats. The `sender` is used to send the latest stats to the caller.
+    pub fn new(inner: Io, sender: watch::Sender<S>) -> Self {
         Self {
             inner,
-            metrics: Default::default(),
+            sender,
             _marker: PhantomData,
             next_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
         }
     }
 
-    /// Returns a shared reference to the metrics.
-    pub fn metrics(&self) -> Arc<RwLock<M>> {
-        Arc::clone(&self.metrics)
+    #[inline]
+    fn maybe_refresh(&mut self) {
+        let now = Instant::now();
+        if self.next_refresh <= now {
+            match S::try_from(&self.inner) {
+                Ok(stats) => {
+                    if let Err(e) = self.sender.send(stats) {
+                        tracing::error!(err = ?e, "failed to update TCP stats");
+                    }
+                }
+                Err(e) => tracing::error!(err = ?e, "failed to gather TCP stats"),
+            }
+
+            self.next_refresh = now + self.refresh_interval;
+        }
     }
 }
 
@@ -123,6 +169,9 @@ pub trait Transport<A: Address> {
     /// The output type is transport-specific, and can be a handle to directly write to the
     /// connection, or it can be a substream multiplexer in the case of stream protocols.
     type Io: AsyncRead + AsyncWrite + PeerAddress<A> + Send + Unpin;
+
+    /// The statistics for the transport (specifically its underlying IO object).
+    type Stats: Default + Send + Sync + for<'a> TryFrom<&'a Self::Io>;
 
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;

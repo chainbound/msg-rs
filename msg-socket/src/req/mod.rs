@@ -1,7 +1,7 @@
 use bytes::Bytes;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use msg_wire::{
     compression::{CompressionType, Compressor},
@@ -181,8 +181,17 @@ impl ReqMessage {
 }
 
 /// The request socket state, shared between the backend task and the socket.
-#[derive(Debug, Default)]
-pub(crate) struct SocketState {
+#[derive(Debug)]
+pub(crate) struct SocketState<S> {
     /// The socket stats.
-    pub(crate) stats: SocketStats<ReqStats>,
+    pub(crate) stats: Arc<SocketStats<ReqStats>>,
+    /// The transport stats. This is None until a connection is established.
+    pub(crate) transport: (watch::Sender<S>, watch::Receiver<S>),
+}
+
+// Manual clone implementation needed here because `S` is n`.
+impl<S> Clone for SocketState<S> {
+    fn clone(&self) -> Self {
+        Self { stats: Arc::clone(&self.stats), transport: self.transport.clone() }
+    }
 }

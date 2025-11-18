@@ -1,79 +1,9 @@
-use std::{
-    net::SocketAddr,
-    os::fd::AsRawFd,
-    pin::Pin,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+use std::{os::fd::AsRawFd, time::Duration};
 
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
-};
-
-use crate::MeteredIo;
-
-impl MeteredIo<TcpStream, TcpMetrics, SocketAddr> {
-    #[inline]
-    fn maybe_refresh(&mut self) {
-        let now = Instant::now();
-        if self.next_refresh <= now {
-            match TcpMetrics::gather(&self.inner) {
-                Ok(metrics) => *self.metrics.write().unwrap() = metrics,
-                Err(e) => tracing::error!(err = ?e, "failed to gather TCP metrics"),
-            }
-
-            self.next_refresh = now + self.refresh_interval;
-        }
-    }
-}
-
-impl AsyncRead for MeteredIo<TcpStream, TcpMetrics, SocketAddr> {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let this = self.get_mut();
-
-        this.maybe_refresh();
-
-        Pin::new(&mut this.inner).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for MeteredIo<TcpStream, TcpMetrics, SocketAddr> {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        let this = self.get_mut();
-
-        this.maybe_refresh();
-
-        Pin::new(&mut this.inner).poll_write(cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        let this = self.get_mut();
-
-        this.maybe_refresh();
-
-        Pin::new(&mut this.inner).poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        let this = self.get_mut();
-
-        this.maybe_refresh();
-
-        Pin::new(&mut this.inner).poll_shutdown(cx)
-    }
-}
+use tokio::net::TcpStream;
 
 #[derive(Debug, Default)]
-pub struct TcpMetrics {
+pub struct TcpStats {
     /// The congestion window in bytes.
     pub cwnd: u32,
     /// The peer's advertised receive window in bytes.
@@ -96,10 +26,12 @@ pub struct TcpMetrics {
     pub rto: Duration,
 }
 
-impl TcpMetrics {
+impl TryFrom<&TcpStream> for TcpStats {
+    type Error = std::io::Error;
+
     /// Gathers stats from the given TCP socket file descriptor, sourced from the OS with
     /// [`libc::getsockopt`].
-    pub fn gather(stream: &TcpStream) -> Result<Self, std::io::Error> {
+    fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
         let mut info = unsafe { std::mem::zeroed::<libc::tcp_connection_info>() };
         let mut len = std::mem::size_of::<libc::tcp_connection_info>() as libc::socklen_t;
 
@@ -122,7 +54,7 @@ impl TcpMetrics {
 }
 
 #[cfg(target_os = "macos")]
-impl From<libc::tcp_connection_info> for TcpMetrics {
+impl From<libc::tcp_connection_info> for TcpStats {
     /// Converts a [`libc::tcp_connection_info`] into [`TcpMetrics`].
     fn from(info: libc::tcp_connection_info) -> Self {
         // Window sizes

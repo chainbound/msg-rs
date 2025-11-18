@@ -33,4 +33,7 @@ async fn main() {
         stats.bytes_rx(),
         stats.rtt()
     );
+
+    let transport_stats = req.transport_stats();
+    println!("Transport stats: {:?}", transport_stats);
 }

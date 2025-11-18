@@ -1,14 +1,15 @@
-use std::{net::SocketAddr, pin::Pin};
+use std::{net::SocketAddr, pin::Pin, time::Instant};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::PeerAddress;
+use crate::{MeteredIo, PeerAddress};
 
 /// A bi-directional QUIC stream that implements [`AsyncRead`] + [`AsyncWrite`].
 pub struct QuicStream {
     pub(super) peer: SocketAddr,
     pub(super) send: quinn::SendStream,
     pub(super) recv: quinn::RecvStream,
+    pub(super) conn: quinn::Connection,
 }
 
 impl AsyncRead for QuicStream {

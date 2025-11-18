@@ -20,7 +20,7 @@ use tracing::{debug, error, trace};
 use super::{Command, ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, req::SocketState};
 
-use msg_transport::{Address, Transport};
+use msg_transport::{Address, MeteredIo, PeerAddress as _, Transport};
 use msg_wire::{
     auth,
     compression::{Compressor, try_decompress_payload},
@@ -31,7 +31,8 @@ use msg_wire::{
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
-type ConnectionCtl<Io, Addr> = ConnectionState<Framed<Io, reqrep::Codec>, ExponentialBackoff, Addr>;
+type ConnectionCtl<Io, S, A> =
+    ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
 /// The request socket driver. Endless future that drives
 /// the socket forward.
@@ -39,7 +40,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
-    pub(crate) socket_state: Arc<SocketState>,
+    pub(crate) socket_state: SocketState<T::Stats>,
     /// ID counter for outgoing requests.
     pub(crate) id_counter: u32,
     /// Commands from the socket.
@@ -52,7 +53,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state: ConnectionCtl<T::Io, A>,
+    pub(crate) conn_state: ConnectionCtl<T::Io, T::Stats, A>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -276,7 +277,12 @@ where
                     this.conn_task = None;
 
                     if let Ok(io) = result {
-                        let mut framed = Framed::new(io, reqrep::Codec::new());
+                        tracing::debug!(target = ?io.peer_addr(), "new connection");
+
+                        let tx = this.socket_state.transport.0.clone();
+                        let metered = MeteredIo::new(io, tx);
+
+                        let mut framed = Framed::new(metered, reqrep::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
                         this.conn_state = ConnectionState::Active { channel: framed };
                     }

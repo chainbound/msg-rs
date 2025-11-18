@@ -9,10 +9,10 @@ use tracing::debug;
 
 use msg_common::async_error;
 
-use crate::{Acceptor, MeteredIo, PeerAddress, Transport, TransportExt};
+use crate::{Acceptor, PeerAddress, Transport, TransportExt};
 
 mod metered;
-pub use metered::TcpMetrics;
+pub use metered::TcpStats;
 
 #[derive(Debug, Default)]
 pub struct Config;
@@ -38,7 +38,8 @@ impl PeerAddress<SocketAddr> for TcpStream {
 
 #[async_trait::async_trait]
 impl Transport<SocketAddr> for Tcp {
-    type Io = MeteredIo<TcpStream, TcpMetrics, SocketAddr>;
+    type Stats = TcpStats;
+    type Io = TcpStream;
 
     type Error = io::Error;
 
@@ -62,7 +63,7 @@ impl Transport<SocketAddr> for Tcp {
             let stream = TcpStream::connect(addr).await?;
             stream.set_nodelay(true)?;
 
-            Ok(MeteredIo::new(stream))
+            Ok(stream)
         })
     }
 
@@ -79,7 +80,7 @@ impl Transport<SocketAddr> for Tcp {
 
                 Poll::Ready(Box::pin(async move {
                     io.set_nodelay(true)?;
-                    Ok(MeteredIo::new(io))
+                    Ok(io)
                 }))
             }
             Poll::Ready(Err(e)) => Poll::Ready(async_error(e)),
