@@ -5,19 +5,19 @@ use tokio::net::TcpStream;
 #[derive(Debug, Default)]
 pub struct TcpStats {
     /// The congestion window in bytes.
-    pub cwnd: u32,
+    pub congestion_window: u32,
     /// Our receive window in bytes.
-    pub rwnd: u32,
+    pub receive_window: u32,
     /// Our send window (= the peer's advertised receive window) in bytes.
     #[cfg(target_os = "macos")]
-    pub snd_wnd: u32,
+    pub send_window: u32,
     /// The most recent RTT sample.
     #[cfg(target_os = "macos")]
     pub last_rtt: Duration,
     /// The smoothed round-trip time.
     pub smoothed_rtt: Duration,
     /// The round-trip time variance.
-    pub rtt_var: Duration,
+    pub rtt_variance: Duration,
     /// Total bytes sent on the socket.
     #[cfg(target_os = "macos")]
     pub tx_bytes: u64,
@@ -29,7 +29,30 @@ pub struct TcpStats {
     /// Total sender retransmitted packets on the socket.
     pub retransmitted_packets: u64,
     /// The current retransmission timeout.
-    pub rto: Duration,
+    pub retransmission_timeout: Duration,
+}
+
+/// Helper function to get a socket option from a TCP stream.
+fn getsockopt<T>(stream: &TcpStream) -> std::io::Result<T> {
+    let mut info = unsafe { std::mem::zeroed::<T>() };
+    let mut len = std::mem::size_of::<T>() as libc::socklen_t;
+    let dst = &mut info as *mut _ as *mut _;
+
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            libc::TCP_CONNECTION_INFO,
+            dst,
+            &mut len,
+        )
+    };
+
+    if result != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(info)
 }
 
 #[cfg(target_os = "macos")]
@@ -39,22 +62,7 @@ impl TryFrom<&TcpStream> for TcpStats {
     /// Gathers stats from the given TCP socket file descriptor, sourced from the OS with
     /// [`libc::getsockopt`].
     fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let mut info = unsafe { std::mem::zeroed::<libc::tcp_connection_info>() };
-        let mut len = std::mem::size_of::<libc::tcp_connection_info>() as libc::socklen_t;
-
-        let rc = unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::IPPROTO_TCP,
-                libc::TCP_CONNECTION_INFO,
-                &mut info as *mut _ as *mut _,
-                &mut len,
-            )
-        };
-
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        let info = getsockopt::<libc::tcp_connection_info>(stream)?;
 
         Ok(info.into())
     }
@@ -65,14 +73,14 @@ impl From<libc::tcp_connection_info> for TcpStats {
     /// Converts a [`libc::tcp_connection_info`] into [`TcpStats`].
     fn from(info: libc::tcp_connection_info) -> Self {
         // Window sizes
-        let cwnd = info.tcpi_snd_cwnd;
-        let rwnd = info.tcpi_rcv_wnd;
-        let snd_wnd = info.tcpi_snd_wnd;
+        let congestion_window = info.tcpi_snd_cwnd;
+        let receive_window = info.tcpi_rcv_wnd;
+        let send_window = info.tcpi_snd_wnd;
 
         // RTT
         let last_rtt = Duration::from_millis(info.tcpi_rttcur as u64);
         let smoothed_rtt = Duration::from_millis(info.tcpi_srtt as u64);
-        let rtt_var = Duration::from_millis(info.tcpi_rttvar as u64);
+        let rtt_variance = Duration::from_millis(info.tcpi_rttvar as u64);
 
         // Volumes
         let tx_bytes = info.tcpi_txbytes;
@@ -81,20 +89,20 @@ impl From<libc::tcp_connection_info> for TcpStats {
         // Retransmissions
         let retransmitted_bytes = info.tcpi_txretransmitbytes;
         let retransmitted_packets = info.tcpi_rxretransmitpackets;
-        let rto = Duration::from_millis(info.tcpi_rto as u64);
+        let retransmission_timeout = Duration::from_millis(info.tcpi_rto as u64);
 
         Self {
-            cwnd,
-            rwnd,
-            snd_wnd,
+            congestion_window,
+            receive_window,
+            send_window,
             last_rtt,
             smoothed_rtt,
-            rtt_var,
+            rtt_variance,
             tx_bytes,
             rx_bytes,
             retransmitted_bytes,
             retransmitted_packets,
-            rto,
+            retransmission_timeout,
         }
     }
 }
@@ -106,22 +114,7 @@ impl TryFrom<&TcpStream> for TcpStats {
     /// Gathers stats from the given TCP socket file descriptor, sourced from the OS with
     /// [`libc::getsockopt`].
     fn try_from(stream: &TcpStream) -> Result<Self, Self::Error> {
-        let mut info = unsafe { std::mem::zeroed::<libc::tcp_info>() };
-        let mut len = std::mem::size_of::<libc::tcp_info>() as libc::socklen_t;
-
-        let rc = unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::IPPROTO_TCP,
-                libc::TCP_INFO,
-                &mut info as *mut _ as *mut _,
-                &mut len,
-            )
-        };
-
-        if rc != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        let info = getsockopt::<libc::tcp_info>(stream)?;
 
         Ok(info.into())
     }
@@ -132,20 +125,28 @@ impl From<libc::tcp_info> for TcpStats {
     /// Converts a [`libc::tcp_info`] into [`TcpStats`].
     fn from(info: libc::tcp_info) -> Self {
         // On Linux, tcpi_snd_cwnd is in segments; convert to bytes using snd_mss.
-        let cwnd = info.tcpi_snd_cwnd.saturating_mul(info.tcpi_snd_mss);
+        let congestion_window = info.tcpi_snd_cwnd.saturating_mul(info.tcpi_snd_mss);
         // Local advertised receive window (bytes).
-        let rwnd = info.tcpi_rcv_space;
+        let receive_window = info.tcpi_rcv_space;
 
         // RTT fields are reported in microseconds.
         let smoothed_rtt = Duration::from_micros(info.tcpi_rtt as u64);
-        let rtt_var = Duration::from_micros(info.tcpi_rttvar as u64);
+        let rtt_variance = Duration::from_micros(info.tcpi_rttvar as u64);
 
         // Retransmissions
         let retransmitted_packets = info.tcpi_total_retrans as u64;
         let retransmitted_bytes = retransmitted_packets.saturating_mul(info.tcpi_snd_mss as u64);
         // RTO is in microseconds.
-        let rto = Duration::from_micros(info.tcpi_rto as u64);
+        let retransmission_timeout = Duration::from_micros(info.tcpi_rto as u64);
 
-        Self { cwnd, rwnd, smoothed_rtt, rtt_var, retransmitted_bytes, retransmitted_packets, rto }
+        Self {
+            congestion_window,
+            receive_window,
+            smoothed_rtt,
+            rtt_variance,
+            retransmitted_bytes,
+            retransmitted_packets,
+            retransmission_timeout,
+        }
     }
 }
