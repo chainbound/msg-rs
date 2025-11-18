@@ -102,7 +102,7 @@ impl From<&IpcStream> for NoStats {
 #[async_trait]
 impl Transport<PathBuf> for Ipc {
     // TODO: Implement stats for IPC
-    type Stats = ();
+    type Stats = NoStats;
     type Io = IpcStream;
 
     type Error = io::Error;
