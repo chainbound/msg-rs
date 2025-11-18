@@ -59,7 +59,7 @@ impl<Io, S, A> AsyncRead for MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
     A: Address,
-    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
 {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -78,7 +78,7 @@ impl<Io, S, A> AsyncWrite for MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
     A: Address,
-    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
 {
     fn poll_write(
         self: Pin<&mut Self>,
@@ -123,7 +123,7 @@ impl<Io, S, A> MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A>,
     A: Address,
-    S: for<'a> TryFrom<&'a Io, Error = io::Error>,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
 {
     /// Creates a new `MeteredIo` wrapper around the given `Io` object, and initializes default
     /// stats. The `sender` is used to send the latest stats to the caller.
@@ -146,10 +146,10 @@ where
             match S::try_from(&self.inner) {
                 Ok(stats) => {
                     if let Err(e) = self.sender.send(stats) {
-                        tracing::error!(err = ?e, "failed to update TCP stats");
+                        tracing::error!(err = ?e, "failed to update transport stats");
                     }
                 }
-                Err(e) => tracing::error!(err = ?e, "failed to gather TCP stats"),
+                Err(e) => tracing::error!(errror = ?e, "failed to gather transport stats"),
             }
 
             self.next_refresh = now + self.refresh_interval;
@@ -170,7 +170,7 @@ pub trait Transport<A: Address> {
     type Io: AsyncRead + AsyncWrite + PeerAddress<A> + Send + Unpin;
 
     /// The statistics for the transport (specifically its underlying IO object).
-    type Stats: Default + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error = io::Error>;
+    type Stats: Default + Debug + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error: Debug>;
 
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;
