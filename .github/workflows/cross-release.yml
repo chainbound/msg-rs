@@ -3,6 +3,10 @@ name: Cross Release
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   extract-version:
     runs-on: ubuntu-latest

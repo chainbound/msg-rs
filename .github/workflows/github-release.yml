@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "*"
+      - "v*"
+    
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   extract-crate-version:
