@@ -40,7 +40,7 @@ jobs:
       GIT_TAG: ${{ needs.extract-github-tag.outputs.VERSION }}
       CRATE_VERSION: ${{ needs.extract-crate-version.outputs.VERSION }}
     steps:
-      - uses: baptiste0928/cargo-install@v2
+      - uses: baptiste0928/cargo-install@v3
         with:
           crate: semver-util
       - name: Validate Semvers
