@@ -20,7 +20,7 @@ use tracing::{debug, error, trace};
 use super::{Command, ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, req::SocketState};
 
-use msg_transport::{Address, MeteredIo, PeerAddress as _, Transport};
+use msg_transport::{Address, MeteredIo, PeerAddress, Transport};
 use msg_wire::{
     auth,
     compression::{Compressor, try_decompress_payload},

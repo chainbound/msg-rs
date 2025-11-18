@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::{self, Receiver};
 use tracing::{debug, error};
 
-use crate::{Acceptor, MeteredIo, Transport, TransportExt};
+use crate::{Acceptor, Transport, TransportExt};
 
 use msg_common::async_error;
 

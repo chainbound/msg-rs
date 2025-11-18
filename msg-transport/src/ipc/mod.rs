@@ -95,7 +95,7 @@ impl PeerAddress<PathBuf> for IpcStream {
 impl TryFrom<&IpcStream> for () {
     type Error = std::io::Error;
 
-    fn try_from(stream: &IpcStream) -> Result<Self, Self::Error> {
+    fn try_from(_: &IpcStream) -> Result<Self, Self::Error> {
         Ok(())
     }
 }

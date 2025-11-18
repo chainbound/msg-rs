@@ -36,11 +36,8 @@ impl Address for SocketAddr {}
 impl Address for PathBuf {}
 
 /// A wrapper around an `Io` object that records and provides transport-specific metrics.
-///
-/// # Reasoning
-/// One reason of using a wrapper around the IO object here is that it metrics should be on a
-/// per-connection (or stream) basis. This is a clean way to achieve this without polluting the
-/// [`Transport`] trait or any higher-level users of the transport.
+/// The link with the transport-specific metrics is achieved by the `S` type parameter, which
+/// must implement the `TryFrom<&Io>` trait.
 pub struct MeteredIo<Io, S, A>
 where
     Io: AsyncRead + AsyncWrite + PeerAddress<A>,
@@ -130,6 +127,8 @@ where
 {
     /// Creates a new `MeteredIo` wrapper around the given `Io` object, and initializes default
     /// stats. The `sender` is used to send the latest stats to the caller.
+    ///
+    /// TODO: Specify configuration options.
     pub fn new(inner: Io, sender: watch::Sender<S>) -> Self {
         Self {
             inner,
@@ -171,7 +170,7 @@ pub trait Transport<A: Address> {
     type Io: AsyncRead + AsyncWrite + PeerAddress<A> + Send + Unpin;
 
     /// The statistics for the transport (specifically its underlying IO object).
-    type Stats: Default + Send + Sync + for<'a> TryFrom<&'a Self::Io>;
+    type Stats: Default + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error = io::Error>;
 
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;

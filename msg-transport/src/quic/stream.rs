@@ -1,8 +1,8 @@
-use std::{net::SocketAddr, pin::Pin, time::Instant};
+use std::{net::SocketAddr, pin::Pin};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{MeteredIo, PeerAddress};
+use crate::PeerAddress;
 
 /// A bi-directional QUIC stream that implements [`AsyncRead`] + [`AsyncWrite`].
 pub struct QuicStream {
