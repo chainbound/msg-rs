@@ -186,7 +186,7 @@ pub(crate) struct SocketState<S> {
     /// The socket stats.
     pub(crate) stats: Arc<SocketStats<ReqStats>>,
     /// The transport stats. This is None until a connection is established.
-    pub(crate) transport: (watch::Sender<S>, watch::Receiver<S>),
+    pub(crate) transport: (watch::Sender<Arc<S>>, watch::Receiver<Arc<S>>),
 }
 
 // Manual clone implementation needed here because `S` is n`.

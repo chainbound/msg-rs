@@ -5,7 +5,7 @@ use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{
         mpsc, oneshot,
-        watch::{self, Ref},
+        watch::{self},
     },
 };
 
@@ -76,7 +76,7 @@ where
             options: Arc::new(options),
             state: SocketState {
                 stats: Arc::new(SocketStats::default()),
-                transport: watch::channel(T::Stats::default()),
+                transport: watch::channel(Arc::new(T::Stats::default())),
             },
             compressor: None,
             _marker: PhantomData,
@@ -95,8 +95,8 @@ where
     }
 
     /// Borrow the latest transport-level stats snapshot.
-    pub fn transport_stats(&self) -> Ref<'_, T::Stats> {
-        self.state.transport.1.borrow()
+    pub fn transport_stats(&self) -> Arc<T::Stats> {
+        self.state.transport.1.borrow().clone()
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

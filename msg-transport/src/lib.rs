@@ -10,6 +10,7 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -46,7 +47,7 @@ where
     /// The inner IO object.
     inner: Io,
     /// The sender for the stats.
-    sender: watch::Sender<S>,
+    sender: watch::Sender<Arc<S>>,
     /// The next time the stats should be refreshed.
     next_refresh: Instant,
     /// The interval at which the stats should be refreshed.
@@ -129,7 +130,7 @@ where
     /// stats. The `sender` is used to send the latest stats to the caller.
     ///
     /// TODO: Specify configuration options.
-    pub fn new(inner: Io, sender: watch::Sender<S>) -> Self {
+    pub fn new(inner: Io, sender: watch::Sender<Arc<S>>) -> Self {
         Self {
             inner,
             sender,
@@ -145,7 +146,7 @@ where
         if self.next_refresh <= now {
             match S::try_from(&self.inner) {
                 Ok(stats) => {
-                    if let Err(e) = self.sender.send(stats) {
+                    if let Err(e) = self.sender.send(Arc::new(stats)) {
                         tracing::error!(err = ?e, "failed to update transport stats");
                     }
                 }
