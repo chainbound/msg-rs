@@ -9,16 +9,20 @@ pub struct TcpStats {
     /// Our receive window in bytes.
     pub rwnd: u32,
     /// Our send window (= the peer's advertised receive window) in bytes.
+    #[cfg(target_os = "macos")]
     pub snd_wnd: u32,
     /// The most recent RTT sample.
+    #[cfg(target_os = "macos")]
     pub last_rtt: Duration,
     /// The smoothed round-trip time.
     pub smoothed_rtt: Duration,
     /// The round-trip time variance.
     pub rtt_var: Duration,
     /// Total bytes sent on the socket.
+    #[cfg(target_os = "macos")]
     pub tx_bytes: u64,
     /// Total bytes received on the socket.
+    #[cfg(target_os = "macos")]
     pub rx_bytes: u64,
     /// Total sender retransmitted bytes on the socket.
     pub retransmitted_bytes: u64,
@@ -133,13 +137,8 @@ impl From<libc::tcp_info> for TcpStats {
         let rwnd = info.tcpi_rcv_space;
 
         // RTT fields are reported in microseconds.
-        let last_rtt = Duration::from_micros(info.tcpi_rtt as u64);
         let smoothed_rtt = Duration::from_micros(info.tcpi_rtt as u64);
         let rtt_var = Duration::from_micros(info.tcpi_rttvar as u64);
-
-        // Volumes: approximate using segment counts * MSS.
-        let tx_bytes = (info.tcpi_segs_out as u64).saturating_mul(info.tcpi_snd_mss as u64);
-        let rx_bytes = (info.tcpi_segs_in as u64).saturating_mul(info.tcpi_rcv_mss as u64);
 
         // Retransmissions
         let retransmitted_packets = info.tcpi_total_retrans as u64;
@@ -147,17 +146,6 @@ impl From<libc::tcp_info> for TcpStats {
         // RTO is in microseconds.
         let rto = Duration::from_micros(info.tcpi_rto as u64);
 
-        Self {
-            cwnd,
-            rwnd,
-            last_rtt,
-            smoothed_rtt,
-            rtt_var,
-            tx_bytes,
-            rx_bytes,
-            retransmitted_bytes,
-            retransmitted_packets,
-            rto,
-        }
+        Self { cwnd, rwnd, smoothed_rtt, rtt_var, retransmitted_bytes, retransmitted_packets, rto }
     }
 }
