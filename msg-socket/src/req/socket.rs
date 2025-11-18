@@ -96,6 +96,8 @@ where
 
     /// Borrow the latest transport-level stats snapshot.
     pub fn transport_stats(&self) -> Arc<T::Stats> {
+        // NOTE: We clone the Arc here because purely borrowing the inner stats
+        // would lock the channel.
         self.state.transport.1.borrow().clone()
     }
 
