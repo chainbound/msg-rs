@@ -14,7 +14,7 @@ jobs:
   extract-github-tag:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions-ecosystem/action-get-latest-tag@v1
         id: get-latest-tag
       - name: Extract the git tag version
@@ -26,7 +26,7 @@ jobs:
   extract-crate-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Export Crate Package Version
         run: echo "VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
         id: export_crate_version
