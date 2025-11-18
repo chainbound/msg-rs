@@ -107,6 +107,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
       - name: Install cargo-binstall
         uses: cargo-bins/cargo-binstall@main
 
