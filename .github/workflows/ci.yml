@@ -32,9 +32,6 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run tests (no features)
-        run: cargo nextest run --all --no-fail-fast
-
       - name: Run tests (all features)
         run: cargo nextest run --all --all-features --no-fail-fast
 
