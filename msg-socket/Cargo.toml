@@ -26,6 +26,8 @@ tracing.workspace = true
 tokio-stream.workspace = true
 parking_lot.workspace = true
 
+derive_more = { workspace = true, features = ["deref"] }
+
 [dev-dependencies]
 rand.workspace = true
 msg-transport = { workspace = true, features = ["quic", "tcp-tls"] }

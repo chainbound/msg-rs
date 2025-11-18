@@ -71,10 +71,7 @@ where
             to_driver: None,
             transport: Some(transport),
             options: Arc::new(options),
-            state: SocketState {
-                stats: Arc::new(SocketStats::default()),
-                transport: Default::default(),
-            },
+            state: SocketState::default(),
             compressor: None,
             _marker: PhantomData,
         }
@@ -93,7 +90,7 @@ where
 
     /// Borrow the latest transport-level stats snapshot.
     pub fn transport_stats(&self) -> Arc<T::Stats> {
-        Arc::clone(&self.state.transport.read().unwrap())
+        Arc::clone(&self.state.transport.read())
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {

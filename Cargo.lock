@@ -887,6 +887,7 @@ name = "msg-socket"
 version = "0.1.3"
 dependencies = [
  "bytes",
+ "derive_more",
  "futures",
  "msg-common",
  "msg-sim",
@@ -914,6 +915,7 @@ dependencies = [
  "libc",
  "msg-common",
  "openssl",
+ "parking_lot",
  "quinn",
  "rcgen",
  "thiserror 1.0.69",

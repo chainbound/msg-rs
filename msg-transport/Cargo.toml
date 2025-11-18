@@ -17,6 +17,7 @@ async-trait.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+parking_lot.workspace = true
 
 libc.workspace = true
 

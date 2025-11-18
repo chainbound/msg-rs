@@ -1,8 +1,6 @@
 use bytes::Bytes;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use parking_lot::RwLock;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -184,15 +182,15 @@ impl ReqMessage {
 }
 
 /// The request socket state, shared between the backend task and the socket.
-#[derive(Debug)]
-pub(crate) struct SocketState<S> {
+#[derive(Debug, Default)]
+pub(crate) struct SocketState<S: Default> {
     /// The socket stats.
     pub(crate) stats: Arc<SocketStats<ReqStats>>,
     pub(crate) transport: Arc<RwLock<Arc<S>>>,
 }
 
-// Manual clone implementation needed here because `S` is n`.
-impl<S> Clone for SocketState<S> {
+// Manual clone implementation needed here because `S` is not `Clone`.
+impl<S: Default> Clone for SocketState<S> {
     fn clone(&self) -> Self {
         Self { stats: Arc::clone(&self.stats), transport: self.transport.clone() }
     }

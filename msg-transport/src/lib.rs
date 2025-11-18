@@ -10,13 +10,14 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
-    sync::{Arc, RwLock},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
+use parking_lot::RwLock;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 pub mod ipc;
@@ -145,7 +146,7 @@ where
         if self.next_refresh <= now {
             match S::try_from(&self.inner) {
                 Ok(stats) => {
-                    *self.stats.write().unwrap() = Arc::new(stats);
+                    *self.stats.write() = Arc::new(stats);
                 }
                 Err(e) => tracing::error!(errror = ?e, "failed to gather transport stats"),
             }
