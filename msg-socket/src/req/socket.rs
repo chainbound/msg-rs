@@ -88,7 +88,7 @@ where
         &self.state.stats
     }
 
-    /// Borrow the latest transport-level stats snapshot.
+    /// Get the latest transport-level stats snapshot.
     pub fn transport_stats(&self) -> Arc<T::Stats> {
         Arc::clone(&self.state.transport.read())
     }
