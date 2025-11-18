@@ -28,8 +28,8 @@ The 📖 [MSG-RS Book][book] contains detailed information on how to use the lib
   - [x] Request/Reply
   - [x] Publish/Subscribe
 - Pluggable transport layers
-  - [x] TCP
-  - [x] QUIC
+  - [x] TCP (with TLS support)
+  - [x] QUIC (with TLS support)
   - [x] IPC
 - Useful stats: latency, throughput, packet drops
 - Durable IO abstraction (built-in retries and reconnections)
