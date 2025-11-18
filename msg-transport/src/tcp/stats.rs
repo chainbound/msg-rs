@@ -129,29 +129,27 @@ impl From<libc::tcp_info> for TcpStats {
     fn from(info: libc::tcp_info) -> Self {
         // On Linux, tcpi_snd_cwnd is in segments; convert to bytes using snd_mss.
         let cwnd = info.tcpi_snd_cwnd.saturating_mul(info.tcpi_snd_mss);
-        // The advertised receive window space is already in bytes.
+        // Local advertised receive window (bytes).
         let rwnd = info.tcpi_rcv_space;
-        let snd_wnd = info.tcpi_snd_wnd;
 
         // RTT fields are reported in microseconds.
         let last_rtt = Duration::from_micros(info.tcpi_rtt as u64);
-        let smoothed_rtt = Duration::from_micros(info.tcpi_rtt as u64); // best approximation available
+        let smoothed_rtt = Duration::from_micros(info.tcpi_rtt as u64);
         let rtt_var = Duration::from_micros(info.tcpi_rttvar as u64);
 
-        // Volumes; tcpi_bytes_acked/received are bytes, retrans_bytes is bytes.
-        let tx_bytes = info.tcpi_bytes_acked;
-        let rx_bytes = info.tcpi_bytes_received;
+        // Volumes: approximate using segment counts * MSS.
+        let tx_bytes = (info.tcpi_segs_out as u64).saturating_mul(info.tcpi_snd_mss as u64);
+        let rx_bytes = (info.tcpi_segs_in as u64).saturating_mul(info.tcpi_rcv_mss as u64);
 
         // Retransmissions
-        let retransmitted_bytes = info.tcpi_retrans_bytes;
         let retransmitted_packets = info.tcpi_total_retrans as u64;
+        let retransmitted_bytes = retransmitted_packets.saturating_mul(info.tcpi_snd_mss as u64);
         // RTO is in microseconds.
         let rto = Duration::from_micros(info.tcpi_rto as u64);
 
         Self {
             cwnd,
             rwnd,
-            snd_wnd,
             last_rtt,
             smoothed_rtt,
             rtt_var,
