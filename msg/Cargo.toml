@@ -21,7 +21,6 @@ tokio-stream.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 tracing-subscriber = "0.3"
-divan = "0.1"
 futures.workspace = true
 tracing.workspace = true
 rand.workspace = true
