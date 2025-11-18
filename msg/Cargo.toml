@@ -27,10 +27,12 @@ tracing.workspace = true
 rand.workspace = true
 criterion.workspace = true
 pprof.workspace = true
+openssl.workspace = true
 
 [features]
 default = []
 quic = ["msg-transport/quic"]
+tcp-tls = ["msg-transport/tcp-tls"]
 
 
 # Add jemalloc for extra perf on Linux systems.
