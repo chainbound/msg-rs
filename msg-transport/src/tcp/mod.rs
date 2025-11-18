@@ -11,8 +11,8 @@ use msg_common::async_error;
 
 use crate::{Acceptor, PeerAddress, Transport, TransportExt};
 
-mod metered;
-pub use metered::TcpStats;
+mod stats;
+pub use stats::TcpStats;
 
 #[derive(Debug, Default)]
 pub struct Config;
