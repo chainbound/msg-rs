@@ -132,7 +132,7 @@ impl Default for ReqOptions {
         Self {
             auth_token: None,
             timeout: std::time::Duration::from_secs(5),
-            blocking_connect: true,
+            blocking_connect: false,
             backoff_duration: Duration::from_millis(200),
             flush_interval: None,
             backpressure_boundary: 8192,
