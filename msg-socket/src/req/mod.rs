@@ -35,6 +35,8 @@ pub enum ReqError {
     Timeout,
     #[error("Could not connect to any valid endpoints")]
     NoValidEndpoints,
+    #[error("Failed to connect to the target endpoint: {0:?}")]
+    Connect(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Commands that can be sent to the request socket driver.

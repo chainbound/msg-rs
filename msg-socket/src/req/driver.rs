@@ -15,7 +15,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_util::codec::Framed;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::{Command, ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, req::SocketState};
@@ -327,7 +327,7 @@ where
                 }
                 Poll::Ready(Some(Err(err))) => {
                     if let reqrep::Error::Io(e) = err {
-                        error!(err = ?e, "Socket wire error");
+                        error!(err = ?e, "wire error, resetting connection state");
                     }
 
                     // set the connection to inactive, so that it will be re-tried
@@ -336,9 +336,12 @@ where
                     continue;
                 }
                 Poll::Ready(None) => {
-                    debug!("Connection to {:?} closed, shutting down driver", this.addr);
+                    warn!(peer = ?this.addr, "connection closed, resetting connection state");
 
-                    return Poll::Ready(());
+                    // set the connection to inactive, so that it will be re-tried
+                    this.reset_connection();
+
+                    continue;
                 }
                 Poll::Pending => {}
             }

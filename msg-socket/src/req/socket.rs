@@ -115,7 +115,8 @@ where
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let transport = self.transport.take().expect("Transport has been moved already");
+        // TODO: Don't panic, return error
+        let mut transport = self.transport.take().expect("Transport has been moved already");
 
         // We initialize the connection as inactive, and let it be activated
         // by the backend task as soon as the driver is spawned.
@@ -123,6 +124,13 @@ where
             addr: endpoint.clone(),
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
+
+        if self.options.blocking_connect {
+            transport
+                .connect(endpoint.clone())
+                .await
+                .map_err(|e| ReqError::Connect(Box::new(e)))?;
+        }
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 
