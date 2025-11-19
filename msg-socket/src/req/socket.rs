@@ -6,9 +6,10 @@ use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
+use tokio_util::codec::Framed;
 
-use msg_transport::{Address, Transport};
-use msg_wire::compression::Compressor;
+use msg_transport::{Address, MeteredIo, Transport};
+use msg_wire::{compression::Compressor, reqrep};
 
 use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
@@ -118,19 +119,25 @@ where
         // TODO: Don't panic, return error
         let mut transport = self.transport.take().expect("Transport has been moved already");
 
-        // We initialize the connection as inactive, and let it be activated
-        // by the backend task as soon as the driver is spawned.
-        let conn_state = ConnectionState::Inactive {
-            addr: endpoint.clone(),
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
-        };
-
-        if self.options.blocking_connect {
-            transport
+        let conn_state = if self.options.blocking_connect {
+            let io = transport
                 .connect(endpoint.clone())
                 .await
                 .map_err(|e| ReqError::Connect(Box::new(e)))?;
-        }
+
+            let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
+            let mut framed = Framed::new(metered, reqrep::Codec::new());
+            framed.set_backpressure_boundary(self.options.backpressure_boundary);
+
+            ConnectionState::Active { channel: framed }
+        } else {
+            // We initialize the connection as inactive, and let it be activated
+            // by the backend task as soon as the driver is spawned.
+            ConnectionState::Inactive {
+                addr: endpoint.clone(),
+                backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            }
+        };
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 
