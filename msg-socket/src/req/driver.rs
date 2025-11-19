@@ -326,9 +326,7 @@ where
                     continue;
                 }
                 Poll::Ready(Some(Err(err))) => {
-                    if let reqrep::Error::Io(e) = err {
-                        error!(err = ?e, "wire error, resetting connection state");
-                    }
+                    warn!(err = ?err, "error reading from connection, resetting connection state");
 
                     // set the connection to inactive, so that it will be re-tried
                     this.reset_connection();
