@@ -35,6 +35,8 @@ pub enum ReqError {
     Timeout,
     #[error("Could not connect to any valid endpoints")]
     NoValidEndpoints,
+    #[error("Failed to connect to the target endpoint: {0:?}")]
+    Connect(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// Commands that can be sent to the request socket driver.
@@ -130,7 +132,7 @@ impl Default for ReqOptions {
         Self {
             auth_token: None,
             timeout: std::time::Duration::from_secs(5),
-            blocking_connect: true,
+            blocking_connect: false,
             backoff_duration: Duration::from_millis(200),
             flush_interval: None,
             backpressure_boundary: 8192,

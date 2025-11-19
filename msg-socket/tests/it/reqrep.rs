@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bytes::Bytes;
 use msg_socket::{RepSocket, ReqSocket};
 use msg_transport::{
@@ -142,5 +144,31 @@ async fn reqrep_mutual_tls_works() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
+    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+}
+
+#[tokio::test]
+async fn reqrep_late_bind_works() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let mut rep = RepSocket::new(Tcp::default());
+    let mut req = ReqSocket::new(Tcp::default());
+
+    let local_addr = "localhost:64521";
+    req.connect(local_addr).await.unwrap();
+
+    let hello = Bytes::from_static(b"hello");
+
+    let reply = tokio::spawn(async move { req.request(hello.clone()).await.unwrap() });
+
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    rep.bind(local_addr).await.unwrap();
+
+    let msg = rep.next().await.unwrap();
+    let payload = msg.msg().clone();
+    msg.respond(payload).unwrap();
+
+    let response = reply.await.unwrap();
+    let hello = Bytes::from_static(b"hello");
     assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
 }
