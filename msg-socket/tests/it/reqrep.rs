@@ -182,7 +182,7 @@ async fn reqrep_drop_server() {
 
     rep.bind("0.0.0.0:0").await.unwrap();
 
-    let addr = rep.local_addr().unwrap().clone();
+    let addr = *rep.local_addr().unwrap();
     req.connect(addr).await.unwrap();
 
     tokio::spawn(async move {
