@@ -131,13 +131,22 @@ impl TcpTls {
 #[derive(Debug, From, Deref, DerefMut)]
 pub struct TcpTlsStream(SslStream<TcpStream>);
 
+impl TcpTlsStream {
+    /// Get a mutable reference to the underlying SSL stream.
+    pub fn inner(&mut self) -> &mut SslStream<TcpStream> {
+        &mut self.0
+    }
+}
+
 impl tokio::io::AsyncRead for TcpTlsStream {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
+        let stream = self.get_mut().inner();
+
+        Pin::new(stream).poll_read(cx, buf)
     }
 }
 
@@ -147,15 +156,21 @@ impl tokio::io::AsyncWrite for TcpTlsStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(self.get_mut().get_mut()).poll_write(cx, buf)
+        let stream = self.get_mut().inner();
+
+        Pin::new(stream).poll_write(cx, buf)
     }
 
     fn poll_flush(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(self.get_mut().get_mut()).poll_flush(cx)
+        let stream = self.get_mut().inner();
+
+        Pin::new(stream).poll_flush(cx)
     }
 
     fn poll_shutdown(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.get_mut()).poll_shutdown(cx)
+        let stream = self.get_mut().inner();
+
+        Pin::new(stream).poll_shutdown(cx)
     }
 }
 
