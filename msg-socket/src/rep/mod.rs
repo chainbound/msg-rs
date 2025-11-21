@@ -10,6 +10,10 @@ use crate::stats::SocketStats;
 pub use socket::*;
 use stats::RepStats;
 
+const DEFAULT_BACKPRESSURE_BOUNDARY: usize = 8 * 1024;
+
+const DEFAULT_MIN_COMPRESS_SIZE: usize = 8192;
+
 /// Errors that can occur when using a reply socket.
 #[derive(Debug, Error)]
 pub enum RepError {
@@ -30,11 +34,17 @@ pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     min_compress_size: usize,
+    /// The maximum number of bytes that can be buffered in the write buffer before being flushed.
+    backpressure_boundary: usize,
 }
 
 impl Default for RepOptions {
     fn default() -> Self {
-        Self { max_clients: None, min_compress_size: 8192 }
+        Self {
+            max_clients: None,
+            min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
+            backpressure_boundary: DEFAULT_BACKPRESSURE_BOUNDARY,
+        }
     }
 }
 
@@ -49,6 +59,11 @@ impl RepOptions {
     /// If the payload is smaller than this value, it will not be compressed.
     pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
+        self
+    }
+
+    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
+        self.backpressure_boundary = backpressure_boundary;
         self
     }
 }
