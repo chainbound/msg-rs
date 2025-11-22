@@ -1,5 +1,6 @@
 use arc_swap::Guard;
 use bytes::Bytes;
+use msg_common::{IdBase58, Spanned};
 use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
@@ -13,7 +14,7 @@ use msg_wire::{compression::Compressor, reqrep};
 
 use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
-    ConnectionState, ExponentialBackoff, ReqMessage,
+    ConnectionState, ExponentialBackoff, ReqMessage, SendCommand,
     req::{SocketState, driver::ReqDriver, stats::ReqStats},
     stats::SocketStats,
 };
@@ -103,7 +104,7 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(Command::Send { message: msg, response: response_tx })
+            .send(Command::Send(SendCommand::new(Spanned::current(msg), response_tx)))
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 
@@ -117,7 +118,7 @@ where
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: Don't panic, return error
-        let mut transport = self.transport.take().expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("transport has been moved already");
 
         let conn_state = if self.options.blocking_connect {
             let io = transport
@@ -147,6 +148,9 @@ where
         // capacity. If we do this, we'll never have to re-allocate.
         let pending_requests = FxHashMap::default();
 
+        let id = IdBase58::new();
+        let span = tracing::info_span!(parent: None, "req_driver", %id, addr = ?endpoint);
+
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
             addr: endpoint,
@@ -163,6 +167,8 @@ where
             conn_task: None,
             egress_queue: Default::default(),
             compressor: self.compressor.clone(),
+            id,
+            span,
         };
 
         // Spawn the backend task
