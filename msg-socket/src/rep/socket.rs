@@ -7,6 +7,7 @@ use std::{
 };
 
 use futures::{Stream, stream::FuturesUnordered};
+use msg_common::IdBase58;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
@@ -105,13 +106,13 @@ where
     pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), RepError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let mut transport = self.transport.take().expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("transport has been moved already");
 
         for addr in addresses {
             match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    warn!(err = ?e, "Failed to bind to {:?}, trying next address", addr);
+                    warn!(?e, ?addr, "failed to bind");
                     continue;
                 }
             }
@@ -121,7 +122,10 @@ where
             return Err(RepError::NoValidEndpoints);
         };
 
-        debug!("Listening on {:?}", local_addr);
+        debug!(?local_addr, "listening");
+
+        let id = IdBase58::new();
+        let span = tracing::info_span!("rep_driver", %id, ?local_addr);
 
         let backend = RepDriver {
             transport,
@@ -133,6 +137,7 @@ where
             auth_tasks: JoinSet::new(),
             conn_tasks: FuturesUnordered::new(),
             compressor: self.compressor.take(),
+            span,
         };
 
         tokio::spawn(backend);
