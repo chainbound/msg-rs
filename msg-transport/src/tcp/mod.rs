@@ -11,6 +11,9 @@ use msg_common::async_error;
 
 use crate::{Acceptor, PeerAddress, Transport, TransportExt};
 
+mod stats;
+pub use stats::TcpStats;
+
 #[derive(Debug, Default)]
 pub struct Config;
 
@@ -35,6 +38,7 @@ impl PeerAddress<SocketAddr> for TcpStream {
 
 #[async_trait::async_trait]
 impl Transport<SocketAddr> for Tcp {
+    type Stats = TcpStats;
     type Io = TcpStream;
 
     type Error = io::Error;

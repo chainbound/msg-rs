@@ -1,8 +1,16 @@
 name: Book Deployment
+
 on:
   push:
     branches:
       - main
+    paths:
+      - "book/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -12,7 +20,7 @@ jobs:
     name: Publish to GitHub Pages
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

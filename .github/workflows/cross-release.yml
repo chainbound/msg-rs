@@ -3,11 +3,15 @@ name: Cross Release
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   extract-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Export Crate Package Version
         run: echo "VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
         id: export
@@ -48,7 +52,7 @@ jobs:
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: rustup update stable
       - run: rustup target add ${{ matrix.arch }}
       - uses: Swatinem/rust-cache@v2
@@ -81,7 +85,7 @@ jobs:
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "artifacts/*"

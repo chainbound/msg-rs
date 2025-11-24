@@ -15,12 +15,12 @@ use tokio::{
     time::Interval,
 };
 use tokio_util::codec::Framed;
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
 
 use super::{Command, ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, req::SocketState};
 
-use msg_transport::{Address, Transport};
+use msg_transport::{Address, MeteredIo, PeerAddress, Transport};
 use msg_wire::{
     auth,
     compression::{Compressor, try_decompress_payload},
@@ -31,15 +31,16 @@ use msg_wire::{
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
-type ConnectionCtl<Io, Addr> = ConnectionState<Framed<Io, reqrep::Codec>, ExponentialBackoff, Addr>;
+type ConnectionCtl<Io, S, A> =
+    ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
 /// The request socket driver. Endless future that drives
-/// the the socket forward.
+/// the socket forward.
 pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
-    pub(crate) socket_state: Arc<SocketState>,
+    pub(crate) socket_state: SocketState<T::Stats>,
     /// ID counter for outgoing requests.
     pub(crate) id_counter: u32,
     /// Commands from the socket.
@@ -52,7 +53,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) conn_task: Option<ConnectionTask<T::Io, T::Error>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state: ConnectionCtl<T::Io, A>,
+    pub(crate) conn_state: ConnectionCtl<T::Io, T::Stats, A>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
@@ -276,7 +277,12 @@ where
                     this.conn_task = None;
 
                     if let Ok(io) = result {
-                        let mut framed = Framed::new(io, reqrep::Codec::new());
+                        tracing::debug!(target = ?io.peer_addr(), "new connection");
+
+                        let metered =
+                            MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
+
+                        let mut framed = Framed::new(metered, reqrep::Codec::new());
                         framed.set_backpressure_boundary(this.options.backpressure_boundary);
                         this.conn_state = ConnectionState::Active { channel: framed };
                     }
@@ -320,9 +326,7 @@ where
                     continue;
                 }
                 Poll::Ready(Some(Err(err))) => {
-                    if let reqrep::Error::Io(e) = err {
-                        error!(err = ?e, "Socket wire error");
-                    }
+                    warn!(err = ?err, "error reading from connection, resetting connection state");
 
                     // set the connection to inactive, so that it will be re-tried
                     this.reset_connection();
@@ -330,9 +334,12 @@ where
                     continue;
                 }
                 Poll::Ready(None) => {
-                    debug!("Connection to {:?} closed, shutting down driver", this.addr);
+                    warn!(peer = ?this.addr, "connection closed, resetting connection state");
 
-                    return Poll::Ready(());
+                    // set the connection to inactive, so that it will be re-tried
+                    this.reset_connection();
+
+                    continue;
                 }
                 Poll::Pending => {}
             }

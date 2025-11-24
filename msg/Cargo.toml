@@ -23,7 +23,6 @@ tokio-stream.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 tracing-subscriber = "0.3"
-divan = "0.1"
 futures.workspace = true
 tracing.workspace = true
 rand.workspace = true
@@ -48,3 +47,7 @@ harness = false
 [[bench]]
 name = "pubsub"
 harness = false
+
+[[example]]
+name = "quic_vs_tcp"
+required-features = ["quic"]

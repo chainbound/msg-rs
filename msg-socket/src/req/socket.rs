@@ -1,3 +1,4 @@
+use arc_swap::Guard;
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -5,14 +6,16 @@ use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
+use tokio_util::codec::Framed;
 
-use msg_transport::{Address, Transport};
-use msg_wire::compression::Compressor;
+use msg_transport::{Address, MeteredIo, Transport};
+use msg_wire::{compression::Compressor, reqrep};
 
 use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, ExponentialBackoff, ReqMessage,
     req::{SocketState, driver::ReqDriver, stats::ReqStats},
+    stats::SocketStats,
 };
 
 /// The request socket.
@@ -24,7 +27,7 @@ pub struct ReqSocket<T: Transport<A>, A: Address> {
     /// Options for the socket. These are shared with the backend task.
     options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
-    state: Arc<SocketState>,
+    state: SocketState<T::Stats>,
     /// Optional message compressor. This is shared with the backend task.
     // NOTE: for now we're using dynamic dispatch, since using generics here
     // complicates the API a lot. We can always change this later for perf reasons.
@@ -70,7 +73,7 @@ where
             to_driver: None,
             transport: Some(transport),
             options: Arc::new(options),
-            state: Arc::new(SocketState::default()),
+            state: SocketState::default(),
             compressor: None,
             _marker: PhantomData,
         }
@@ -82,8 +85,14 @@ where
         self
     }
 
-    pub fn stats(&self) -> &ReqStats {
-        &self.state.stats.specific
+    /// Returns the socket stats.
+    pub fn stats(&self) -> &SocketStats<ReqStats> {
+        &self.state.stats
+    }
+
+    /// Get the latest transport-level stats snapshot.
+    pub fn transport_stats(&self) -> Guard<Arc<T::Stats>> {
+        self.state.transport_stats.load()
     }
 
     pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
@@ -107,13 +116,27 @@ where
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let transport = self.transport.take().expect("Transport has been moved already");
+        // TODO: Don't panic, return error
+        let mut transport = self.transport.take().expect("Transport has been moved already");
 
-        // We initialize the connection as inactive, and let it be activated
-        // by the backend task as soon as the driver is spawned.
-        let conn_state = ConnectionState::Inactive {
-            addr: endpoint.clone(),
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+        let conn_state = if self.options.blocking_connect {
+            let io = transport
+                .connect(endpoint.clone())
+                .await
+                .map_err(|e| ReqError::Connect(Box::new(e)))?;
+
+            let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
+            let mut framed = Framed::new(metered, reqrep::Codec::new());
+            framed.set_backpressure_boundary(self.options.backpressure_boundary);
+
+            ConnectionState::Active { channel: framed }
+        } else {
+            // We initialize the connection as inactive, and let it be activated
+            // by the backend task as soon as the driver is spawned.
+            ConnectionState::Inactive {
+                addr: endpoint.clone(),
+                backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            }
         };
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
@@ -128,7 +151,7 @@ where
         let driver: ReqDriver<T, A> = ReqDriver {
             addr: endpoint,
             options: Arc::clone(&self.options),
-            socket_state: Arc::clone(&self.state),
+            socket_state: self.state.clone(),
             id_counter: 0,
             from_socket,
             transport,

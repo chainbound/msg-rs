@@ -4,13 +4,17 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "*"
+      - "v*"
+    
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   extract-crate-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Export Crate Package Version
         run: echo "VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
         id: export_crate_version
@@ -26,7 +30,7 @@ jobs:
     env:
       VERSION: ${{ needs.extract-crate-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cargo build --release
       - name: Generate the Release Tarball
         run: tar --directory=target/release -cf release.tar.gz $(ls -U target/release/ | head -1)

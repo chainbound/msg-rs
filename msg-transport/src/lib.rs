@@ -10,9 +10,12 @@ use std::{
     net::SocketAddr,
     path::PathBuf,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use futures::{Future, FutureExt};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -33,6 +36,126 @@ impl Address for SocketAddr {}
 /// File system path, used for IPC transport.
 impl Address for PathBuf {}
 
+/// A wrapper around an `Io` object that records and provides transport-specific metrics.
+/// The link with the transport-specific metrics is achieved by the `S` type parameter, which
+/// must implement the `TryFrom<&Io>` trait.
+pub struct MeteredIo<Io, S, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    /// The inner IO object.
+    inner: Io,
+    /// The sender for the stats.
+    stats: Arc<ArcSwap<S>>,
+    /// The next time the stats should be refreshed.
+    next_refresh: Instant,
+    /// The interval at which the stats should be refreshed.
+    refresh_interval: Duration,
+
+    _marker: PhantomData<A>,
+}
+
+impl<Io, S, A> AsyncRead for MeteredIo<Io, S, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
+    A: Address,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_read(cx, buf)
+    }
+}
+
+impl<Io, S, A> AsyncWrite for MeteredIo<Io, S, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A> + Unpin,
+    A: Address,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
+{
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_shutdown(cx)
+    }
+}
+
+impl<Io, M, A> PeerAddress<A> for MeteredIo<Io, M, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+{
+    fn peer_addr(&self) -> Result<A, io::Error> {
+        self.inner.peer_addr()
+    }
+}
+
+impl<Io, S, A> MeteredIo<Io, S, A>
+where
+    Io: AsyncRead + AsyncWrite + PeerAddress<A>,
+    A: Address,
+    S: for<'a> TryFrom<&'a Io, Error: Debug>,
+{
+    /// Creates a new `MeteredIo` wrapper around the given `Io` object, and initializes default
+    /// stats. The `sender` is used to send the latest stats to the caller.
+    ///
+    /// TODO: Specify configuration options.
+    pub fn new(inner: Io, stats: Arc<ArcSwap<S>>) -> Self {
+        Self {
+            inner,
+            stats,
+            _marker: PhantomData,
+            next_refresh: Instant::now(),
+            refresh_interval: Duration::from_secs(2),
+        }
+    }
+
+    #[inline]
+    fn maybe_refresh(&mut self) {
+        let now = Instant::now();
+        if self.next_refresh <= now {
+            match S::try_from(&self.inner) {
+                Ok(stats) => {
+                    self.stats.store(Arc::new(stats));
+                }
+                Err(e) => tracing::error!(errror = ?e, "failed to gather transport stats"),
+            }
+
+            self.next_refresh = now + self.refresh_interval;
+        }
+    }
+}
+
 /// A transport provides connection-oriented communication between two peers through
 /// ordered and reliable streams of bytes.
 ///
@@ -44,6 +167,9 @@ pub trait Transport<A: Address> {
     /// The output type is transport-specific, and can be a handle to directly write to the
     /// connection, or it can be a substream multiplexer in the case of stream protocols.
     type Io: AsyncRead + AsyncWrite + PeerAddress<A> + Send + Unpin;
+
+    /// The statistics for the transport (specifically its underlying IO object).
+    type Stats: Default + Debug + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error: Debug>;
 
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;

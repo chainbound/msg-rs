@@ -110,11 +110,14 @@ where
                         // Run custom authenticator
                         info!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
+                        let mut conn = Framed::new(auth.stream, reqrep::Codec::new());
+                        conn.set_backpressure_boundary(this.options.backpressure_boundary);
+
                         this.peer_states.insert(
                             auth.addr.clone(),
                             StreamNotifyClose::new(PeerState {
                                 pending_requests: FuturesUnordered::new(),
-                                conn: Framed::new(auth.stream, reqrep::Codec::new()),
+                                conn,
                                 addr: auth.addr,
                                 egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),

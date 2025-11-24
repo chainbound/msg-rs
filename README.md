@@ -9,7 +9,7 @@
 [![CI](https://github.com/chainbound/msg-rs/actions/workflows/ci.yml/badge.svg)][gh-ci]
 [![License](https://img.shields.io/badge/License-MIT-orange.svg)][mit-license]
 [![Book](https://img.shields.io/badge/Documentation_Book-MSG--RS-blue)][book]
-[![Discord](https://img.shields.io/discord/1024661923737899058?style=flat&logo=discord&logoColor=white&color=lightgreen)][discord]
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chainbound/msg-rs)
 
 </div>
 
@@ -28,8 +28,8 @@ The 📖 [MSG-RS Book][book] contains detailed information on how to use the lib
   - [x] Request/Reply
   - [x] Publish/Subscribe
 - Pluggable transport layers
-  - [x] TCP
-  - [x] QUIC
+  - [x] TCP (with TLS support)
+  - [x] QUIC (with TLS support)
   - [x] IPC
 - Useful stats: latency, throughput, packet drops
 - Durable IO abstraction (built-in retries and reconnections)
