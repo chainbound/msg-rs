@@ -54,7 +54,7 @@ async fn pubsub_channel_transport<F, T, A>(
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     F: Fn() -> T,
-    T: Transport<A> + Send + Sync + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     let mut publisher = PubSocket::new(new_transport());
@@ -114,8 +114,8 @@ async fn pubsub_fan_out() {
 }
 
 async fn pubsub_fan_out_transport<
-    F: Fn() -> T + Send + 'static + Copy,
-    T: Transport<A> + Send + Sync + Unpin + 'static,
+    F: Fn() -> T + Send + Copy + 'static,
+    T: Transport<A>,
     A: Address,
 >(
     new_transport: F,
@@ -193,8 +193,8 @@ async fn pubsub_fan_in() {
 }
 
 async fn pubsub_fan_in_transport<
-    F: Fn() -> T + Send + 'static + Copy,
-    T: Transport<A> + Send + Sync + Unpin + 'static,
+    F: Fn() -> T + Send + Copy + 'static,
+    T: Transport<A>,
     A: Address,
 >(
     new_transport: F,

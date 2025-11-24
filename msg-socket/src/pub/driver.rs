@@ -41,7 +41,7 @@ pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
 
 impl<T, A> Future for PubDriver<T, A>
 where
-    T: Transport<A> + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     type Output = Result<(), PubError>;
@@ -134,7 +134,7 @@ where
 
 impl<T, A> PubDriver<T, A>
 where
-    T: Transport<A> + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     /// Handles an incoming connection. If this returns an error, the active connections counter

@@ -15,9 +15,6 @@ msg-socket.workspace = true
 msg-transport.workspace = true
 msg-wire.workspace = true
 
-tokio.workspace = true
-tokio-stream.workspace = true
-
 [dev-dependencies]
 bytes.workspace = true
 tracing-subscriber = "0.3"
@@ -27,6 +24,8 @@ rand.workspace = true
 criterion.workspace = true
 pprof.workspace = true
 openssl.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
 
 [features]
 default = []

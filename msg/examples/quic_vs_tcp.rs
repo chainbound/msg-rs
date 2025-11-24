@@ -77,7 +77,7 @@ async fn run_quic() {
     run_transfer("QUIC", &mut pub_socket, &mut sub1).await;
 }
 
-async fn run_transfer<T: Transport<A> + Send + Unpin + 'static, A: Address>(
+async fn run_transfer<T: Transport<A>, A: Address>(
     transport: &str,
     pub_socket: &mut PubSocket<T, A>,
     sub_socket: &mut SubSocket<T, A>,

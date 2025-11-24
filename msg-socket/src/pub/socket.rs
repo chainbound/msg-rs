@@ -40,7 +40,7 @@ pub struct PubSocket<T: Transport<A>, A: Address> {
 
 impl<T> PubSocket<T, SocketAddr>
 where
-    T: Transport<SocketAddr> + Send + Unpin + 'static,
+    T: Transport<SocketAddr>,
 {
     /// Binds the socket to the given socket addres
     ///
@@ -54,7 +54,7 @@ where
 
 impl<T> PubSocket<T, PathBuf>
 where
-    T: Transport<PathBuf> + Send + Unpin + 'static,
+    T: Transport<PathBuf>,
 {
     /// Binds the socket to the given path.
     ///
@@ -67,7 +67,7 @@ where
 
 impl<T, A> PubSocket<T, A>
 where
-    T: Transport<A> + Send + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     /// Creates a new reply socket with the default [`PubOptions`].

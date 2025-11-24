@@ -33,7 +33,7 @@ struct PairBenchmark<T: Transport<A>, A: Address> {
     msg_sizes: Vec<usize>,
 }
 
-impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<T, A> {
+impl<T: Transport<A>, A: Address> PairBenchmark<T, A> {
     /// Sets up the publisher and subscriber sockets.
     fn init(&mut self, addr: A) {
         // Set up the socket connections

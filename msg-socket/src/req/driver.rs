@@ -79,7 +79,7 @@ pub(crate) struct PendingRequest {
 
 impl<T, A> ReqDriver<T, A>
 where
-    T: Transport<A> + Send + Sync + 'static,
+    T: Transport<A>,
     A: Address,
 {
     /// Start the connection task to the server, handling authentication if necessary.
@@ -250,7 +250,7 @@ where
 
 impl<T, A> Future for ReqDriver<T, A>
 where
-    T: Transport<A> + Unpin + Send + Sync + 'static,
+    T: Transport<A>,
     A: Address,
 {
     type Output = ();

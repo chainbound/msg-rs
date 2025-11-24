@@ -161,7 +161,7 @@ where
 ///
 /// It provides an interface to manage both inbound and outbound connections.
 #[async_trait]
-pub trait Transport<A: Address> {
+pub trait Transport<A: Address>: Send + Sync + Unpin + 'static {
     /// The result of a successful connection.
     ///
     /// The output type is transport-specific, and can be a handle to directly write to the
