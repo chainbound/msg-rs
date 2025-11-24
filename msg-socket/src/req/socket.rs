@@ -37,7 +37,7 @@ pub struct ReqSocket<T: Transport<A>, A: Address> {
 
 impl<T> ReqSocket<T, SocketAddr>
 where
-    T: Transport<SocketAddr> + Send + Sync + Unpin + 'static,
+    T: Transport<SocketAddr>,
 {
     /// Connects to the target address with the default options.
     pub async fn connect(&mut self, addr: impl ToSocketAddrs) -> Result<(), ReqError> {
@@ -50,7 +50,7 @@ where
 
 impl<T> ReqSocket<T, PathBuf>
 where
-    T: Transport<PathBuf> + Send + Sync + Unpin + 'static,
+    T: Transport<PathBuf>,
 {
     /// Connects to the target path with the default options.
     pub async fn connect(&mut self, addr: impl Into<PathBuf>) -> Result<(), ReqError> {
@@ -60,7 +60,7 @@ where
 
 impl<T, A> ReqSocket<T, A>
 where
-    T: Transport<A> + Send + Sync + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     pub fn new(transport: T) -> Self {

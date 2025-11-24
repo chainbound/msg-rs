@@ -51,7 +51,7 @@ pub struct SubSocket<T: Transport<A>, A: Address> {
 
 impl<T> SubSocket<T, SocketAddr>
 where
-    T: Transport<SocketAddr> + Send + Sync + Unpin + 'static,
+    T: Transport<SocketAddr>,
 {
     /// Connects to the given endpoint asynchronously.
     pub async fn connect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
@@ -100,7 +100,7 @@ where
 
 impl<T> SubSocket<T, PathBuf>
 where
-    T: Transport<PathBuf> + Send + Sync + Unpin + 'static,
+    T: Transport<PathBuf>,
 {
     /// Connects to the given path asynchronously.
     pub async fn connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {

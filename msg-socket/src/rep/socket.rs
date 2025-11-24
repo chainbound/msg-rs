@@ -46,7 +46,7 @@ pub struct RepSocket<T: Transport<A>, A: Address> {
 
 impl<T> RepSocket<T, SocketAddr>
 where
-    T: Transport<SocketAddr> + Send + Unpin + 'static,
+    T: Transport<SocketAddr>,
 {
     /// Binds the socket to the given socket address.
     pub async fn bind(&mut self, addr: impl ToSocketAddrs) -> Result<(), RepError> {
@@ -57,7 +57,7 @@ where
 
 impl<T> RepSocket<T, PathBuf>
 where
-    T: Transport<PathBuf> + Send + Unpin + 'static,
+    T: Transport<PathBuf>,
 {
     /// Binds the socket to the given path.
     pub async fn bind(&mut self, path: impl Into<PathBuf>) -> Result<(), RepError> {
@@ -68,7 +68,7 @@ where
 
 impl<T, A> RepSocket<T, A>
 where
-    T: Transport<A> + Send + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     /// Creates a new reply socket with the default [`RepOptions`].
@@ -159,7 +159,7 @@ where
     }
 }
 
-impl<T: Transport<A> + Unpin, A: Address> Stream for RepSocket<T, A> {
+impl<T: Transport<A>, A: Address> Stream for RepSocket<T, A> {
     type Item = Request<A>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

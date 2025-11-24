@@ -32,7 +32,7 @@ struct PairBenchmark<T: Transport<A>, A: Address> {
     msg_sizes: Vec<usize>,
 }
 
-impl<T: Transport<A> + Send + Sync + Unpin + 'static, A: Address> PairBenchmark<T, A> {
+impl<T: Transport<A>, A: Address> PairBenchmark<T, A> {
     fn init(&mut self, addr: A) {
         let mut rep = self.rep.take().unwrap();
         // setup the socket connections

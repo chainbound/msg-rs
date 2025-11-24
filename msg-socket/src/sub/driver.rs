@@ -48,7 +48,7 @@ pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
 
 impl<T, A> Future for SubDriver<T, A>
 where
-    T: Transport<A> + Send + Sync + Unpin + 'static,
+    T: Transport<A>,
     A: Address,
 {
     type Output = ();
@@ -95,7 +95,7 @@ where
 
 impl<T, A> SubDriver<T, A>
 where
-    T: Transport<A> + Send + Sync + 'static,
+    T: Transport<A>,
     A: Address,
 {
     /// De-activates a publisher by setting it to [`ConnectionState::Inactive`].
@@ -263,14 +263,14 @@ where
                         return (
                             addr,
                             Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-                        )
+                        );
                     }
                     None => {
                         return (
                             addr,
                             Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
                                 .into()),
-                        )
+                        );
                     }
                 };
 
