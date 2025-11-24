@@ -27,6 +27,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      # - name: cargo test
+      #   run: sudo HOME=$HOME $(which cargo) test --all
+      # - name: cargo test all features
+      #   run: sudo HOME=$HOME $(which cargo) test --all --all-features
 
       # Install nextest
       - name: Install cargo-nextest
@@ -101,7 +105,7 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo +nightly doc --all --no-deps --all-features --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
-        
+
   # Find unused dependencies, this will fail if any are found.
   cargo-shear:
     runs-on: ubuntu-latest
