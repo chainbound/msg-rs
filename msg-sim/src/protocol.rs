@@ -1,17 +1,16 @@
 #[derive(Debug, Clone, Copy)]
-#[allow(clippy::upper_case_acronyms)]
 pub enum Protocol {
-    TCP,
-    UDP,
-    ICMP,
+    Tcp,
+    Udp,
+    Icmp,
 }
 
 impl From<&str> for Protocol {
     fn from(s: &str) -> Self {
         match s {
-            "tcp" => Self::TCP,
-            "udp" => Self::UDP,
-            "icmp" => Self::ICMP,
+            "tcp" => Self::Tcp,
+            "udp" => Self::Udp,
+            "icmp" => Self::Icmp,
             _ => panic!("invalid protocol"),
         }
     }

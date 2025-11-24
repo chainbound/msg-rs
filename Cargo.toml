@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "msg",
-    "msg-socket",
-    "msg-wire",
-    "msg-transport",
-    "msg-common",
-    "msg-sim",
+  "msg",
+  "msg-socket",
+  "msg-wire",
+  "msg-transport",
+  "msg-common",
+  "msg-sim",
 ]
 resolver = "2"
 
@@ -19,19 +19,19 @@ authors = ["Chainbound Developers <dev@chainbound.io>"]
 homepage = "https://github.com/chainbound/msg-rs"
 repository = "https://github.com/chainbound/msg-rs"
 keywords = [
-    "messaging",
-    "distributed",
-    "systems",
-    "networking",
-    "quic",
-    "quinn",
-    "tokio",
-    "async",
-    "simulation",
-    "pnet",
-    "udp",
-    "tcp",
-    "socket",
+  "messaging",
+  "distributed",
+  "systems",
+  "networking",
+  "quic",
+  "quinn",
+  "tokio",
+  "async",
+  "simulation",
+  "pnet",
+  "udp",
+  "tcp",
+  "socket",
 ]
 
 [workspace.dependencies]
@@ -44,11 +44,11 @@ msg-sim = { path = "./msg-sim" }
 # async
 async-trait = "0.1"
 tokio = { version = "1", features = [
-    "rt",
-    "rt-multi-thread",
-    "net",
-    "io-util",
-    "macros",
+  "rt",
+  "rt-multi-thread",
+  "net",
+  "io-util",
+  "macros",
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -64,12 +64,13 @@ rustc-hash = "2"
 rand = "0.9"
 libc = "0.2"
 derive_more = { version = "2.1.1", features = [
-    "from",
-    "into",
-    "deref",
-    "deref_mut",
+  "from",
+  "into",
+  "deref",
+  "deref_mut",
 ] }
 arc-swap = "1.8.0"
+nix = { version = "0.30.1" }
 
 # networking
 quinn = "0.11.9"
