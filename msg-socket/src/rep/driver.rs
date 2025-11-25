@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt, stream::FuturesUnordered};
-use msg_common::{Spanned, SpannedExt};
+use msg_common::span::{IntoEntered, SpanExt as _, WithSpan};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{
@@ -33,10 +33,10 @@ use msg_wire::{
 use super::RepError;
 
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
-    pending_requests: FuturesUnordered<Spanned<PendingRequest>>,
+    pending_requests: FuturesUnordered<WithSpan<PendingRequest>>,
     conn: Framed<T, reqrep::Codec>,
     addr: A,
-    egress_queue: VecDeque<Spanned<reqrep::Message>>,
+    egress_queue: VecDeque<WithSpan<reqrep::Message>>,
     state: Arc<SocketState>,
     should_flush: bool,
     compressor: Option<Arc<dyn Compressor>>,
@@ -62,9 +62,9 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// the API consistent with other socket types (e.g. `PubSocket`)
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
-    pub(crate) conn_tasks: FuturesUnordered<Spanned<T::Accept>>,
+    pub(crate) conn_tasks: FuturesUnordered<WithSpan<T::Accept>>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Spanned<Result<AuthResult<T::Io, A>, RepError>>>,
+    pub(crate) auth_tasks: JoinSet<WithSpan<Result<AuthResult<T::Io, A>, RepError>>>,
 
     /// A span to use for general purpose notifications, not tied to a specific path.
     pub(crate) span: tracing::Span,
@@ -81,10 +81,15 @@ where
         let this = self.get_mut();
 
         loop {
-            if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
-                match msg {
-                    Some(Ok(Spanned { inner: mut request, span })) => {
-                        let _g = span.enter();
+            if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
+                let Some(result) = maybe_result.map(|r| r.into_entered()) else {
+                    warn!(?peer, "peer disconnected");
+                    this.state.stats.specific.decrement_active_clients();
+                    continue;
+                };
+
+                match result.inner {
+                    Ok(mut request) => {
                         debug!("received request");
 
                         let size = request.msg().len();
@@ -100,20 +105,16 @@ where
                         this.state.stats.specific.increment_rx(size);
                         let _ = this.to_socket.try_send(request);
                     }
-                    Some(Err(e)) => {
+                    Err(e) => {
                         error!(?e, ?peer, "failed to receive message from peer");
-                        // TODO: metric?
-                    }
-                    None => {
-                        warn!(?peer, "peer disconnected");
-                        this.state.stats.specific.decrement_active_clients();
                     }
                 }
 
                 continue;
             }
 
-            if let Poll::Ready(Some(Ok(Spanned { inner: auth, span }))) =
+            // TODO: .into_entered() also for this type.
+            if let Poll::Ready(Some(Ok(WithSpan { inner: auth, span }))) =
                 this.auth_tasks.poll_join_next(cx)
             {
                 let _g = span.enter();
@@ -151,10 +152,8 @@ where
                 continue;
             }
 
-            if let Poll::Ready(Some(Spanned { inner, span })) = this.conn_tasks.poll_next_unpin(cx)
-            {
-                let _g = span.enter();
-                match inner {
+            if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).into_entered() {
+                match conn.inner {
                     Ok(io) => {
                         if let Err(e) = this.on_accepted_connection(io) {
                             error!(?e, "failed to handle accepted connection");
@@ -193,7 +192,7 @@ where
                 // will be decremented.
                 this.state.stats.specific.increment_active_clients();
 
-                this.conn_tasks.push(Spanned::new(accept).with_span(span.clone()));
+                this.conn_tasks.push(WithSpan::new(accept).with_span(span.clone()));
 
                 continue;
             }
@@ -278,7 +277,7 @@ where
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
-    type Item = Result<Spanned<Request<A>>, RepError>;
+    type Item = WithSpan<Result<Request<A>, RepError>>;
 
     /// Advances the state of the peer.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -294,12 +293,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
 
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(Spanned { inner: msg, span }) = this.egress_queue.pop_front() {
-                    let _g = span.enter();
+                if let Some(msg) = this.egress_queue.pop_front().into_entered() {
                     let msg_len = msg.size();
 
                     debug!(msg_id = msg.id(), "sending response");
-                    match this.conn.start_send_unpin(msg) {
+                    match this.conn.start_send_unpin(msg.inner) {
                         Ok(_) => {
                             this.state.stats.specific.increment_tx(msg_len);
                             this.should_flush = true;
@@ -318,12 +316,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
             }
 
             // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(Spanned { inner: result, span })) =
-                this.pending_requests.poll_next_unpin(cx)
+            if let Poll::Ready(Some(result)) =
+                this.pending_requests.poll_next_unpin(cx).into_entered()
             {
-                let span = span.entered();
-
-                match result {
+                match result.inner {
                     Err(_) => tracing::error!("response channel closed unexpectedly"),
                     Ok(Response { msg_id, mut response }) => {
                         let mut compression_type = 0;
@@ -351,7 +347,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         debug!(msg_id, "received response");
 
                         let msg = reqrep::Message::new(msg_id, compression_type, response);
-                        this.egress_queue.push_back(msg.with_span(span.clone()));
+                        this.egress_queue.push_back(msg.with_span(result.span.clone()));
 
                         continue;
                     }
@@ -366,7 +362,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         let span = tracing::info_span!("request").entered();
 
                         trace!(?result, "received message");
-                        let msg = result?;
+                        let msg = match result {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Poll::Ready(Some(Err(e.into()).with_span(span.clone())));
+                            }
+                        };
 
                         let (tx, rx) = oneshot::channel();
 
@@ -381,10 +382,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             response: tx,
                             compression_type: msg.header().compression_type(),
                             msg: msg.into_payload(),
-                        }
-                        .with_span(span.clone());
+                        };
 
-                        return Poll::Ready(Some(Ok(request)));
+                        return Poll::Ready(Some(Ok(request).with_span(span.clone())));
                     }
                     Poll::Ready(None) => {
                         error!("framed closed unexpectedly");

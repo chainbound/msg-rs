@@ -6,12 +6,9 @@
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    pin::Pin,
-    task::{Context, Poll},
     time::SystemTime,
 };
 
-use derive_more::{Deref, DerefMut};
 use futures::future::BoxFuture;
 
 mod channel;
@@ -21,6 +18,8 @@ mod task;
 pub use task::JoinMap;
 
 use rand::Rng;
+
+pub mod span;
 
 /// Returns the current UNIX timestamp in microseconds.
 #[inline]
@@ -135,78 +134,5 @@ impl std::fmt::Display for IdBase58 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // SAFETY: it is always valid UTF-8 since it only contains Base58 characters
         f.write_str(unsafe { core::str::from_utf8_unchecked(&self.0) })
-    }
-}
-
-/// A container with a [`tracing::Span`] attached.
-#[derive(Debug, Clone, Deref, DerefMut)]
-pub struct Spanned<T> {
-    #[deref]
-    #[deref_mut]
-    pub inner: T,
-    pub span: tracing::Span,
-}
-
-impl<T> Spanned<T> {
-    /// Create a spanned container using [`tracing::Span::current`] span.
-    #[inline]
-    pub fn current(inner: T) -> Self {
-        Self { inner, span: tracing::Span::current() }
-    }
-
-    /// Create a container with a no-op [`tracing::Span::none`] span, to be eventually replaced
-    /// with [`Self::with_span`]
-    #[inline]
-    pub fn new(inner: T) -> Self {
-        Self { inner, span: tracing::Span::none() }
-    }
-
-    /// Replace the current [`tracing::Span`] with the provided one.
-    #[inline]
-    pub fn with_span(mut self, span: tracing::Span) -> Self {
-        self.span = span;
-        self
-    }
-
-    /// Break the spanned container into a tuple containing the inner object and the span.
-    #[inline]
-    pub fn into_parts(self) -> (T, tracing::Span) {
-        (self.inner, self.span)
-    }
-
-    #[inline]
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
-
-impl<T: Future> Future for Spanned<T> {
-    type Output = Spanned<T::Output>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        unsafe {
-            // SAFETY: we never move `inner` while polling, and span is `Unpin`.
-            let this = self.get_unchecked_mut();
-            let inner = Pin::new_unchecked(&mut this.inner);
-            let span = &this.span;
-
-            let _g = span.enter();
-
-            if let Poll::Ready(val) = inner.poll(cx) {
-                return Poll::Ready(Spanned::new(val).with_span(span.clone()));
-            }
-
-            Poll::Pending
-        }
-    }
-}
-
-pub trait SpannedExt<T> {
-    fn with_span(self, span: tracing::Span) -> Spanned<T>;
-}
-
-impl<T> SpannedExt<T> for T {
-    fn with_span(self, span: tracing::Span) -> Spanned<T> {
-        Spanned { inner: self, span }
     }
 }

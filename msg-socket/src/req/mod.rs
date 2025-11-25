@@ -1,6 +1,6 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use msg_common::Spanned;
+use msg_common::span::WithSpan;
 use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -44,7 +44,7 @@ pub enum ReqError {
 #[derive(Debug)]
 pub struct SendCommand {
     /// The request message to send.
-    pub message: Spanned<ReqMessage>,
+    pub message: WithSpan<ReqMessage>,
     /// The channel to send the peer's response back.
     pub response: oneshot::Sender<Result<Bytes, ReqError>>,
 }
@@ -52,7 +52,7 @@ pub struct SendCommand {
 impl SendCommand {
     /// Creates a new send command.
     pub fn new(
-        message: Spanned<ReqMessage>,
+        message: WithSpan<ReqMessage>,
         response: oneshot::Sender<Result<Bytes, ReqError>>,
     ) -> Self {
         Self { message, response }

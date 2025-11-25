@@ -1,6 +1,6 @@
 use arc_swap::Guard;
 use bytes::Bytes;
-use msg_common::{IdBase58, Spanned};
+use msg_common::{IdBase58, span::WithSpan};
 use rustc_hash::FxHashMap;
 use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::{
@@ -120,7 +120,7 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(Command::Send(SendCommand::new(Spanned::current(msg), response_tx)))
+            .send(Command::Send(SendCommand::new(WithSpan::current(msg), response_tx)))
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 

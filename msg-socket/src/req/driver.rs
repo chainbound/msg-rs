@@ -9,7 +9,10 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_common::{IdBase58, Spanned};
+use msg_common::{
+    IdBase58,
+    span::{IntoEntered as _, WithSpan},
+};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -51,14 +54,14 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// The address of the server.
     pub(crate) addr: A,
     /// The connection task which handles the connection to the server.
-    pub(crate) conn_task: Option<Spanned<ConnectionTask<T::Io, T::Error>>>,
+    pub(crate) conn_task: Option<WithSpan<ConnectionTask<T::Io, T::Error>>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     pub(crate) conn_state: ConnectionCtl<T::Io, T::Stats, A>,
     /// The outgoing message queue.
-    pub(crate) egress_queue: VecDeque<Spanned<reqrep::Message>>,
+    pub(crate) egress_queue: VecDeque<WithSpan<reqrep::Message>>,
     /// The currently pending requests waiting for a response.
-    pub(crate) pending_requests: FxHashMap<u32, Spanned<PendingRequest>>,
+    pub(crate) pending_requests: FxHashMap<u32, WithSpan<PendingRequest>>,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
     /// Interval for flushing the connection. This is secondary to `should_flush`.
@@ -135,7 +138,7 @@ where
         }
         .in_current_span();
 
-        self.conn_task = Some(Spanned::current(Box::pin(task)));
+        self.conn_task = Some(WithSpan::current(Box::pin(task)));
     }
 
     /// Handle an incoming message from the connection.
@@ -179,7 +182,7 @@ where
     fn on_command(&mut self, cmd: Command) {
         match cmd {
             Command::Send(SendCommand {
-                message: Spanned { inner: mut message, span },
+                message: WithSpan { inner: mut message, span },
                 response,
             }) => {
                 let start = std::time::Instant::now();
@@ -209,9 +212,9 @@ where
                 let msg = message.into_wire(self.id_counter);
                 let msg_id = msg.id();
                 self.id_counter = self.id_counter.wrapping_add(1);
-                self.egress_queue.push_back(Spanned::new(msg).with_span(span.clone()));
+                self.egress_queue.push_back(WithSpan::new(msg).with_span(span.clone()));
                 self.pending_requests
-                    .insert(msg_id, Spanned::current(PendingRequest { start, sender: response }));
+                    .insert(msg_id, WithSpan::current(PendingRequest { start, sender: response }));
             }
         }
     }
@@ -294,15 +297,13 @@ where
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
-                if let Poll::Ready(Spanned { inner: result, span }) = conn_task.poll_unpin(cx) {
-                    let _g = span.enter();
-
+                if let Poll::Ready(result) = conn_task.poll_unpin(cx).into_entered() {
                     // As soon as the connection task finishes, set it to `None`.
                     // - If it was successful, set the connection to active
                     // - If it failed, it will be re-tried until the backoff limit is reached.
                     this.conn_task = None;
 
-                    match result {
+                    match result.inner {
                         Ok(io) => {
                             tracing::info!("connected");
 
@@ -325,8 +326,7 @@ where
             if let ConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
                 let Poll::Ready(item) = backoff.poll_next_unpin(cx) else { return Poll::Pending };
 
-                let span = tracing::info_span!(parent: this.span.clone(), "connect");
-                let _g = span.enter();
+                let _span = tracing::info_span!(parent: this.span.clone(), "connect").entered();
 
                 if let Some(duration) = item {
                     if this.conn_task.is_none() {
