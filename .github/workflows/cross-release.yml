@@ -11,7 +11,7 @@ jobs:
   extract-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Export Crate Package Version
         run: echo "VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_OUTPUT
         id: export
@@ -52,7 +52,7 @@ jobs:
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - run: rustup update stable
       - run: rustup target add ${{ matrix.arch }}
       - uses: Swatinem/rust-cache@v2
@@ -85,7 +85,7 @@ jobs:
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "artifacts/*"
