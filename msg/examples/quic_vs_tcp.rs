@@ -19,14 +19,14 @@ async fn run_tcp() {
     let mut pub_socket = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .backpressure_boundary(8192)
-            .session_buffer_size(1024)
-            .flush_interval(Duration::from_micros(100)),
+            .with_backpressure_boundary(8192)
+            .with_session_buffer_size(1024)
+            .with_flush_interval(Duration::from_micros(100)),
     );
 
     // Configure the subscribers with options
     let mut sub1 =
-        SubSocket::with_options(Tcp::default(), SubOptions::default().ingress_buffer_size(1024));
+        SubSocket::with_options(Tcp::default(), SubOptions::default().with_ingress_buffer_size(1024));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();
@@ -49,16 +49,16 @@ async fn run_quic() {
     let mut pub_socket = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .backpressure_boundary(8192)
-            .session_buffer_size(1024)
-            .flush_interval(Duration::from_micros(100)),
+            .with_backpressure_boundary(8192)
+            .with_session_buffer_size(1024)
+            .with_flush_interval(Duration::from_micros(100)),
     );
 
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Quic::default(),
-        SubOptions::default().ingress_buffer_size(1024),
+        SubOptions::default().with_ingress_buffer_size(1024),
     );
 
     tracing::info!("Setting up the sockets...");

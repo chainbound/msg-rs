@@ -73,35 +73,35 @@ impl Default for PubOptions {
 
 impl PubOptions {
     /// Sets the maximum number of concurrent clients.
-    pub fn max_clients(mut self, max_clients: usize) -> Self {
+    pub fn with_max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
         self
     }
 
     /// Sets the session channel buffer size. This is the amount of messages that can be buffered
     /// per session before messages start being dropped.
-    pub fn session_buffer_size(mut self, session_buffer_size: usize) -> Self {
+    pub fn with_session_buffer_size(mut self, session_buffer_size: usize) -> Self {
         self.session_buffer_size = session_buffer_size;
         self
     }
 
     /// Sets the maximum number of bytes that can be buffered in the session before being flushed.
     /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
+    pub fn with_backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
         self.backpressure_boundary = backpressure_boundary;
         self
     }
 
     /// Sets the interval at which each session should be flushed. If this is `None`,
     /// the session will be flushed on every publish, which can add a lot of overhead.
-    pub fn flush_interval(mut self, flush_interval: std::time::Duration) -> Self {
+    pub fn with_flush_interval(mut self, flush_interval: std::time::Duration) -> Self {
         self.flush_interval = Some(flush_interval);
         self
     }
 
     /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
     /// than this threshold, it will not be compressed.
-    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+    pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
     }
@@ -224,7 +224,7 @@ mod tests {
 
         let mut sub_socket = SubSocket::with_options(
             Tcp::default(),
-            SubOptions::default().auth_token(Bytes::from("client1")),
+            SubOptions::default().with_auth_token(Bytes::from("client1")),
         );
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
@@ -250,7 +250,7 @@ mod tests {
 
         let mut sub_socket = SubSocket::with_options(
             Quic::default(),
-            SubOptions::default().auth_token(Bytes::from("client1")),
+            SubOptions::default().with_auth_token(Bytes::from("client1")),
         );
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
@@ -389,7 +389,7 @@ mod tests {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut pub_socket =
-            PubSocket::with_options(Tcp::default(), PubOptions::default().max_clients(1));
+            PubSocket::with_options(Tcp::default(), PubOptions::default().with_max_clients(1));
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
 

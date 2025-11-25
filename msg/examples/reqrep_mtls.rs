@@ -2,10 +2,7 @@
 //! mutual TLS (mTLS).
 
 use bytes::Bytes;
-use msg::{
-    RepSocket, ReqSocket,
-    tcp_tls::{self, TcpTls},
-};
+use msg::{RepSocket, ReqSocket, tcp_tls::TcpTls};
 use tokio_stream::StreamExt as _;
 
 /// Helper functions.
@@ -91,5 +88,5 @@ async fn main() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }

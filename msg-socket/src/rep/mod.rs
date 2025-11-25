@@ -50,19 +50,19 @@ impl Default for RepOptions {
 
 impl RepOptions {
     /// Sets the number of maximum concurrent clients.
-    pub fn max_clients(mut self, max_clients: usize) -> Self {
+    pub fn with_max_clients(mut self, max_clients: usize) -> Self {
         self.max_clients = Some(max_clients);
         self
     }
 
     /// Sets the minimum payload size for compression.
     /// If the payload is smaller than this value, it will not be compressed.
-    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+    pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
     }
 
-    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
+    pub fn with_backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
         self.backpressure_boundary = backpressure_boundary;
         self
     }
@@ -210,7 +210,7 @@ mod tests {
         // Initialize socket with a client ID. This will implicitly enable authentication.
         let mut req = ReqSocket::with_options(
             Tcp::default(),
-            ReqOptions::default().auth_token(Bytes::from("REQ")),
+            ReqOptions::default().with_auth_token(Bytes::from("REQ")),
         );
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
@@ -247,7 +247,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().max_clients(1));
+        let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().with_max_clients(1));
         rep.bind("127.0.0.1:0").await.unwrap();
         let addr = rep.local_addr().unwrap();
 
@@ -265,13 +265,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_basic_reqrep_with_compression() {
         let mut rep =
-            RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
+            RepSocket::with_options(Tcp::default(), RepOptions::default().with_min_compress_size(0))
                 .with_compressor(SnappyCompressor);
 
         rep.bind("0.0.0.0:4445").await.unwrap();
 
         let mut req =
-            ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
+            ReqSocket::with_options(Tcp::default(), ReqOptions::default().with_min_compress_size(0))
                 .with_compressor(GzipCompressor::new(6));
 
         req.connect("0.0.0.0:4445").await.unwrap();

@@ -71,7 +71,7 @@ pub struct SubOptions {
 impl SubOptions {
     /// Sets the authentication token for this socket. This will activate the authentication layer
     /// and send the token to the publisher.
-    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
+    pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
         self
     }
@@ -79,19 +79,19 @@ impl SubOptions {
     /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be
     /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
     /// being dropped.
-    pub fn ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
+    pub fn with_ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
         self.ingress_buffer_size = ingress_buffer_size;
         self
     }
 
     /// Sets the read buffer size. This sets the size of the read buffer for each session.
-    pub fn read_buffer_size(mut self, read_buffer_size: usize) -> Self {
+    pub fn with_read_buffer_size(mut self, read_buffer_size: usize) -> Self {
         self.read_buffer_size = read_buffer_size;
         self
     }
 
     /// Set the initial backoff for reconnecting to a publisher.
-    pub fn initial_backoff(mut self, initial_backoff: Duration) -> Self {
+    pub fn with_initial_backoff(mut self, initial_backoff: Duration) -> Self {
         self.initial_backoff = initial_backoff;
         self
     }

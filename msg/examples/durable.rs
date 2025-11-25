@@ -61,7 +61,7 @@ async fn main() {
     // and an identifier. This will implicitly turn on client authentication.
     let mut req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default().timeout(Duration::from_secs(4)).auth_token(Bytes::from("client1")),
+        ReqOptions::default().with_timeout(Duration::from_secs(4)).with_auth_token(Bytes::from("client1")),
     );
 
     let (tx, rx) = oneshot::channel();

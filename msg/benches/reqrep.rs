@@ -118,7 +118,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
 
     let req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default().flush_interval(Duration::from_micros(50)),
+        ReqOptions::default().with_flush_interval(Duration::from_micros(50)),
     );
 
     let rep = RepSocket::new(Tcp::default());
@@ -149,7 +149,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
 
     let req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default().flush_interval(Duration::from_micros(50)),
+        ReqOptions::default().with_flush_interval(Duration::from_micros(50)),
     );
 
     let rep = RepSocket::new(Tcp::default());
