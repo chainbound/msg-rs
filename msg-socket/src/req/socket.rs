@@ -127,7 +127,7 @@ where
 
             let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
             let mut framed = Framed::new(metered, reqrep::Codec::new());
-            framed.set_backpressure_boundary(self.options.backpressure_boundary);
+            framed.set_backpressure_boundary(self.options.write_buffer);
 
             ConnectionState::Active { channel: framed }
         } else {
@@ -140,8 +140,6 @@ where
         };
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
-
-        let flush_interval = self.options.flush_interval.map(tokio::time::interval);
 
         // TODO: we should limit the amount of active outgoing requests, and that should be the
         // capacity. If we do this, we'll never have to re-allocate.
@@ -157,9 +155,8 @@ where
             transport,
             conn_state,
             pending_requests,
-            timeout_check_interval,
-            flush_interval,
             should_flush: false,
+            timeout_check_interval,
             conn_task: None,
             egress_queue: Default::default(),
             compressor: self.compressor.clone(),

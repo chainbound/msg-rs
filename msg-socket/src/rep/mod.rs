@@ -35,7 +35,8 @@ pub struct RepOptions {
     max_clients: Option<usize>,
     min_compress_size: usize,
     /// The maximum number of bytes that can be buffered in the write buffer before being flushed.
-    backpressure_boundary: usize,
+    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
+    write_buffer: usize,
 }
 
 impl Default for RepOptions {
@@ -43,7 +44,7 @@ impl Default for RepOptions {
         Self {
             max_clients: None,
             min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
-            backpressure_boundary: DEFAULT_BACKPRESSURE_BOUNDARY,
+            write_buffer: DEFAULT_BACKPRESSURE_BOUNDARY,
         }
     }
 }
@@ -63,7 +64,7 @@ impl RepOptions {
     }
 
     pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
-        self.backpressure_boundary = backpressure_boundary;
+        self.write_buffer = backpressure_boundary;
         self
     }
 }

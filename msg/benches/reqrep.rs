@@ -116,10 +116,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
 
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
-    let req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default().flush_interval(Duration::from_micros(50)),
-    );
+    let req = ReqSocket::with_options(Tcp::default(), ReqOptions::default());
 
     let rep = RepSocket::new(Tcp::default());
 
@@ -147,10 +144,8 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     let rt =
         tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
-    let req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default().flush_interval(Duration::from_micros(50)),
-    );
+    let req =
+        ReqSocket::with_options(Tcp::default(), ReqOptions::default().write_buffer(1024 * 16));
 
     let rep = RepSocket::new(Tcp::default());
 

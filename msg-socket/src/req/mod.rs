@@ -56,13 +56,10 @@ pub struct ReqOptions {
     blocking_connect: bool,
     /// The backoff duration for the underlying transport on reconnections.
     backoff_duration: std::time::Duration,
-    /// The interval that the request connection should be flushed.
-    /// Default is `None`, and the connection is flushed after every send.
-    flush_interval: Option<std::time::Duration>,
     /// The maximum number of bytes that can be buffered in the session before being flushed.
     /// This internally sets
     /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed::set_backpressure_boundary).
-    backpressure_boundary: usize,
+    write_buffer: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
@@ -95,20 +92,11 @@ impl ReqOptions {
         self
     }
 
-    /// Sets the flush interval for the socket. A higher flush interval will result in higher
-    /// throughput, but at the cost of higher latency. Note that this behaviour can be
-    /// completely useless if the `backpressure_boundary` is set too low (which will trigger a
-    /// flush before the interval is reached).
-    pub fn flush_interval(mut self, flush_interval: Duration) -> Self {
-        self.flush_interval = Some(flush_interval);
-        self
-    }
-
-    /// Sets the backpressure boundary for the socket. This is the maximum number of bytes that can
+    /// Sets the write buffer for the socket in bytes. This is the maximum number of bytes that can
     /// be buffered in the session before being flushed. This internally sets
     /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
-        self.backpressure_boundary = backpressure_boundary;
+    pub fn write_buffer(mut self, size: usize) -> Self {
+        self.write_buffer = size;
         self
     }
 
@@ -134,8 +122,7 @@ impl Default for ReqOptions {
             timeout: std::time::Duration::from_secs(5),
             blocking_connect: false,
             backoff_duration: Duration::from_millis(200),
-            flush_interval: None,
-            backpressure_boundary: 8192,
+            write_buffer: 8192,
             retry_attempts: None,
             min_compress_size: 8192,
         }

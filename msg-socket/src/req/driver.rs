@@ -58,12 +58,10 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
+    /// Whether or not the connection should be flushed (i.e. data was written to the buffer).
+    pub(crate) should_flush: bool,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
-    /// Interval for flushing the connection. This is secondary to `should_flush`.
-    pub(crate) flush_interval: Option<tokio::time::Interval>,
-    /// Whether or not the connection should be flushed
-    pub(crate) should_flush: bool,
     /// Optional message compressor. This is shared with the socket to keep
     /// the API consistent with other socket types (e.g. `PubSocket`)
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
@@ -105,7 +103,6 @@ where
 
                 debug!("Sending auth message: {:?}", token);
                 conn.send(auth::Message::Auth(token)).await?;
-                conn.flush().await?;
 
                 debug!("Waiting for ACK from server...");
 
@@ -217,26 +214,6 @@ where
         }
     }
 
-    /// Check if the connection should be flushed.
-    #[inline]
-    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
-        if self.should_flush {
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.poll_tick(cx).is_ready()
-            } else {
-                true
-            }
-        } else {
-            // If we shouldn't flush, reset the interval so we don't get woken up
-            // every time the interval expires
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.reset()
-            }
-
-            false
-        }
-    }
-
     /// Reset the connection state to inactive, so that it will be re-tried.
     /// This is done when the connection is closed or an error occurs.
     #[inline]
@@ -259,14 +236,9 @@ where
         let this = self.get_mut();
 
         loop {
-            // Try to flush pending messages
-            if this.should_flush(cx) {
-                if let ConnectionState::Active { ref mut channel } = this.conn_state {
-                    if let Poll::Ready(Ok(_)) = channel.poll_flush_unpin(cx) {
-                        this.should_flush = false;
-                    }
-                }
-            }
+            // TODO: Group connection management together in a function or at a different level of
+            // abstraction.
+            // --------------------------------------------------------------------------------
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
@@ -283,7 +255,7 @@ where
                             MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
 
                         let mut framed = Framed::new(metered, reqrep::Codec::new());
-                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
+                        framed.set_backpressure_boundary(this.options.write_buffer);
                         this.conn_state = ConnectionState::Active { channel: framed };
                     }
                 }
@@ -317,6 +289,8 @@ where
             let ConnectionState::Active { ref mut channel } = this.conn_state else {
                 continue;
             };
+
+            // --------------------------------------------------------------------------------
 
             // Check for incoming messages from the socket
             match channel.poll_next_unpin(cx) {
@@ -354,6 +328,9 @@ where
                     match channel.start_send_unpin(msg) {
                         Ok(_) => {
                             this.socket_state.stats.specific.increment_tx(size);
+                            // Set the flag to indicate that data was written to the buffer. In the
+                            // next iteration of the loop, we will try
+                            // to flush the connection if no more messages are ready to be sent.
                             this.should_flush = true;
                         }
                         Err(e) => {
@@ -364,7 +341,18 @@ where
                         }
                     }
 
+                    // We might be able to send more queued messages.
                     continue;
+                } else {
+                    // Try to flush the connection if data was written to the buffer.
+                    if this.should_flush {
+                        if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
+                            error!(err = ?e, "Failed to flush connection");
+                            this.reset_connection();
+                        } else {
+                            this.should_flush = false;
+                        }
+                    }
                 }
             }
 

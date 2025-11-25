@@ -111,7 +111,7 @@ where
                         info!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
                         let mut conn = Framed::new(auth.stream, reqrep::Codec::new());
-                        conn.set_backpressure_boundary(this.options.backpressure_boundary);
+                        conn.set_backpressure_boundary(this.options.write_buffer);
 
                         this.peer_states.insert(
                             auth.addr.clone(),
