@@ -25,8 +25,10 @@ async fn run_tcp() {
     );
 
     // Configure the subscribers with options
-    let mut sub1 =
-        SubSocket::with_options(Tcp::default(), SubOptions::default().with_ingress_buffer_size(1024));
+    let mut sub1 = SubSocket::with_options(
+        Tcp::default(),
+        SubOptions::default().with_ingress_buffer_size(1024),
+    );
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();

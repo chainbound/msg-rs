@@ -247,7 +247,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn rep_max_connections() {
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::with_options(Tcp::default(), RepOptions::default().with_max_clients(1));
+        let mut rep =
+            RepSocket::with_options(Tcp::default(), RepOptions::default().with_max_clients(1));
         rep.bind("127.0.0.1:0").await.unwrap();
         let addr = rep.local_addr().unwrap();
 
@@ -264,15 +265,19 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_basic_reqrep_with_compression() {
-        let mut rep =
-            RepSocket::with_options(Tcp::default(), RepOptions::default().with_min_compress_size(0))
-                .with_compressor(SnappyCompressor);
+        let mut rep = RepSocket::with_options(
+            Tcp::default(),
+            RepOptions::default().with_min_compress_size(0),
+        )
+        .with_compressor(SnappyCompressor);
 
         rep.bind("0.0.0.0:4445").await.unwrap();
 
-        let mut req =
-            ReqSocket::with_options(Tcp::default(), ReqOptions::default().with_min_compress_size(0))
-                .with_compressor(GzipCompressor::new(6));
+        let mut req = ReqSocket::with_options(
+            Tcp::default(),
+            ReqOptions::default().with_min_compress_size(0),
+        )
+        .with_compressor(GzipCompressor::new(6));
 
         req.connect("0.0.0.0:4445").await.unwrap();
 
