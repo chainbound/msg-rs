@@ -157,7 +157,9 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -197,7 +199,9 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -236,7 +240,9 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -276,7 +282,9 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -315,7 +323,9 @@ fn pubsub_single_thread_ipc(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -355,7 +365,9 @@ fn pubsub_multi_thread_ipc(c: &mut Criterion) {
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default().with_read_buffer_size(buffer_size).with_ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {

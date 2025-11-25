@@ -295,7 +295,7 @@ mod tests {
     #[tokio::test]
     async fn connecting_with_tls_works() {
         let server_name = "www.rust-lang.org";
-        let server_name_with_port = format!("{}:443", server_name);
+        let server_name_with_port = format!("{server_name}:443");
 
         let config = config::Client::new(server_name.to_string());
         let mut tcp_tls = TcpTls::new_client(config);
