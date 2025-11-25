@@ -196,6 +196,7 @@ pub trait Transport<A: Address>: Send + Sync + Unpin + 'static {
     fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept>;
 }
 
+/// Extension trait for transports that provides additional methods.
 pub trait TransportExt<A: Address>: Transport<A> {
     /// Async-friendly interface for accepting inbound connections.
     fn accept(&mut self) -> Acceptor<'_, Self, A>
@@ -226,6 +227,7 @@ where
     T: Transport<A>,
     A: Address,
 {
+    /// Creates a new `Acceptor` for the given transport.
     fn new(inner: &'a mut T) -> Self {
         Self { inner, pending: None, _marker: PhantomData }
     }

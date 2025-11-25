@@ -89,7 +89,6 @@ impl Transport<SocketAddr> for Tcp {
     }
 }
 
-#[async_trait::async_trait]
 impl TransportExt<SocketAddr> for Tcp {
     fn accept(&mut self) -> Acceptor<'_, Self, SocketAddr>
     where
