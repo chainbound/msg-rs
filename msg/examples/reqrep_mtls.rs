@@ -2,7 +2,10 @@
 //! mutual TLS (mTLS).
 
 use bytes::Bytes;
-use msg::{RepSocket, ReqSocket, tcp_tls::TcpTls};
+use msg::{
+    RepSocket, ReqSocket,
+    tcp_tls::{self, TcpTls},
+};
 use tokio_stream::StreamExt as _;
 
 /// Helper functions.
