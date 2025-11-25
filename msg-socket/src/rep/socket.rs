@@ -122,10 +122,12 @@ where
             return Err(RepError::NoValidEndpoints);
         };
 
-        debug!(?local_addr, "listening");
-
         let id = IdBase58::new();
-        let span = tracing::info_span!("rep_driver", %id, ?local_addr);
+        let span = tracing::info_span!(parent: None, "rep_driver", %id, ?local_addr);
+
+        span.in_scope(|| {
+            debug!("listening");
+        });
 
         let backend = RepDriver {
             transport,

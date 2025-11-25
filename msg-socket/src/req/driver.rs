@@ -11,7 +11,7 @@ use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
 use msg_common::{
     IdBase58,
-    span::{IntoEntered as _, WithSpan},
+    span::{Enter as _, SpanExt as _, WithSpan},
 };
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -97,17 +97,17 @@ where
 
     conn.send(auth::Message::Auth(token)).await?;
     conn.flush().await?;
-    debug!("sent auth message, waiting ack from server");
+    debug!("sent auth, waiting ack from server");
 
     // Wait for the response
     match conn.next().await {
         Some(res) => match res {
             Ok(auth::Message::Ack) => {
-                debug!("received auth ack");
+                debug!("received ack");
                 Ok(io)
             }
             Ok(msg) => {
-                error!(?msg, "unexpected auth ack result");
+                error!(?msg, "unexpected ack result");
                 Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
             }
             Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
@@ -188,8 +188,8 @@ where
                 let start = std::time::Instant::now();
 
                 // We want ot inherit the span from the socket frontend
-                let span = tracing::info_span!(parent: span.clone(), "send", driver_id = %self.id)
-                    .entered();
+                let span =
+                    tracing::info_span!(parent: span, "send", driver_id = %self.id).entered();
 
                 // Compress the message if it's larger than the minimum size
                 let size_before = message.payload().len();
@@ -212,9 +212,9 @@ where
                 let msg = message.into_wire(self.id_counter);
                 let msg_id = msg.id();
                 self.id_counter = self.id_counter.wrapping_add(1);
-                self.egress_queue.push_back(WithSpan::new(msg).with_span(span.clone()));
+                self.egress_queue.push_back(msg.with_span(span.clone()));
                 self.pending_requests
-                    .insert(msg_id, WithSpan::current(PendingRequest { start, sender: response }));
+                    .insert(msg_id, PendingRequest { start, sender: response }.with_span(span));
             }
         }
     }
@@ -297,7 +297,7 @@ where
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
-                if let Poll::Ready(result) = conn_task.poll_unpin(cx).into_entered() {
+                if let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
                     // As soon as the connection task finishes, set it to `None`.
                     // - If it was successful, set the connection to active
                     // - If it failed, it will be re-tried until the backoff limit is reached.

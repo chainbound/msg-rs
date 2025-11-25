@@ -64,7 +64,7 @@ impl<T: Future> Future for WithSpan<T> {
             let _g = span.enter();
 
             if let Poll::Ready(val) = inner.poll(cx) {
-                return Poll::Ready(WithSpan::new(val).with_span(span.clone()));
+                return Poll::Ready(val.with_span(span));
             }
 
             Poll::Pending
@@ -81,58 +81,105 @@ pub struct WithEntered<T> {
     pub span: tracing::span::EnteredSpan,
 }
 
-/// Trait to convert [`WithSpan`] containers into [`WithEntered`] containers.
-pub trait IntoEntered<T, S> {
-    fn into_entered(self) -> S;
+/// Trait to convert [`WithSpan<T>`] containers into [`WithEntered<S>`] containers, by
+/// [`Enter::enter`]ing the span.
+///
+/// The associated type [`Enter::Output`] allows for conversions that change the outer type which
+/// may wrap [`WithSpan<T>`], such as `Option` or `Poll`. For example, one implementation for poll
+/// could allow to convert from `Poll<WithSpan<T>>` to `Poll<WithEntered<T>>`.
+pub trait Enter {
+    type Output;
+
+    fn enter(self) -> Self::Output;
 }
 
-impl<T> IntoEntered<T, WithEntered<T>> for WithSpan<T> {
-    fn into_entered(self) -> WithEntered<T> {
+impl<T> Enter for WithSpan<T> {
+    type Output = WithEntered<T>;
+
+    #[inline]
+    fn enter(self) -> Self::Output {
         let WithSpan { inner, span } = self;
         WithEntered { inner, span: span.entered() }
     }
 }
 
-impl<T> IntoEntered<T, Option<WithEntered<T>>> for Option<WithSpan<T>> {
-    fn into_entered(self) -> Option<WithEntered<T>> {
-        self.map(|v| v.into_entered())
+impl<T> Enter for WithEntered<T> {
+    type Output = WithEntered<T>;
+
+    #[inline]
+    fn enter(self) -> Self::Output {
+        self
     }
 }
 
-impl<T> IntoEntered<T, Poll<WithEntered<T>>> for Poll<WithSpan<T>> {
-    fn into_entered(self) -> Poll<WithEntered<T>> {
+impl<T: Enter> Enter for Option<T> {
+    type Output = Option<<T as Enter>::Output>;
+
+    #[inline]
+    fn enter(self) -> Self::Output {
+        self.map(|v| v.enter())
+    }
+}
+
+impl<T: Enter, E> Enter for Result<T, E> {
+    type Output = Result<<T as Enter>::Output, E>;
+
+    #[inline]
+    fn enter(self) -> Self::Output {
+        self.map(|v| v.enter())
+    }
+}
+
+impl<T: Enter> Enter for Poll<T> {
+    type Output = Poll<<T as Enter>::Output>;
+
+    #[inline]
+    fn enter(self) -> Self::Output {
         match self {
-            Poll::Ready(val) => {
-                let WithSpan { inner, span } = val;
-                Poll::Ready(WithEntered { inner, span: span.entered() })
-            }
+            Poll::Ready(v) => Poll::Ready(v.enter()),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
-impl<T> IntoEntered<T, Poll<Option<WithEntered<T>>>> for Poll<Option<WithSpan<T>>> {
-    fn into_entered(self) -> Poll<Option<WithEntered<T>>> {
-        match self {
-            Poll::Ready(val) => {
-                if let Some(val) = val {
-                    let WithSpan { inner, span } = val;
-                    Poll::Ready(Some(WithEntered { inner, span: span.entered() }))
-                } else {
-                    Poll::Ready(None)
-                }
-            }
-            Poll::Pending => Poll::Pending,
-        }
+pub trait IntoSpanExt {
+    fn into_span(self) -> tracing::Span;
+}
+
+impl IntoSpanExt for tracing::Span {
+    #[inline]
+    fn into_span(self) -> tracing::Span {
+        self
+    }
+}
+
+impl IntoSpanExt for &tracing::Span {
+    #[inline]
+    fn into_span(self) -> tracing::Span {
+        self.clone()
+    }
+}
+
+impl IntoSpanExt for tracing::span::EnteredSpan {
+    #[inline]
+    fn into_span(self) -> tracing::Span {
+        self.clone()
     }
 }
 
 pub trait SpanExt<T> {
-    fn with_span(self, span: tracing::Span) -> WithSpan<T>;
+    fn with_span(self, span: impl IntoSpanExt) -> WithSpan<T>;
+
+    fn with_current_span(self) -> WithSpan<T>;
 }
 
 impl<T> SpanExt<T> for T {
-    fn with_span(self, span: tracing::Span) -> WithSpan<T> {
-        WithSpan { inner: self, span }
+    #[inline]
+    fn with_span(self, span: impl IntoSpanExt) -> WithSpan<T> {
+        WithSpan { inner: self, span: span.into_span() }
+    }
+
+    fn with_current_span(self) -> WithSpan<T> {
+        WithSpan::current(self)
     }
 }

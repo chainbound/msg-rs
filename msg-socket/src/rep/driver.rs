@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt, stream::FuturesUnordered};
-use msg_common::span::{IntoEntered, SpanExt as _, WithSpan};
+use msg_common::span::{Enter, SpanExt as _, WithSpan};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{
@@ -82,7 +82,7 @@ where
 
         loop {
             if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
-                let Some(result) = maybe_result.map(|r| r.into_entered()) else {
+                let Some(result) = maybe_result.enter() else {
                     warn!(?peer, "peer disconnected");
                     this.state.stats.specific.decrement_active_clients();
                     continue;
@@ -113,16 +113,11 @@ where
                 continue;
             }
 
-            // TODO: .into_entered() also for this type.
-            if let Poll::Ready(Some(Ok(WithSpan { inner: auth, span }))) =
-                this.auth_tasks.poll_join_next(cx)
-            {
-                let _g = span.enter();
-                match auth {
+            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx).enter() {
+                match auth.inner {
                     Ok(auth) => {
                         // Run custom authenticator
                         info!(id = ?auth.id, "passed");
-                        drop(_g);
 
                         let mut conn = Framed::new(auth.stream, reqrep::Codec::new());
                         conn.set_backpressure_boundary(this.options.backpressure_boundary);
@@ -152,7 +147,7 @@ where
                 continue;
             }
 
-            if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).into_entered() {
+            if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).enter() {
                 match conn.inner {
                     Ok(io) => {
                         if let Err(e) = this.on_accepted_connection(io) {
@@ -192,7 +187,7 @@ where
                 // will be decremented.
                 this.state.stats.specific.increment_active_clients();
 
-                this.conn_tasks.push(WithSpan::new(accept).with_span(span.clone()));
+                this.conn_tasks.push(accept.with_span(span));
 
                 continue;
             }
@@ -233,7 +228,7 @@ where
 
         // start the authentication process
         let authenticator = Arc::clone(auth);
-        let span = tracing::info_span!("auth");
+        let span = tracing::info_span!("auth", ?addr);
 
         let fut = async move {
             let mut conn = Framed::new(io, auth::Codec::new_server());
@@ -293,7 +288,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
 
             // Then, try to drain the egress queue.
             if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.egress_queue.pop_front().into_entered() {
+                if let Some(msg) = this.egress_queue.pop_front().enter() {
                     let msg_len = msg.size();
 
                     debug!(msg_id = msg.id(), "sending response");
@@ -316,9 +311,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
             }
 
             // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(result)) =
-                this.pending_requests.poll_next_unpin(cx).into_entered()
-            {
+            if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter() {
                 match result.inner {
                     Err(_) => tracing::error!("response channel closed unexpectedly"),
                     Ok(Response { msg_id, mut response }) => {
@@ -344,10 +337,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             )
                         }
 
-                        debug!(msg_id, "received response");
+                        debug!(msg_id, "received response to send");
 
                         let msg = reqrep::Message::new(msg_id, compression_type, response);
-                        this.egress_queue.push_back(msg.with_span(result.span.clone()));
+                        this.egress_queue.push_back(msg.with_span(result.span));
 
                         continue;
                     }
@@ -384,7 +377,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             msg: msg.into_payload(),
                         };
 
-                        return Poll::Ready(Some(Ok(request).with_span(span.clone())));
+                        return Poll::Ready(Some(Ok(request).with_span(span)));
                     }
                     Poll::Ready(None) => {
                         error!("framed closed unexpectedly");
