@@ -139,7 +139,7 @@ mod tests {
         });
 
         let n_reqs = 1000;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let msg_vec: Vec<Bytes> = (0..n_reqs)
             .map(|_| {
                 let mut vec = vec![0u8; 512];
@@ -227,7 +227,7 @@ mod tests {
         });
 
         let n_reqs = 1000;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let msg_vec: Vec<Bytes> = (0..n_reqs)
             .map(|_| {
                 let mut vec = vec![0u8; 512];
