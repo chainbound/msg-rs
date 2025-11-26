@@ -41,17 +41,20 @@ pub struct Ipc {
 }
 
 impl Ipc {
+    /// Creates a new `Ipc` transport.
     pub fn new(config: Config) -> Self {
         Self { config, listener: None, path: None }
     }
 }
 
+/// A stream representing an IPC connection.
 pub struct IpcStream {
     peer: PathBuf,
     stream: UnixStream,
 }
 
 impl IpcStream {
+    /// Connects to the given peer path.
     pub async fn connect(peer: PathBuf) -> io::Result<Self> {
         let stream = UnixStream::connect(&peer).await?;
         Ok(Self { peer, stream })

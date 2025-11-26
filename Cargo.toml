@@ -108,9 +108,10 @@ all = "warn"
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
 missing_docs = "warn"
-rust-2018-idioms = { level = "deny", priority = -1 }
-unreachable-pub = "warn"
-unused-must-use = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unreachable_pub = "warn"
+unused_must_use = "deny"
+rust_2024_incompatible_pat = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.

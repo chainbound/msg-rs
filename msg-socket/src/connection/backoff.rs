@@ -1,12 +1,16 @@
 use futures::{FutureExt, Stream};
-use std::{pin::Pin, task::Poll, time::Duration};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 use tokio::time::sleep;
 
 /// Helper trait alias for backoff streams.
 /// We define any stream that yields `Duration`s as a backoff
 pub trait Backoff: Stream<Item = Duration> + Unpin {}
 
-/// Blanket implementation of `Backoff` for any stream that yields `Duration`s.
+// Blanket implementation of `Backoff` for any stream that yields `Duration`s.
 impl<T> Backoff for T where T: Stream<Item = Duration> + Unpin {}
 
 /// A stream that yields exponentially increasing backoff durations.
@@ -23,6 +27,7 @@ pub struct ExponentialBackoff {
 }
 
 impl ExponentialBackoff {
+    /// Creates a new exponential backoff stream with the given initial duration and max retries.
     pub fn new(initial: Duration, max_retries: usize) -> Self {
         Self { retry_count: 0, max_retries, backoff: initial, timeout: None }
     }
@@ -38,38 +43,36 @@ impl Stream for ExponentialBackoff {
 
     /// Polls the exponential backoff stream. Returns `Poll::Ready` with the current backoff
     /// duration if the backoff timeout has elapsed, otherwise returns `Poll::Pending`.
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
         loop {
-            if let Some(ref mut timeout) = this.timeout {
-                if timeout.poll_unpin(cx).is_ready() {
-                    // Timeout has elapsed, so reset the timeout and double the backoff
-                    this.backoff *= 2;
-                    this.retry_count += 1;
-
-                    // Close the stream
-                    if this.retry_count >= this.max_retries {
-                        return Poll::Ready(None);
-                    }
-
-                    this.reset_timeout();
-
-                    // Wake up the task to poll the timeout again
-                    cx.waker().wake_by_ref();
-
-                    // Return the current backoff duration
-                    return Poll::Ready(Some(this.backoff));
-                } else {
-                    // Timeout has not elapsed, so return pending
-                    return Poll::Pending;
-                }
-            } else {
-                // Set initial timeout
+            let Some(ref mut timeout) = this.timeout else {
+                // Set the initial timeout
                 this.reset_timeout();
+                continue;
+            };
+
+            if timeout.poll_unpin(cx).is_ready() {
+                // Timeout has elapsed, so reset the timeout and double the backoff
+                this.backoff *= 2;
+                this.retry_count += 1;
+
+                // Close the stream
+                if this.retry_count >= this.max_retries {
+                    return Poll::Ready(None);
+                }
+
+                this.reset_timeout();
+
+                // Wake up the task to poll the timeout again
+                cx.waker().wake_by_ref();
+
+                // Return the current backoff duration
+                return Poll::Ready(Some(this.backoff));
+            } else {
+                // Timeout has not elapsed, so return pending
+                return Poll::Pending;
             }
         }
     }

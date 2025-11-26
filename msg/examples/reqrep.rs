@@ -35,5 +35,5 @@ async fn main() {
     );
 
     let transport_stats = req.transport_stats();
-    println!("Transport stats: {:?}", transport_stats);
+    println!("Transport stats: {transport_stats:?}");
 }

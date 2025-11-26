@@ -72,25 +72,25 @@ pub struct ReqOptions {
 
 impl ReqOptions {
     /// Sets the authentication token for the socket.
-    pub fn auth_token(mut self, auth_token: Bytes) -> Self {
+    pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
         self.auth_token = Some(auth_token);
         self
     }
 
     /// Sets the timeout for the socket.
-    pub fn timeout(mut self, timeout: Duration) -> Self {
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
     }
 
     /// Enables blocking initial connections to the target.
-    pub fn blocking_connect(mut self) -> Self {
+    pub fn with_blocking_connect(mut self) -> Self {
         self.blocking_connect = true;
         self
     }
 
     /// Sets the backoff duration for the socket.
-    pub fn backoff_duration(mut self, backoff_duration: Duration) -> Self {
+    pub fn with_backoff_duration(mut self, backoff_duration: Duration) -> Self {
         self.backoff_duration = backoff_duration;
         self
     }
@@ -99,7 +99,7 @@ impl ReqOptions {
     /// throughput, but at the cost of higher latency. Note that this behaviour can be
     /// completely useless if the `backpressure_boundary` is set too low (which will trigger a
     /// flush before the interval is reached).
-    pub fn flush_interval(mut self, flush_interval: Duration) -> Self {
+    pub fn with_flush_interval(mut self, flush_interval: Duration) -> Self {
         self.flush_interval = Some(flush_interval);
         self
     }
@@ -107,21 +107,21 @@ impl ReqOptions {
     /// Sets the backpressure boundary for the socket. This is the maximum number of bytes that can
     /// be buffered in the session before being flushed. This internally sets
     /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
+    pub fn with_backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
         self.backpressure_boundary = backpressure_boundary;
         self
     }
 
     /// Sets the maximum number of retry attempts. If `None`, all connections will be retried
     /// indefinitely.
-    pub fn retry_attempts(mut self, retry_attempts: usize) -> Self {
+    pub fn with_retry_attempts(mut self, retry_attempts: usize) -> Self {
         self.retry_attempts = Some(retry_attempts);
         self
     }
 
     /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
     /// than this threshold, it will not be compressed.
-    pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
+    pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
     }
