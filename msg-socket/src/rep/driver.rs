@@ -28,12 +28,26 @@ use msg_wire::{
 
 use super::RepError;
 
+/// An object that represents a connected peer and associated state.
+///
+/// # Usage of Framed
+/// [`Framed`] is used for encoding and decoding messages ("frames").
+/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected by
+/// [`Sink::poll_ready`] and configured by [`Framed::set_backpressure_boundary`].
+///
+/// However, we don't use `poll_ready` here, and instead we flush whenever the write buffer contains
+/// data (i.e., every time we write a message to it).
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_requests: FuturesUnordered<PendingRequest>,
+    /// The framed connection to the peer.
     conn: Framed<T, reqrep::Codec>,
+    /// The address of the peer.
     addr: A,
+    /// The queue of messages to be sent to the peer.
     egress_queue: VecDeque<reqrep::Message>,
+    /// The socket state, shared between the backend task and the socket.
     state: Arc<SocketState>,
+    /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
 }
 
@@ -109,8 +123,7 @@ where
                         // Run custom authenticator
                         info!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
-                        let mut conn = Framed::new(auth.stream, reqrep::Codec::new());
-                        conn.set_backpressure_boundary(this.options.write_buffer);
+                        let conn = Framed::new(auth.stream, reqrep::Codec::new());
 
                         this.peer_states.insert(
                             auth.addr.clone(),
@@ -213,7 +226,6 @@ where
 
                 let auth::Message::Auth(id) = auth else {
                     conn.send(auth::Message::Reject).await?;
-                    conn.flush().await?;
                     conn.close().await?;
                     return Err(RepError::Auth("Invalid auth message".to_string()));
                 };
@@ -221,14 +233,12 @@ where
                 // If authentication fails, send a reject message and close the connection
                 if !authenticator.authenticate(&id) {
                     conn.send(auth::Message::Reject).await?;
-                    conn.flush().await?;
                     conn.close().await?;
                     return Err(RepError::Auth("Authentication failed".to_string()));
                 }
 
                 // Send ack
                 conn.send(auth::Message::Ack).await?;
-                conn.flush().await?;
 
                 Ok(AuthResult { id, addr, stream: conn.into_inner() })
             });

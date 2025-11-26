@@ -56,10 +56,6 @@ pub struct ReqOptions {
     blocking_connect: bool,
     /// The backoff duration for the underlying transport on reconnections.
     backoff_duration: std::time::Duration,
-    /// The maximum number of bytes that can be buffered in the session before being flushed.
-    /// This internally sets
-    /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed::set_backpressure_boundary).
-    write_buffer: usize,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
@@ -92,14 +88,6 @@ impl ReqOptions {
         self
     }
 
-    /// Sets the write buffer for the socket in bytes. This is the maximum number of bytes that can
-    /// be buffered in the session before being flushed. This internally sets
-    /// [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub fn write_buffer(mut self, size: usize) -> Self {
-        self.write_buffer = size;
-        self
-    }
-
     /// Sets the maximum number of retry attempts. If `None`, all connections will be retried
     /// indefinitely.
     pub fn retry_attempts(mut self, retry_attempts: usize) -> Self {
@@ -122,7 +110,6 @@ impl Default for ReqOptions {
             timeout: std::time::Duration::from_secs(5),
             blocking_connect: false,
             backoff_duration: Duration::from_millis(200),
-            write_buffer: 8192,
             retry_attempts: None,
             min_compress_size: 8192,
         }

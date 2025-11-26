@@ -31,6 +31,14 @@ use msg_wire::{
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
+///
+/// # Usage of Framed
+/// [`Framed`] is used for encoding and decoding messages ("frames").
+/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected by
+/// [`Sink::poll_ready`] and configured by [`Framed::set_backpressure_boundary`].
+///
+/// However, we don't use `poll_ready` here, and instead we flush whenever the write buffer contains
+/// data (i.e., every time we write a message to it).
 type ConnectionCtl<Io, S, A> =
     ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
@@ -236,7 +244,6 @@ where
         loop {
             // TODO: Group connection management together in a function or at a different level of
             // abstraction.
-            // --------------------------------------------------------------------------------
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
@@ -252,8 +259,7 @@ where
                         let metered =
                             MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
 
-                        let mut framed = Framed::new(metered, reqrep::Codec::new());
-                        framed.set_backpressure_boundary(this.options.write_buffer);
+                        let framed = Framed::new(metered, reqrep::Codec::new());
                         this.conn_state = ConnectionState::Active { channel: framed };
                     }
                 }
@@ -287,8 +293,6 @@ where
             let ConnectionState::Active { ref mut channel } = this.conn_state else {
                 continue;
             };
-
-            // --------------------------------------------------------------------------------
 
             // Check for incoming messages from the socket
             match channel.poll_next_unpin(cx) {

@@ -10,8 +10,6 @@ use crate::stats::SocketStats;
 pub use socket::*;
 use stats::RepStats;
 
-const DEFAULT_BACKPRESSURE_BOUNDARY: usize = 8 * 1024;
-
 const DEFAULT_MIN_COMPRESS_SIZE: usize = 8192;
 
 /// Errors that can occur when using a reply socket.
@@ -34,18 +32,11 @@ pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     min_compress_size: usize,
-    /// The maximum number of bytes that can be buffered in the write buffer before being flushed.
-    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    write_buffer: usize,
 }
 
 impl Default for RepOptions {
     fn default() -> Self {
-        Self {
-            max_clients: None,
-            min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
-            write_buffer: DEFAULT_BACKPRESSURE_BOUNDARY,
-        }
+        Self { max_clients: None, min_compress_size: DEFAULT_MIN_COMPRESS_SIZE }
     }
 }
 
@@ -60,11 +51,6 @@ impl RepOptions {
     /// If the payload is smaller than this value, it will not be compressed.
     pub fn min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
-        self
-    }
-
-    pub fn backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
-        self.write_buffer = backpressure_boundary;
         self
     }
 }

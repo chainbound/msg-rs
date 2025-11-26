@@ -126,8 +126,7 @@ where
                 .map_err(|e| ReqError::Connect(Box::new(e)))?;
 
             let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
-            let mut framed = Framed::new(metered, reqrep::Codec::new());
-            framed.set_backpressure_boundary(self.options.write_buffer);
+            let framed = Framed::new(metered, reqrep::Codec::new());
 
             ConnectionState::Active { channel: framed }
         } else {
