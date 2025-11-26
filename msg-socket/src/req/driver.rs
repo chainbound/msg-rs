@@ -39,7 +39,7 @@ type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Se
 ///
 /// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
 /// the framed buffer.
-type ConnectionCtl<Io, S, A> =
+pub(crate) type ConnectionCtl<Io, S, A> =
     ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
 /// The request socket driver. Endless future that drives
