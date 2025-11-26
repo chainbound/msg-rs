@@ -50,3 +50,7 @@ required-features = ["quic"]
 [[example]]
 name = "quic_vs_tcp"
 required-features = ["quic"]
+
+[[example]]
+name = "reqrep_mtls"
+required-features = ["tcp-tls"]

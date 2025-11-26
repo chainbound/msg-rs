@@ -148,8 +148,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     let rt =
         tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
-    let req =
-        ReqSocket::with_options(Tcp::default(), ReqOptions::default().write_buffer(1024 * 32));
+    let req = ReqSocket::with_options(Tcp::default(), ReqOptions::default());
 
     let rep = RepSocket::new(Tcp::default());
 
@@ -182,7 +181,7 @@ fn reqrep_multi_thread_tls(c: &mut Criterion) {
             config::Client::new("localhost".to_string())
                 .with_ssl_connector(helpers::default_connector_builder().build()),
         ),
-        ReqOptions::default().write_buffer(1024 * 16),
+        ReqOptions::default(),
     );
 
     let rep = RepSocket::new(TcpTls::new_server(config::Server::new(
@@ -274,7 +273,6 @@ mod helpers {
 
     use openssl::ssl::{
         SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslFiletype, SslMethod,
-        SslMode,
     };
 
     /// Creates a default SSL acceptor builder for testing, with a trusted CA.

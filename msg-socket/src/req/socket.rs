@@ -113,7 +113,6 @@ where
     /// Tries to connect to the target endpoint with the default options.
     /// A ReqSocket can only be connected to a single address.
     pub async fn try_connect(&mut self, endpoint: A) -> Result<(), ReqError> {
-        // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         // TODO: Don't panic, return error

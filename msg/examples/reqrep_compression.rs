@@ -10,7 +10,7 @@ async fn main() {
     // Initialize the reply socket (server side) with a transport
     // and a minimum compresion size of 0 bytes to compress all responses
     let mut rep =
-        RepSocket::with_options(Tcp::default(), RepOptions::default().min_compress_size(0))
+        RepSocket::with_options(Tcp::default(), RepOptions::default().with_min_compress_size(0))
             // Enable Gzip compression (compression level 6)
             .with_compressor(GzipCompressor::new(6));
     rep.bind("0.0.0.0:4444").await.unwrap();
@@ -18,7 +18,7 @@ async fn main() {
     // Initialize the request socket (client side) with a transport
     // and a minimum compresion size of 0 bytes to compress all requests
     let mut req =
-        ReqSocket::with_options(Tcp::default(), ReqOptions::default().min_compress_size(0))
+        ReqSocket::with_options(Tcp::default(), ReqOptions::default().with_min_compress_size(0))
             // Enable Gzip compression (compression level 6).
             // The request and response sockets *don't have to*
             // use the same compression algorithm or level.
