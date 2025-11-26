@@ -14,7 +14,11 @@ use msg_wire::{compression::Compressor, reqrep};
 use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, ExponentialBackoff, ReqMessage,
-    req::{SocketState, driver::ReqDriver, stats::ReqStats},
+    req::{
+        SocketState,
+        driver::{ConnectionCtl, ReqDriver},
+        stats::ReqStats,
+    },
     stats::SocketStats,
 };
 
@@ -46,6 +50,21 @@ where
         let endpoint = addrs.next().ok_or(ReqError::NoValidEndpoints)?;
 
         self.try_connect(endpoint).await
+    }
+
+    /// Starts connecting to a resolved socket address. This is essentially a [`Self::connect`]
+    /// variant that doesn't error or block due to DNS resolution and blocking connect.
+    pub fn connect_sync(&mut self, addr: SocketAddr) {
+        // TODO: Don't panic, return error
+        let transport = self.transport.take().expect("Transport has been moved already");
+        // We initialize the connection as inactive, and let it be activated
+        // by the backend task as soon as the driver is spawned.
+        let conn_state = ConnectionState::Inactive {
+            addr,
+            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+        };
+
+        self.spawn_driver(addr, transport, conn_state)
     }
 }
 
@@ -113,8 +132,6 @@ where
     /// Tries to connect to the target endpoint with the default options.
     /// A ReqSocket can only be connected to a single address.
     pub async fn try_connect(&mut self, endpoint: A) -> Result<(), ReqError> {
-        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-
         // TODO: Don't panic, return error
         let mut transport = self.transport.take().expect("Transport has been moved already");
 
@@ -138,8 +155,22 @@ where
             }
         };
 
-        let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
+        self.spawn_driver(endpoint, transport, conn_state);
 
+        Ok(())
+    }
+
+    /// Internal method to initialize and spawn the driver.
+    fn spawn_driver(
+        &mut self,
+        endpoint: A,
+        transport: T,
+        conn_state: ConnectionCtl<T::Io, T::Stats, A>,
+    ) {
+        // Initialize communication channels
+        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+
+        let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
         let flush_interval = self.options.flush_interval.map(tokio::time::interval);
 
         // TODO: we should limit the amount of active outgoing requests, and that should be the
@@ -168,7 +199,5 @@ where
         tokio::spawn(driver);
 
         self.to_driver = Some(to_driver);
-
-        Ok(())
     }
 }

@@ -31,7 +31,7 @@ use msg_wire::{
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
-type ConnectionCtl<Io, S, A> =
+pub(crate) type ConnectionCtl<Io, S, A> =
     ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
 /// The request socket driver. Endless future that drives
