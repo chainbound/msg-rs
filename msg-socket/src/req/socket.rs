@@ -155,7 +155,6 @@ where
             transport,
             conn_state,
             pending_requests,
-            should_flush: false,
             timeout_check_interval,
             conn_task: None,
             egress_queue: Default::default(),

@@ -58,8 +58,6 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) egress_queue: VecDeque<reqrep::Message>,
     /// The currently pending requests, if any. Uses [`FxHashMap`] for performance.
     pub(crate) pending_requests: FxHashMap<u32, PendingRequest>,
-    /// Whether or not the connection should be flushed (i.e. data was written to the buffer).
-    pub(crate) should_flush: bool,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
     /// Optional message compressor. This is shared with the socket to keep
@@ -318,20 +316,24 @@ where
                 Poll::Pending => {}
             }
 
-            // Check for outgoing messages to the socket
+            // NOTE: `poll_ready_unpin` will return `Ready` up until the buffer is full
+            // (`backpressure_boundary`). Once full, this will automaticaly flush data to the
+            // underlying transport, and return `Pending`.
+            //
+            // This may raise the question of latency: what if we're sending small messages, and we
+            // don't hit the backpressure boundary? In this case, we'll try to drain the
+            // egress queue, and when it's empty, we flush the connection manually. This
+            // theoretically strikes a good balance between latency and throughput.
             if channel.poll_ready_unpin(cx).is_ready() {
                 // Drain the egress queue
                 if let Some(msg) = this.egress_queue.pop_front() {
                     // Generate the new message
                     let size = msg.size();
                     debug!("Sending msg {}", msg.id());
+                    // Write the message to the buffer.
                     match channel.start_send_unpin(msg) {
                         Ok(_) => {
                             this.socket_state.stats.specific.increment_tx(size);
-                            // Set the flag to indicate that data was written to the buffer. In the
-                            // next iteration of the loop, we will try
-                            // to flush the connection if no more messages are ready to be sent.
-                            this.should_flush = true;
                         }
                         Err(e) => {
                             error!(err = ?e, "Failed to send message to socket");
@@ -345,12 +347,10 @@ where
                     continue;
                 } else {
                     // Try to flush the connection if data was written to the buffer.
-                    if this.should_flush {
+                    if !channel.write_buffer().is_empty() {
                         if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                             error!(err = ?e, "Failed to flush connection");
                             this.reset_connection();
-                        } else {
-                            this.should_flush = false;
                         }
                     }
                 }
