@@ -273,8 +273,8 @@ fn build_quic() -> Quic {
 }
 
 fn random_delay(upper_ms: u64) -> Duration {
-    let mut rng = rand::thread_rng();
-    let delay_ms = rng.gen_range(0..upper_ms);
+    let mut rng = rand::rng();
+    let delay_ms = rng.random_range(0..upper_ms);
     Duration::from_millis(delay_ms)
 }
 

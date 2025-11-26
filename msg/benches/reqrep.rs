@@ -101,7 +101,7 @@ impl<T: Transport<A>, A: Address> PairBenchmark<T, A> {
 }
 
 fn generate_requests(n_reqs: usize, msg_size: usize) -> Vec<Bytes> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..n_reqs)
         .map(|_| {
             let mut vec = vec![0u8; msg_size];
