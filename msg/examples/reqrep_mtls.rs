@@ -91,5 +91,5 @@ async fn main() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }

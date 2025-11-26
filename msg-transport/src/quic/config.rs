@@ -25,12 +25,20 @@ pub struct ConfigBuilder<C> {
     keep_alive_interval: Duration,
 }
 
+impl<C> Default for ConfigBuilder<C>
+where
+    C: ControllerFactory + Default + Send + Sync + 'static,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<C> ConfigBuilder<C>
 where
     C: ControllerFactory + Default + Send + Sync + 'static,
 {
     /// Creates a new [`ConfigBuilder`] with sensible defaults.
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             cc: C::default(),
@@ -43,37 +51,39 @@ where
     }
 
     /// Sets the initial MTU.
-    pub fn initial_mtu(mut self, mtu: u16) -> Self {
+    pub fn with_initial_mtu(mut self, mtu: u16) -> Self {
         self.initial_mtu = mtu;
         self
     }
 
     /// Sets the maximum stream bandwidth in bytes per second.
-    pub fn max_stream_bandwidth(mut self, bandwidth: u32) -> Self {
+    pub fn with_max_stream_bandwidth(mut self, bandwidth: u32) -> Self {
         self.max_stream_bandwidth = bandwidth;
         self
     }
 
     /// Sets the expected round-trip time in milliseconds.
-    pub fn expected_rtt(mut self, rtt: u32) -> Self {
+    pub fn with_expected_rtt(mut self, rtt: u32) -> Self {
         self.expected_rtt = rtt;
         self
     }
 
     /// Sets the maximum idle timeout.
-    pub fn max_idle_timeout(mut self, timeout: Duration) -> Self {
+    ///
+    /// NOTE: this value must be less than 2^62 milliseconds.
+    pub fn with_max_idle_timeout(mut self, timeout: Duration) -> Self {
         self.max_idle_timeout = timeout;
         self
     }
 
     /// Sets the keep-alive interval.
-    pub fn keep_alive_interval(mut self, interval: Duration) -> Self {
+    pub fn with_keep_alive_interval(mut self, interval: Duration) -> Self {
         self.keep_alive_interval = interval;
         self
     }
 
     /// Sets the congestion controller.
-    pub fn congestion_controller(mut self, cc: C) -> Self {
+    pub fn with_congestion_controller(mut self, cc: C) -> Self {
         self.cc = cc;
         self
     }
@@ -85,11 +95,11 @@ where
         // Stream receive window
         let stream_rwnd = self.max_stream_bandwidth / 1000 * self.expected_rtt;
 
+        let timeout = IdleTimeout::try_from(self.max_idle_timeout).expect("Valid idle timeout");
+
         transport
             .keep_alive_interval(Some(self.keep_alive_interval))
-            .max_idle_timeout(Some(
-                IdleTimeout::try_from(self.max_idle_timeout).expect("Valid idle timeout"),
-            ))
+            .max_idle_timeout(Some(timeout))
             // Disable datagram support
             .datagram_receive_buffer_size(None)
             .datagram_send_buffer_size(0)

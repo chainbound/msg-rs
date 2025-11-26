@@ -55,7 +55,7 @@ async fn main() {
     // The identifier will be sent to the server when the connection is established.
     let mut req = ReqSocket::with_options(
         Tcp::default(),
-        ReqOptions::default().auth_token(Bytes::from("client1")),
+        ReqOptions::default().with_auth_token(Bytes::from("client1")),
     );
 
     ...

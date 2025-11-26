@@ -35,13 +35,13 @@ async fn main() {
     let mut sub1 = SubSocket::with_options(
         Tcp::default(),
         // Set the authentication token
-        SubOptions::default().auth_token(Bytes::from("client1")),
+        SubOptions::default().with_auth_token(Bytes::from("client1")),
     );
 
     let mut sub2 = SubSocket::with_options(
         Tcp::default(),
         // Set the authentication token
-        SubOptions::default().auth_token(Bytes::from("client2")),
+        SubOptions::default().with_auth_token(Bytes::from("client2")),
     );
 
     tracing::info!("Setting up the sockets...");

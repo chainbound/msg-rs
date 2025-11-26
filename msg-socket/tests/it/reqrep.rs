@@ -79,7 +79,7 @@ async fn reqrep_works() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }
 
 #[tokio::test]
@@ -109,7 +109,7 @@ async fn reqrep_tls_works() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }
 
 #[tokio::test]
@@ -144,7 +144,7 @@ async fn reqrep_mutual_tls_works() {
 
     let hello = Bytes::from_static(b"hello");
     let response = req.request(hello.clone()).await.unwrap();
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }
 
 #[tokio::test]
@@ -170,5 +170,5 @@ async fn reqrep_late_bind_works() {
 
     let response = reply.await.unwrap();
     let hello = Bytes::from_static(b"hello");
-    assert_eq!(hello, response, "expected {:?}, got {:?}", hello, response);
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }

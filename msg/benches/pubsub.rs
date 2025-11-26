@@ -150,14 +150,16 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -190,14 +192,16 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -229,14 +233,16 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -269,14 +275,16 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Quic::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -308,14 +316,16 @@ fn pubsub_single_thread_ipc(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Ipc::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
@@ -348,14 +358,16 @@ fn pubsub_multi_thread_ipc(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Ipc::default(),
         PubOptions::default()
-            .flush_interval(Duration::from_micros(100))
-            .backpressure_boundary(buffer_size)
-            .session_buffer_size(N_REQS * 2),
+            .with_flush_interval(Duration::from_micros(100))
+            .with_backpressure_boundary(buffer_size)
+            .with_session_buffer_size(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
         Ipc::default(),
-        SubOptions::default().read_buffer_size(buffer_size).ingress_buffer_size(N_REQS * 2),
+        SubOptions::default()
+            .with_read_buffer_size(buffer_size)
+            .with_ingress_buffer_size(N_REQS * 2),
     );
 
     let mut bench = PairBenchmark {
