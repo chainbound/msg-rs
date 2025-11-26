@@ -316,43 +316,37 @@ where
                 Poll::Pending => {}
             }
 
-            // NOTE: `poll_ready_unpin` will return `Ready` up until the buffer is full
-            // (`backpressure_boundary`). Once full, this will automaticaly flush data to the
-            // underlying transport, and return `Pending`.
-            //
-            // This may raise the question of latency: what if we're sending small messages, and we
-            // don't hit the backpressure boundary? In this case, we'll try to drain the
-            // egress queue, and when it's empty, we flush the connection manually. This
-            // theoretically strikes a good balance between latency and throughput.
-            if channel.poll_ready_unpin(cx).is_ready() {
-                // Drain the egress queue
-                if let Some(msg) = this.egress_queue.pop_front() {
-                    // Generate the new message
-                    let size = msg.size();
-                    debug!("Sending msg {}", msg.id());
-                    // Write the message to the buffer.
-                    match channel.start_send_unpin(msg) {
-                        Ok(_) => {
-                            this.socket_state.stats.specific.increment_tx(size);
-                        }
-                        Err(e) => {
-                            error!(err = ?e, "Failed to send message to socket");
-
-                            // set the connection to inactive, so that it will be re-tried
-                            this.reset_connection();
-                        }
+            // NOTE: We try to drain the egress queue first (the `continue`), writing everything to
+            // the `Framed` internal buffer. When all messages are written, we move on to flushing
+            // the connection in the block below. We DO NOT rely on the `Framed` internal
+            // backpressure boundary, because we do not call `poll_ready`.
+            if let Some(msg) = this.egress_queue.pop_front() {
+                // Generate the new message
+                let size = msg.size();
+                debug!("Sending msg {}", msg.id());
+                // Write the message to the buffer.
+                match channel.start_send_unpin(msg) {
+                    Ok(_) => {
+                        this.socket_state.stats.specific.increment_tx(size);
                     }
+                    Err(e) => {
+                        error!(err = ?e, "Failed to send message to socket");
 
-                    // We might be able to send more queued messages.
+                        // set the connection to inactive, so that it will be re-tried
+                        this.reset_connection();
+                    }
+                }
+
+                // We might be able to write more queued messages to the buffer.
+                continue;
+            }
+
+            // Try to flush the connection if any data was written to the buffer.
+            if !channel.write_buffer().is_empty() {
+                if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
+                    error!(err = ?e, "Failed to flush connection");
+                    this.reset_connection();
                     continue;
-                } else {
-                    // Try to flush the connection if data was written to the buffer.
-                    if !channel.write_buffer().is_empty() {
-                        if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
-                            error!(err = ?e, "Failed to flush connection");
-                            this.reset_connection();
-                        }
-                    }
                 }
             }
 

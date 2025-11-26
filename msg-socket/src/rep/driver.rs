@@ -34,7 +34,6 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     addr: A,
     egress_queue: VecDeque<reqrep::Message>,
     state: Arc<SocketState>,
-    should_flush: bool,
     compressor: Option<Arc<dyn Compressor>>,
 }
 
@@ -121,7 +120,6 @@ where
                                 addr: auth.addr,
                                 egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),
-                                should_flush: false,
                                 compressor: this.compressor.clone(),
                             }),
                         );
@@ -243,7 +241,6 @@ where
                     addr,
                     egress_queue: VecDeque::with_capacity(128),
                     state: Arc::clone(&self.state),
-                    should_flush: false,
                     compressor: self.compressor.clone(),
                 }),
             );
@@ -256,37 +253,35 @@ where
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
     type Item = Result<Request<A>, RepError>;
 
-    /// Advances the state of the peer.
+    /// Advances the state of the peer. Tries to poll all possible sources of progress equally.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
         loop {
-            // Flush any messages on the outgoing buffer
-            if this.should_flush {
-                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
-                    this.should_flush = false;
+            let mut progress = false;
+            if let Some(msg) = this.egress_queue.pop_front() {
+                let msg_len = msg.size();
+                match this.conn.start_send_unpin(msg) {
+                    Ok(_) => {
+                        this.state.stats.specific.increment_tx(msg_len);
+
+                        // We might be able to send more queued messages
+                        progress = true;
+                    }
+                    Err(e) => {
+                        this.state.stats.specific.increment_failed_requests();
+                        error!(err = ?e, peer = ?this.addr, "failed to send message to socket, closing...");
+                        // End this stream as we can't send any more messages
+                        return Poll::Ready(None);
+                    }
                 }
             }
 
-            // Then, try to drain the egress queue.
-            if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.egress_queue.pop_front() {
-                    let msg_len = msg.size();
-                    match this.conn.start_send_unpin(msg) {
-                        Ok(_) => {
-                            this.state.stats.specific.increment_tx(msg_len);
-                            this.should_flush = true;
-
-                            // We might be able to send more queued messages
-                            continue;
-                        }
-                        Err(e) => {
-                            this.state.stats.specific.increment_failed_requests();
-                            error!(err = ?e, "Failed to send message to socket");
-                            // End this stream as we can't send any more messages
-                            return Poll::Ready(None);
-                        }
-                    }
+            // Try to flush the connection if any data was written to the buffer.
+            if !this.conn.write_buffer().is_empty() {
+                if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                    error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
+                    return Poll::Ready(None);
                 }
             }
 
@@ -319,7 +314,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 let msg = reqrep::Message::new(id, compression_type, payload);
                 this.egress_queue.push_back(msg);
 
-                continue;
+                progress = true;
             }
 
             // Finally we accept incoming requests from the peer.
@@ -347,6 +342,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     return Poll::Ready(None);
                 }
                 Poll::Pending => {}
+            }
+
+            if progress {
+                continue;
             }
 
             return Poll::Pending;
