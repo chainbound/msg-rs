@@ -34,11 +34,11 @@ type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Se
 ///
 /// # Usage of Framed
 /// [`Framed`] is used for encoding and decoding messages ("frames").
-/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected by
-/// [`Sink::poll_ready`] and configured by [`Framed::set_backpressure_boundary`].
+/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected
+/// when calling `poll_ready` and configured by [`Framed::set_backpressure_boundary`].
 ///
-/// However, we don't use `poll_ready` here, and instead we flush whenever the write buffer contains
-/// data (i.e., every time we write a message to it).
+/// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
+/// the framed buffer.
 type ConnectionCtl<Io, S, A> =
     ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
