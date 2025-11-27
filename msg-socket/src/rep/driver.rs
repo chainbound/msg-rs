@@ -8,7 +8,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt, stream::FuturesUnordered};
-use msg_common::span::{Enter, SpanExt as _, WithSpan};
+use msg_common::span::{EnterSpan, SpanExt as _, WithSpan};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::{
@@ -262,10 +262,9 @@ where
             conn.flush().await?;
 
             Ok(AuthResult { id, addr, stream: conn.into_inner() })
-        }
-        .with_span(span);
+        };
 
-        self.auth_tasks.spawn(fut);
+        self.auth_tasks.spawn(fut.with_span(span));
 
         Ok(())
     }

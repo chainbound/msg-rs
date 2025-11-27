@@ -81,19 +81,19 @@ pub struct WithEntered<T> {
     pub span: tracing::span::EnteredSpan,
 }
 
-/// Trait to convert [`WithSpan<T>`] containers into [`WithEntered<S>`] containers, by
-/// [`Enter::enter`]ing the span.
+/// Trait to convert [`WithSpan<T>`] containers into [`WithEntered<T>`] containers, by
+/// [`tracing::Span::enter`]ing the span.
 ///
-/// The associated type [`Enter::Output`] allows for conversions that change the outer type which
+/// The associated type [`EnterSpan::Output`] allows for conversions that change the outer type which
 /// may wrap [`WithSpan<T>`], such as `Option` or `Poll`. For example, one implementation for poll
 /// could allow to convert from `Poll<WithSpan<T>>` to `Poll<WithEntered<T>>`.
-pub trait Enter {
+pub trait EnterSpan {
     type Output;
 
     fn enter(self) -> Self::Output;
 }
 
-impl<T> Enter for WithSpan<T> {
+impl<T> EnterSpan for WithSpan<T> {
     type Output = WithEntered<T>;
 
     #[inline]
@@ -103,7 +103,7 @@ impl<T> Enter for WithSpan<T> {
     }
 }
 
-impl<T> Enter for WithEntered<T> {
+impl<T> EnterSpan for WithEntered<T> {
     type Output = WithEntered<T>;
 
     #[inline]
@@ -112,8 +112,8 @@ impl<T> Enter for WithEntered<T> {
     }
 }
 
-impl<T: Enter> Enter for Option<T> {
-    type Output = Option<<T as Enter>::Output>;
+impl<T: EnterSpan> EnterSpan for Option<T> {
+    type Output = Option<<T as EnterSpan>::Output>;
 
     #[inline]
     fn enter(self) -> Self::Output {
@@ -121,8 +121,8 @@ impl<T: Enter> Enter for Option<T> {
     }
 }
 
-impl<T: Enter, E> Enter for Result<T, E> {
-    type Output = Result<<T as Enter>::Output, E>;
+impl<T: EnterSpan, E> EnterSpan for Result<T, E> {
+    type Output = Result<<T as EnterSpan>::Output, E>;
 
     #[inline]
     fn enter(self) -> Self::Output {
@@ -130,8 +130,8 @@ impl<T: Enter, E> Enter for Result<T, E> {
     }
 }
 
-impl<T: Enter> Enter for Poll<T> {
-    type Output = Poll<<T as Enter>::Output>;
+impl<T: EnterSpan> EnterSpan for Poll<T> {
+    type Output = Poll<<T as EnterSpan>::Output>;
 
     #[inline]
     fn enter(self) -> Self::Output {

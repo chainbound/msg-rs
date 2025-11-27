@@ -106,7 +106,7 @@ impl IdBase58 {
     /// Generates a new random Base58 short ID using the given RNG.
     #[inline]
     pub fn new_with_rng<T: Rng>(rng: &mut T) -> Self {
-        let raw: u64 = rng.r#gen();
+        let raw: u64 = rng.random();
         Self::to_base58(raw)
     }
 

@@ -11,7 +11,7 @@ use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
 use msg_common::{
     IdBase58,
-    span::{Enter as _, SpanExt as _, WithSpan},
+    span::{EnterSpan as _, SpanExt as _, WithSpan},
 };
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -19,7 +19,7 @@ use tokio::{
     time::Interval,
 };
 use tokio_util::codec::Framed;
-use tracing::{Instrument, debug, error, warn};
+use tracing::Instrument;
 
 use super::{Command, ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, SendCommand, req::SocketState};
@@ -97,22 +97,23 @@ where
 
     conn.send(auth::Message::Auth(token)).await?;
     conn.flush().await?;
-    debug!("sent auth, waiting ack from server");
+    tracing::debug!("sent auth, waiting ack from server");
 
     // Wait for the response
-    match conn.next().await {
-        Some(res) => match res {
-            Ok(auth::Message::Ack) => {
-                debug!("received ack");
-                Ok(io)
-            }
-            Ok(msg) => {
-                error!(?msg, "unexpected ack result");
-                Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-        },
-        None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed").into()),
+    let Some(res) = conn.next().await else {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed").into());
+    };
+
+    match res {
+        Ok(auth::Message::Ack) => {
+            tracing::debug!("received ack");
+            Ok(io)
+        }
+        Ok(msg) => {
+            tracing::error!(?msg, "unexpected ack result");
+            Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
+        }
+        Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
     }
 }
 
@@ -138,22 +139,19 @@ where
         }
         .in_current_span();
 
+        // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
         self.conn_task = Some(WithSpan::current(Box::pin(task)));
     }
 
     /// Handle an incoming message from the connection.
     fn on_message(&mut self, msg: reqrep::Message) {
-        let Some(pending) = self.pending_requests.remove(&msg.id()) else {
-            let _g = self.span.enter();
-            warn!(msg_id = msg.id(), "received response for unknown request id");
+        let Some(pending) = self.pending_requests.remove(&msg.id()).enter() else {
+            tracing::warn!(parent: &self.span, msg_id = msg.id(), "received response for unknown request id");
             return;
         };
 
-        let (PendingRequest { start, sender }, span) = pending.into_parts();
-        let _g = span.enter();
-
-        let rtt = start.elapsed();
-        debug!(msg_id = msg.id(), ?rtt, "received response");
+        let rtt = pending.start.elapsed();
+        tracing::debug!(msg_id = msg.id(), ?rtt, "received response");
 
         let size = msg.size();
         let compression_type = msg.header().compression_type();
@@ -163,14 +161,15 @@ where
         match try_decompress_payload(compression_type, payload) {
             Ok(decompressed) => payload = decompressed,
             Err(e) => {
-                error!(?e, "failed to decompress response payload");
-                let _ = sender.send(Err(ReqError::Wire(reqrep::Error::Decompression)));
+                tracing::error!(?e, "failed to decompress response payload");
+                let _ =
+                    pending.inner.sender.send(Err(ReqError::Wire(reqrep::Error::Decompression)));
                 return;
             }
         }
 
-        if sender.send(Ok(payload)).is_err() {
-            error!("failed to send peer response back, dropped receiver");
+        if pending.inner.sender.send(Ok(payload)).is_err() {
+            tracing::error!("failed to send peer response back, dropped receiver");
         }
 
         // Update stats
@@ -197,10 +196,10 @@ where
                     if let Some(ref compressor) = self.compressor {
                         let start = Instant::now();
                         if let Err(e) = message.compress(compressor.as_ref()) {
-                            error!(?e, "failed to compress message");
+                            tracing::error!(?e, "failed to compress message");
                         }
 
-                        debug!(
+                        tracing::debug!(
                             size_before,
                             size_after = message.payload().len(),
                             elapsed = ?start.elapsed(),
@@ -315,7 +314,7 @@ where
                             this.conn_state = ConnectionState::Active { channel: framed };
                         }
                         Err(e) => {
-                            error!(?e, "failed to connect");
+                            tracing::error!(?e, "failed to connect");
                         }
                     }
                 }
@@ -326,17 +325,17 @@ where
             if let ConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
                 let Poll::Ready(item) = backoff.poll_next_unpin(cx) else { return Poll::Pending };
 
-                let _span = tracing::info_span!(parent: this.span.clone(), "connect").entered();
+                let _span = tracing::info_span!(parent: &this.span, "connect").entered();
 
                 if let Some(duration) = item {
                     if this.conn_task.is_none() {
-                        debug!(backoff = ?duration, "trying connection");
+                        tracing::debug!(backoff = ?duration, "trying connection");
                         this.try_connect(addr.clone());
                     } else {
-                        debug!(backoff = ?duration, "not retrying as there is already a connection task");
+                        tracing::debug!(backoff = ?duration, "not retrying as there is already a connection task");
                     }
                 } else {
-                    error!("exceeded maximum number of retries, terminating connection");
+                    tracing::error!("exceeded maximum number of retries, terminating connection");
 
                     return Poll::Ready(());
                 }
@@ -356,7 +355,10 @@ where
                 }
                 Poll::Ready(Some(Err(e))) => {
                     let _g = span.enter();
-                    warn!(?e, "failed to read from connection, resetting connection state");
+                    tracing::warn!(
+                        ?e,
+                        "failed to read from connection, resetting connection state"
+                    );
 
                     // set the connection to inactive, so that it will be re-tried
                     this.reset_connection();
@@ -365,7 +367,7 @@ where
                 }
                 Poll::Ready(None) => {
                     let _g = span.enter();
-                    warn!("connection closed, resetting connection state");
+                    tracing::warn!("connection closed, resetting connection state");
 
                     // set the connection to inactive, so that it will be re-tried
                     this.reset_connection();
@@ -384,14 +386,14 @@ where
 
                     // Generate the new message
                     let size = msg.size();
-                    debug!(id = msg.id(), "sending msg");
+                    tracing::debug!(id = msg.id(), "sending msg");
                     match channel.start_send_unpin(msg) {
                         Ok(_) => {
                             this.socket_state.stats.specific.increment_tx(size);
                             this.should_flush = true;
                         }
                         Err(e) => {
-                            error!(?e, "failed to send message to socket");
+                            tracing::error!(?e, "failed to send message to socket");
 
                             // set the connection to inactive, so that it will be re-tried
                             this.reset_connection();
@@ -415,7 +417,9 @@ where
                     continue;
                 }
                 Poll::Ready(None) => {
-                    debug!("socket dropped, shutting down backend and flushing connection");
+                    tracing::debug!(
+                        "socket dropped, shutting down backend and flushing connection"
+                    );
 
                     if let ConnectionState::Active { ref mut channel } = this.conn_state {
                         let _ = ready!(channel.poll_close_unpin(cx));

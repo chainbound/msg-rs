@@ -15,8 +15,11 @@ use msg_wire::{compression::Compressor, reqrep};
 use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, ExponentialBackoff, ReqMessage, SendCommand,
-    req::driver::ConnectionCtl,
-    req::{SocketState, driver::ReqDriver, stats::ReqStats},
+    req::{
+        SocketState,
+        driver::{ConnectionCtl, ReqDriver},
+        stats::ReqStats,
+    },
     stats::SocketStats,
 };
 
