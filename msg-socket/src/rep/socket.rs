@@ -105,13 +105,13 @@ where
     pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), RepError> {
         let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
-        let mut transport = self.transport.take().expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("transport has been moved already");
 
         for addr in addresses {
             match transport.bind(addr.clone()).await {
                 Ok(_) => break,
                 Err(e) => {
-                    warn!(err = ?e, "Failed to bind to {:?}, trying next address", addr);
+                    warn!(?e, ?addr, "failed to bind");
                     continue;
                 }
             }
@@ -121,7 +121,11 @@ where
             return Err(RepError::NoValidEndpoints);
         };
 
-        debug!("Listening on {:?}", local_addr);
+        let span = tracing::info_span!(parent: None, "rep_driver", ?local_addr);
+
+        span.in_scope(|| {
+            debug!("listening");
+        });
 
         let backend = RepDriver {
             transport,
@@ -131,8 +135,9 @@ where
             to_socket,
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
-            conn_tasks: FuturesUnordered::new(),
             compressor: self.compressor.take(),
+            conn_tasks: FuturesUnordered::new(),
+            span,
         };
 
         tokio::spawn(backend);

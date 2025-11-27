@@ -1,7 +1,14 @@
 use arc_swap::Guard;
 use bytes::Bytes;
+use msg_common::span::WithSpan;
 use rustc_hash::FxHashMap;
-use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    marker::PhantomData,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
@@ -11,9 +18,9 @@ use tokio_util::codec::Framed;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
-use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
+use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
-    ConnectionState, ExponentialBackoff, ReqMessage,
+    ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
         driver::{ConnectionCtl, ReqDriver},
@@ -25,7 +32,7 @@ use crate::{
 /// The request socket.
 pub struct ReqSocket<T: Transport<A>, A: Address> {
     /// Command channel to the backend task.
-    to_driver: Option<mpsc::Sender<Command>>,
+    to_driver: Option<mpsc::Sender<SendCommand>>,
     /// The socket transport.
     transport: Option<T>,
     /// Options for the socket. These are shared with the backend task.
@@ -122,7 +129,7 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(Command::Send { message: msg, response: response_tx })
+            .send(SendCommand::new(WithSpan::current(msg), response_tx))
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 
@@ -133,7 +140,7 @@ where
     /// A ReqSocket can only be connected to a single address.
     pub async fn try_connect(&mut self, endpoint: A) -> Result<(), ReqError> {
         // TODO: Don't panic, return error
-        let mut transport = self.transport.take().expect("Transport has been moved already");
+        let mut transport = self.transport.take().expect("transport has been moved already");
 
         let conn_state = if self.options.blocking_connect {
             let io = transport
@@ -177,6 +184,9 @@ where
         // capacity. If we do this, we'll never have to re-allocate.
         let pending_requests = FxHashMap::default();
 
+        let id = DRIVER_ID.fetch_add(1, Ordering::Relaxed);
+        let span = tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), addr = ?endpoint);
+
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
             addr: endpoint,
@@ -193,6 +203,8 @@ where
             conn_task: None,
             egress_queue: Default::default(),
             compressor: self.compressor.clone(),
+            id,
+            span,
         };
 
         // Spawn the backend task
