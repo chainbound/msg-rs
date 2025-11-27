@@ -32,6 +32,14 @@ use msg_wire::{
 type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
+///
+/// # Usage of Framed
+/// [`Framed`] is used for encoding and decoding messages ("frames").
+/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected
+/// when calling `poll_ready` and configured by [`Framed::set_backpressure_boundary`].
+///
+/// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
+/// the framed buffer.
 pub(crate) type ConnectionCtl<Io, S, A> =
     ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
@@ -61,10 +69,6 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) pending_requests: FxHashMap<u32, WithSpan<PendingRequest>>,
     /// Interval for checking for request timeouts.
     pub(crate) timeout_check_interval: Interval,
-    /// Interval for flushing the connection. This is secondary to `should_flush`.
-    pub(crate) flush_interval: Option<tokio::time::Interval>,
-    /// Whether or not the connection should be flushed
-    pub(crate) should_flush: bool,
     /// Optional message compressor. This is shared with the socket to keep
     /// the API consistent with other socket types (e.g. `PubSocket`)
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
@@ -93,7 +97,6 @@ where
     let mut conn = Framed::new(&mut io, auth::Codec::new_client());
 
     conn.send(auth::Message::Auth(token)).await?;
-    conn.flush().await?;
     tracing::debug!("sent auth, waiting ack from server");
 
     // Wait for the response
@@ -233,26 +236,6 @@ where
         }
     }
 
-    /// Check if the connection should be flushed.
-    #[inline]
-    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
-        if self.should_flush {
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.poll_tick(cx).is_ready()
-            } else {
-                true
-            }
-        } else {
-            // If we shouldn't flush, reset the interval so we don't get woken up
-            // every time the interval expires
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.reset()
-            }
-
-            false
-        }
-    }
-
     /// Reset the connection state to inactive, so that it will be re-tried.
     /// This is done when the connection is closed or an error occurs.
     #[inline]
@@ -276,14 +259,8 @@ where
         let span = this.span.clone();
 
         loop {
-            // Try to flush pending messages
-            if this.should_flush(cx) {
-                if let ConnectionState::Active { ref mut channel } = this.conn_state {
-                    if let Poll::Ready(Ok(_)) = channel.poll_flush_unpin(cx) {
-                        this.should_flush = false;
-                    }
-                }
-            }
+            // TODO: Group connection management together in a function or at a different level of
+            // abstraction.
 
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = this.conn_task {
@@ -300,8 +277,7 @@ where
                             let metered =
                                 MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
 
-                            let mut framed = Framed::new(metered, reqrep::Codec::new());
-                            framed.set_backpressure_boundary(this.options.backpressure_boundary);
+                            let framed = Framed::new(metered, reqrep::Codec::new());
                             this.conn_state = ConnectionState::Active { channel: framed };
                         }
                         Err(e) => {
@@ -368,29 +344,36 @@ where
                 Poll::Pending => {}
             }
 
-            // Check for outgoing messages to the socket
-            if channel.poll_ready_unpin(cx).is_ready() {
-                // Drain the egress queue
-                if let Some(msg) = this.egress_queue.pop_front() {
-                    let (msg, span) = msg.into_parts();
-                    let _g = span.enter();
-
-                    // Generate the new message
-                    let size = msg.size();
-                    tracing::debug!(id = msg.id(), "sending msg");
-                    match channel.start_send_unpin(msg) {
-                        Ok(_) => {
-                            this.socket_state.stats.specific.increment_tx(size);
-                            this.should_flush = true;
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "failed to send message to socket");
-
-                            // set the connection to inactive, so that it will be re-tried
-                            this.reset_connection();
-                        }
+            // NOTE: We try to drain the egress queue first (the `continue`), writing everything to
+            // the `Framed` internal buffer. When all messages are written, we move on to flushing
+            // the connection in the block below. We DO NOT rely on the `Framed` internal
+            // backpressure boundary, because we do not call `poll_ready`.
+            if let Some(msg) = this.egress_queue.pop_front().enter() {
+                // Generate the new message
+                let size = msg.size();
+                tracing::debug!("Sending msg {}", msg.id());
+                // Write the message to the buffer.
+                match channel.start_send_unpin(msg.inner) {
+                    Ok(_) => {
+                        this.socket_state.stats.specific.increment_tx(size);
                     }
+                    Err(e) => {
+                        tracing::error!(err = ?e, "Failed to send message to socket");
 
+                        // set the connection to inactive, so that it will be re-tried
+                        this.reset_connection();
+                    }
+                }
+
+                // We might be able to write more queued messages to the buffer.
+                continue;
+            }
+
+            // Try to flush the connection if any data was written to the buffer.
+            if !channel.write_buffer().is_empty() {
+                if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
+                    tracing::error!(err = ?e, "Failed to flush connection");
+                    this.reset_connection();
                     continue;
                 }
             }

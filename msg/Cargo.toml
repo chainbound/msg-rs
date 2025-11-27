@@ -40,11 +40,12 @@ jemallocator = { version = "0.5.0", features = ["profiling"] }
 [[bench]]
 name = "reqrep"
 harness = false
+required-features = ["tcp-tls"]
 
 [[bench]]
 name = "pubsub"
-required-features = ["quic"]
 harness = false
+required-features = ["quic"]
 
 [[example]]
 name = "quic_vs_tcp"

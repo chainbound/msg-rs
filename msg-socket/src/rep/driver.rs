@@ -32,13 +32,23 @@ use msg_wire::{
 
 use super::RepError;
 
+/// An object that represents a connected peer and associated state.
+///
+/// # Usage of Framed
+/// [`Framed`] is used for encoding and decoding messages ("frames").
+/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected
+/// when calling `poll_ready` and configured by [`Framed::set_backpressure_boundary`].
+///
+/// However, we don't use `poll_ready` here, and instead we flush whenever the write buffer contains
+/// data (i.e., every time we write a message to it).
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_requests: FuturesUnordered<WithSpan<PendingRequest>>,
     conn: Framed<T, reqrep::Codec>,
+    /// The address of the peer.
     addr: A,
     egress_queue: VecDeque<WithSpan<reqrep::Message>>,
     state: Arc<SocketState>,
-    should_flush: bool,
+    /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
     span: tracing::Span,
 }
@@ -119,8 +129,7 @@ where
                         // Run custom authenticator
                         info!(id = ?auth.id, "passed");
 
-                        let mut conn = Framed::new(auth.stream, reqrep::Codec::new());
-                        conn.set_backpressure_boundary(this.options.backpressure_boundary);
+                        let conn = Framed::new(auth.stream, reqrep::Codec::new());
 
                         let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?auth.addr);
 
@@ -133,7 +142,6 @@ where
                                 addr: auth.addr,
                                 egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),
-                                should_flush: false,
                                 compressor: this.compressor.clone(),
                             }),
                         );
@@ -218,7 +226,6 @@ where
                     addr,
                     egress_queue: VecDeque::with_capacity(128),
                     state: Arc::clone(&self.state),
-                    should_flush: false,
                     compressor: self.compressor.clone(),
                 }),
             );
@@ -244,7 +251,6 @@ where
 
             let auth::Message::Auth(id) = token else {
                 conn.send(auth::Message::Reject).await?;
-                conn.flush().await?;
                 conn.close().await?;
                 return Err(RepError::Auth("invalid auth message".to_string()));
             };
@@ -252,14 +258,12 @@ where
             // If authentication fails, send a reject message and close the connection
             if !authenticator.authenticate(&id) {
                 conn.send(auth::Message::Reject).await?;
-                conn.flush().await?;
                 conn.close().await?;
                 return Err(RepError::Auth("authentication failed".to_string()));
             }
 
             // Send ack
             conn.send(auth::Message::Ack).await?;
-            conn.flush().await?;
 
             Ok(AuthResult { id, addr, stream: conn.into_inner() })
         };
@@ -273,15 +277,35 @@ where
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
     type Item = WithSpan<Result<Request<A>, RepError>>;
 
-    /// Advances the state of the peer.
+    /// Advances the state of the peer. Tries to poll all possible sources of progress equally.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
         loop {
-            // Flush any messages on the outgoing buffer
-            if this.should_flush {
-                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
-                    this.should_flush = false;
+            let mut progress = false;
+            if let Some(msg) = this.egress_queue.pop_front().enter() {
+                let msg_len = msg.size();
+                match this.conn.start_send_unpin(msg.inner) {
+                    Ok(_) => {
+                        this.state.stats.specific.increment_tx(msg_len);
+
+                        // We might be able to send more queued messages
+                        progress = true;
+                    }
+                    Err(e) => {
+                        this.state.stats.specific.increment_failed_requests();
+                        error!(err = ?e, peer = ?this.addr, "failed to send message to socket, closing...");
+                        // End this stream as we can't send any more messages
+                        return Poll::Ready(None);
+                    }
+                }
+            }
+
+            // Try to flush the connection if any data was written to the buffer.
+            if !this.conn.write_buffer().is_empty() {
+                if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                    error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
+                    return Poll::Ready(None);
                 }
             }
 
@@ -294,7 +318,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     match this.conn.start_send_unpin(msg.inner) {
                         Ok(_) => {
                             this.state.stats.specific.increment_tx(msg_len);
-                            this.should_flush = true;
 
                             // We might be able to send more queued messages
                             continue;
@@ -384,6 +407,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     }
                     Poll::Pending => {}
                 }
+            }
+
+            if progress {
+                continue;
             }
 
             return Poll::Pending;

@@ -9,7 +9,11 @@ use futures::StreamExt;
 use pprof::criterion::Output;
 use rand::Rng;
 
-use msg::{Address, Transport, ipc::Ipc};
+use msg::{
+    Address, Transport,
+    ipc::Ipc,
+    tcp_tls::{TcpTls, config},
+};
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::tcp::Tcp;
 use tokio::runtime::Runtime;
@@ -116,10 +120,7 @@ fn reqrep_single_thread_tcp(c: &mut Criterion) {
 
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
-    let req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default().with_flush_interval(Duration::from_micros(50)),
-    );
+    let req = ReqSocket::with_options(Tcp::default(), ReqOptions::default());
 
     let rep = RepSocket::new(Tcp::default());
 
@@ -147,10 +148,7 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     let rt =
         tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
 
-    let req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default().with_flush_interval(Duration::from_micros(50)),
-    );
+    let req = ReqSocket::with_options(Tcp::default(), ReqOptions::default());
 
     let rep = RepSocket::new(Tcp::default());
 
@@ -168,6 +166,42 @@ fn reqrep_multi_thread_tcp(c: &mut Criterion) {
     bench.bench_request_throughput(group);
 
     let mut group = c.benchmark_group("reqrep_multi_thread_tcp_rps");
+    group.sample_size(10);
+    bench.bench_rps(group);
+}
+
+fn reqrep_multi_thread_tls(c: &mut Criterion) {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let rt =
+        tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
+
+    let req = ReqSocket::with_options(
+        TcpTls::new_client(
+            config::Client::new("localhost".to_string())
+                .with_ssl_connector(helpers::default_connector_builder().build()),
+        ),
+        ReqOptions::default(),
+    );
+
+    let rep = RepSocket::new(TcpTls::new_server(config::Server::new(
+        helpers::default_acceptor_builder().build(),
+    )));
+
+    let mut bench = PairBenchmark {
+        rt,
+        req,
+        rep: Some(rep),
+        n_reqs: N_REQS,
+        msg_sizes: vec![MSG_SIZE, MSG_SIZE * 8, MSG_SIZE * 64, MSG_SIZE * 128],
+    };
+
+    bench.init("127.0.0.1:0".parse().unwrap());
+    let mut group = c.benchmark_group("reqrep_multi_thread_tls_bytes");
+    group.sample_size(10);
+    bench.bench_request_throughput(group);
+
+    let mut group = c.benchmark_group("reqrep_multi_thread_tls_rps");
     group.sample_size(10);
     bench.bench_rps(group);
 }
@@ -228,8 +262,58 @@ fn reqrep_multi_thread_ipc(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().warm_up_time(Duration::from_secs(1)).with_profiler(pprof::criterion::PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp, reqrep_single_thread_ipc, reqrep_multi_thread_ipc
+    targets = reqrep_single_thread_tcp, reqrep_multi_thread_tcp, reqrep_single_thread_ipc, reqrep_multi_thread_ipc, reqrep_multi_thread_tls
 }
 
 // Runs various benchmarks for the `ReqSocket` and `RepSocket`.
 criterion_main!(benches);
+
+mod helpers {
+    use std::{path::PathBuf, str::FromStr as _};
+
+    use openssl::ssl::{
+        SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslFiletype, SslMethod,
+    };
+
+    /// Creates a default SSL acceptor builder for testing, with a trusted CA.
+    pub fn default_acceptor_builder() -> SslAcceptorBuilder {
+        let certificate_path =
+            PathBuf::from_str("../testdata/certificates/server-cert.pem").unwrap();
+        let private_key_path =
+            PathBuf::from_str("../testdata/certificates/server-key.pem").unwrap();
+        let ca_certificate_path =
+            PathBuf::from_str("../testdata/certificates/ca-cert.pem").unwrap();
+
+        assert!(certificate_path.exists(), "Certificate file does not exist");
+        assert!(private_key_path.exists(), "Private key file does not exist");
+        assert!(ca_certificate_path.exists(), "CA Certificate file does not exist");
+
+        let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        acceptor_builder.set_certificate_file(certificate_path, SslFiletype::PEM).unwrap();
+        acceptor_builder.set_private_key_file(private_key_path, SslFiletype::PEM).unwrap();
+        acceptor_builder.set_ca_file(ca_certificate_path).unwrap();
+        acceptor_builder
+    }
+
+    /// Creates a default SSL connector builder for testing, with a trusted CA.
+    /// It also has client certificate and private key set for mTLS testing.
+    pub fn default_connector_builder() -> SslConnectorBuilder {
+        let certificate_path =
+            PathBuf::from_str("../testdata/certificates/client-cert.pem").unwrap();
+        let private_key_path =
+            PathBuf::from_str("../testdata/certificates/client-key.pem").unwrap();
+        let ca_certificate_path =
+            PathBuf::from_str("../testdata/certificates/ca-cert.pem").unwrap();
+
+        assert!(certificate_path.exists(), "Certificate file does not exist");
+        assert!(private_key_path.exists(), "Private key file does not exist");
+        assert!(ca_certificate_path.exists(), "CA Certificate file does not exist");
+
+        let mut connector_builder = SslConnector::builder(SslMethod::tls()).unwrap();
+        connector_builder.set_certificate_file(certificate_path, SslFiletype::PEM).unwrap();
+        connector_builder.set_private_key_file(private_key_path, SslFiletype::PEM).unwrap();
+        connector_builder.set_ca_file(ca_certificate_path).unwrap();
+
+        connector_builder
+    }
+}
