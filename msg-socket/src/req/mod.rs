@@ -1,7 +1,10 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use msg_common::span::WithSpan;
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, atomic::AtomicUsize},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -20,6 +23,8 @@ use stats::ReqStats;
 
 /// The default buffer size for the socket.
 const DEFAULT_BUFFER_SIZE: usize = 1024;
+
+pub(crate) static DRIVER_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// Errors that can occur when using a request socket.
 #[derive(Debug, Error)]

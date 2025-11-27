@@ -9,10 +9,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_common::{
-    IdBase58,
-    span::{EnterSpan as _, SpanExt as _, WithSpan},
-};
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -73,7 +70,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
 
     /// An unique ID for this driver.
-    pub(crate) id: IdBase58,
+    pub(crate) id: usize,
     /// A span to use for general purpose notifications, not tied to a specific path.
     pub(crate) span: tracing::Span,
 }
@@ -184,7 +181,7 @@ where
 
         // We want ot inherit the span from the socket frontend
         let span =
-            tracing::info_span!(parent: &message.span, "send", driver_id = %self.id).entered();
+            tracing::info_span!(parent: &message.span, "send", driver_id = format!("req-{}", self.id)).entered();
 
         // Compress the message if it's larger than the minimum size
         let size_before = message.payload().len();

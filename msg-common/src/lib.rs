@@ -17,8 +17,6 @@ pub use channel::{Channel, channel};
 mod task;
 pub use task::JoinMap;
 
-use rand::Rng;
-
 pub mod span;
 
 /// Returns the current UNIX timestamp in microseconds.
@@ -86,53 +84,5 @@ impl IpAddrExt for IpAddr {
             Self::V4(_) => Self::V4(Ipv4Addr::LOCALHOST),
             Self::V6(_) => Self::V6(Ipv6Addr::LOCALHOST),
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct IdBase58<const N: usize = 6>([u8; N]);
-
-impl IdBase58 {
-    /// The Base58 alphabet.
-    const ALPHABET: &[u8] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-    /// Generates a new random Base58 short ID.
-    #[inline]
-    pub fn new() -> Self {
-        let raw: u64 = rand::random();
-        Self::to_base58(raw)
-    }
-
-    /// Generates a new random Base58 short ID using the given RNG.
-    #[inline]
-    pub fn new_with_rng<T: Rng>(rng: &mut T) -> Self {
-        let raw: u64 = rng.random();
-        Self::to_base58(raw)
-    }
-
-    /// Converts the given u64 to a Base58 short ID.
-    #[inline]
-    pub fn to_base58(mut x: u64) -> Self {
-        let mut out = [b'1'; 6]; // '1' is the first in base58
-
-        for i in (0..6).rev() {
-            out[i] = Self::ALPHABET[(x % 58) as usize];
-            x /= 58;
-        }
-
-        Self(out)
-    }
-}
-
-impl Default for IdBase58 {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Display for IdBase58 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // SAFETY: it is always valid UTF-8 since it only contains Base58 characters
-        f.write_str(unsafe { core::str::from_utf8_unchecked(&self.0) })
     }
 }

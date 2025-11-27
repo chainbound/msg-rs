@@ -84,9 +84,9 @@ pub struct WithEntered<T> {
 /// Trait to convert [`WithSpan<T>`] containers into [`WithEntered<T>`] containers, by
 /// [`tracing::Span::enter`]ing the span.
 ///
-/// The associated type [`EnterSpan::Output`] allows for conversions that change the outer type which
-/// may wrap [`WithSpan<T>`], such as `Option` or `Poll`. For example, one implementation for poll
-/// could allow to convert from `Poll<WithSpan<T>>` to `Poll<WithEntered<T>>`.
+/// The associated type [`EnterSpan::Output`] allows for conversions that change the outer type
+/// which may wrap [`WithSpan<T>`], such as `Option` or `Poll`. For example, one implementation for
+/// poll could allow to convert from `Poll<WithSpan<T>>` to `Poll<WithEntered<T>>`.
 pub trait EnterSpan {
     type Output;
 

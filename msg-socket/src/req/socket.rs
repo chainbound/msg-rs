@@ -1,8 +1,14 @@
 use arc_swap::Guard;
 use bytes::Bytes;
-use msg_common::{IdBase58, span::WithSpan};
+use msg_common::span::WithSpan;
 use rustc_hash::FxHashMap;
-use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    marker::PhantomData,
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
@@ -14,7 +20,7 @@ use msg_wire::{compression::Compressor, reqrep};
 
 use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
-    ConnectionState, ExponentialBackoff, ReqMessage, SendCommand,
+    ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
         driver::{ConnectionCtl, ReqDriver},
@@ -178,8 +184,8 @@ where
         // capacity. If we do this, we'll never have to re-allocate.
         let pending_requests = FxHashMap::default();
 
-        let id = IdBase58::new();
-        let span = tracing::info_span!(parent: None, "req_driver", %id, addr = ?endpoint);
+        let id = DRIVER_ID.fetch_add(1, Ordering::Relaxed);
+        let span = tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), addr = ?endpoint);
 
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
