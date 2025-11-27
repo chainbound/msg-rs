@@ -12,7 +12,7 @@ use tokio_util::codec::Framed;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
-use super::{Command, DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
+use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
@@ -26,7 +26,7 @@ use crate::{
 /// The request socket.
 pub struct ReqSocket<T: Transport<A>, A: Address> {
     /// Command channel to the backend task.
-    to_driver: Option<mpsc::Sender<Command>>,
+    to_driver: Option<mpsc::Sender<SendCommand>>,
     /// The socket transport.
     transport: Option<T>,
     /// Options for the socket. These are shared with the backend task.
@@ -123,7 +123,7 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(Command::Send(SendCommand::new(WithSpan::current(msg), response_tx)))
+            .send(SendCommand::new(WithSpan::current(msg), response_tx))
             .await
             .map_err(|_| ReqError::SocketClosed)?;
 

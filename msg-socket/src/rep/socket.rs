@@ -7,7 +7,6 @@ use std::{
 };
 
 use futures::{Stream, stream::FuturesUnordered};
-use msg_common::IdBase58;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
@@ -122,8 +121,7 @@ where
             return Err(RepError::NoValidEndpoints);
         };
 
-        let id = IdBase58::new();
-        let span = tracing::info_span!(parent: None, "rep_driver", %id, ?local_addr);
+        let span = tracing::info_span!(parent: None, "rep_driver", ?local_addr);
 
         span.in_scope(|| {
             debug!("listening");
@@ -137,8 +135,8 @@ where
             to_socket,
             auth: self.auth.take(),
             auth_tasks: JoinSet::new(),
-            conn_tasks: FuturesUnordered::new(),
             compressor: self.compressor.take(),
+            conn_tasks: FuturesUnordered::new(),
             span,
         };
 

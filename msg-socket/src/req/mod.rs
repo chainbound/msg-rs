@@ -59,12 +59,6 @@ impl SendCommand {
     }
 }
 
-/// Commands that can be sent to the request socket driver.
-pub enum Command {
-    /// Send a request message and wait for a response.
-    Send(SendCommand),
-}
-
 /// The request socket options.
 #[derive(Debug, Clone)]
 pub struct ReqOptions {

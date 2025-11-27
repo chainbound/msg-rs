@@ -21,7 +21,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use super::{Command, ReqError, ReqOptions};
+use super::{ReqError, ReqOptions};
 use crate::{ConnectionState, ExponentialBackoff, SendCommand, req::SocketState};
 
 use msg_transport::{Address, MeteredIo, Transport};
@@ -48,7 +48,7 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// ID counter for outgoing requests.
     pub(crate) id_counter: u32,
     /// Commands from the socket.
-    pub(crate) from_socket: mpsc::Receiver<Command>,
+    pub(crate) from_socket: mpsc::Receiver<SendCommand>,
     /// The transport for this socket.
     pub(crate) transport: T,
     /// The address of the server.
@@ -178,44 +178,38 @@ where
     }
 
     /// Handle an incoming command from the socket frontend.
-    fn on_command(&mut self, cmd: Command) {
-        match cmd {
-            Command::Send(SendCommand {
-                message: WithSpan { inner: mut message, span },
-                response,
-            }) => {
-                let start = std::time::Instant::now();
+    fn on_send(&mut self, cmd: SendCommand) {
+        let SendCommand { mut message, response } = cmd;
+        let start = std::time::Instant::now();
 
-                // We want ot inherit the span from the socket frontend
-                let span =
-                    tracing::info_span!(parent: span, "send", driver_id = %self.id).entered();
+        // We want ot inherit the span from the socket frontend
+        let span =
+            tracing::info_span!(parent: &message.span, "send", driver_id = %self.id).entered();
 
-                // Compress the message if it's larger than the minimum size
-                let size_before = message.payload().len();
-                if size_before > self.options.min_compress_size {
-                    if let Some(ref compressor) = self.compressor {
-                        let start = Instant::now();
-                        if let Err(e) = message.compress(compressor.as_ref()) {
-                            tracing::error!(?e, "failed to compress message");
-                        }
-
-                        tracing::debug!(
-                            size_before,
-                            size_after = message.payload().len(),
-                            elapsed = ?start.elapsed(),
-                            "compressed message",
-                        );
-                    }
+        // Compress the message if it's larger than the minimum size
+        let size_before = message.payload().len();
+        if size_before > self.options.min_compress_size {
+            if let Some(ref compressor) = self.compressor {
+                let start = Instant::now();
+                if let Err(e) = message.compress(compressor.as_ref()) {
+                    tracing::error!(?e, "failed to compress message");
                 }
 
-                let msg = message.into_wire(self.id_counter);
-                let msg_id = msg.id();
-                self.id_counter = self.id_counter.wrapping_add(1);
-                self.egress_queue.push_back(msg.with_span(span.clone()));
-                self.pending_requests
-                    .insert(msg_id, PendingRequest { start, sender: response }.with_span(span));
+                tracing::debug!(
+                    size_before,
+                    size_after = message.payload().len(),
+                    elapsed = ?start.elapsed(),
+                    "compressed message",
+                );
             }
         }
+
+        let msg = message.inner.into_wire(self.id_counter);
+        let msg_id = msg.id();
+        self.id_counter = self.id_counter.wrapping_add(1);
+        self.egress_queue.push_back(msg.with_span(span.clone()));
+        self.pending_requests
+            .insert(msg_id, PendingRequest { start, sender: response }.with_span(span));
     }
 
     /// Check for request timeouts and notify the sender if any requests have timed out.
@@ -412,7 +406,7 @@ where
             // Check for outgoing messages from the socket handle
             match this.from_socket.poll_recv(cx) {
                 Poll::Ready(Some(cmd)) => {
-                    this.on_command(cmd);
+                    this.on_send(cmd);
 
                     continue;
                 }
