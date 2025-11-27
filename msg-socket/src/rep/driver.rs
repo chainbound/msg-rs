@@ -8,9 +8,13 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, Stream, StreamExt, stream::FuturesUnordered};
+use msg_common::span::{EnterSpan, SpanExt as _, WithSpan};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc,
+        oneshot::{self, error::RecvError},
+    },
     task::JoinSet,
 };
 use tokio_stream::{StreamMap, StreamNotifyClose};
@@ -38,17 +42,15 @@ use super::RepError;
 /// However, we don't use `poll_ready` here, and instead we flush whenever the write buffer contains
 /// data (i.e., every time we write a message to it).
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
-    pending_requests: FuturesUnordered<PendingRequest>,
-    /// The framed connection to the peer.
+    pending_requests: FuturesUnordered<WithSpan<PendingRequest>>,
     conn: Framed<T, reqrep::Codec>,
     /// The address of the peer.
     addr: A,
-    /// The queue of messages to be sent to the peer.
-    egress_queue: VecDeque<reqrep::Message>,
-    /// The socket state, shared between the backend task and the socket.
+    egress_queue: VecDeque<WithSpan<reqrep::Message>>,
     state: Arc<SocketState>,
     /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
+    span: tracing::Span,
 }
 
 #[allow(clippy::type_complexity)]
@@ -70,9 +72,12 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// the API consistent with other socket types (e.g. `PubSocket`)
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
-    pub(super) conn_tasks: FuturesUnordered<T::Accept>,
+    pub(crate) conn_tasks: FuturesUnordered<WithSpan<T::Accept>>,
     /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, RepError>>,
+    pub(crate) auth_tasks: JoinSet<WithSpan<Result<AuthResult<T::Io, A>, RepError>>>,
+
+    /// A span to use for general purpose notifications, not tied to a specific path.
+    pub(crate) span: tracing::Span,
 }
 
 impl<T, A> Future for RepDriver<T, A>
@@ -86,18 +91,23 @@ where
         let this = self.get_mut();
 
         loop {
-            if let Poll::Ready(Some((peer, msg))) = this.peer_states.poll_next_unpin(cx) {
-                match msg {
-                    Some(Ok(mut request)) => {
-                        debug!("Received request from peer {:?}", peer);
+            if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
+                let Some(result) = maybe_result.enter() else {
+                    warn!(?peer, "peer disconnected");
+                    this.state.stats.specific.decrement_active_clients();
+                    continue;
+                };
+
+                match result.inner {
+                    Ok(mut request) => {
+                        debug!("received request");
 
                         let size = request.msg().len();
 
-                        // decompress the payload
                         match try_decompress_payload(request.compression_type, request.msg) {
                             Ok(decompressed) => request.msg = decompressed,
                             Err(e) => {
-                                error!(err = ?e, "Failed to decompress message");
+                                error!(?e, "failed to decompress message");
                                 continue;
                             }
                         }
@@ -105,29 +115,28 @@ where
                         this.state.stats.specific.increment_rx(size);
                         let _ = this.to_socket.try_send(request);
                     }
-                    Some(Err(e)) => {
-                        error!(err = ?e, "Error receiving message from peer {:?}", peer);
-                    }
-                    None => {
-                        warn!("Peer {:?} disconnected", peer);
-                        this.state.stats.specific.decrement_active_clients();
+                    Err(e) => {
+                        error!(?e, ?peer, "failed to receive message from peer");
                     }
                 }
 
                 continue;
             }
 
-            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
-                match auth {
+            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx).enter() {
+                match auth.inner {
                     Ok(auth) => {
                         // Run custom authenticator
-                        info!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
+                        info!(id = ?auth.id, "passed");
 
                         let conn = Framed::new(auth.stream, reqrep::Codec::new());
+
+                        let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?auth.addr);
 
                         this.peer_states.insert(
                             auth.addr.clone(),
                             StreamNotifyClose::new(PeerState {
+                                span,
                                 pending_requests: FuturesUnordered::new(),
                                 conn,
                                 addr: auth.addr,
@@ -138,7 +147,7 @@ where
                         );
                     }
                     Err(e) => {
-                        error!(err = ?e, "Error authenticating client");
+                        error!(?e, "failed to authenticate peer");
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -146,16 +155,16 @@ where
                 continue;
             }
 
-            if let Poll::Ready(Some(incoming)) = this.conn_tasks.poll_next_unpin(cx) {
-                match incoming {
+            if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).enter() {
+                match conn.inner {
                     Ok(io) => {
-                        if let Err(e) = this.on_incoming(io) {
-                            error!(err = ?e, "Error accepting incoming connection");
+                        if let Err(e) = this.on_accepted_connection(io) {
+                            error!(?e, "failed to handle accepted connection");
                             this.state.stats.specific.decrement_active_clients();
                         }
                     }
                     Err(e) => {
-                        error!(err = ?e, "Error accepting incoming connection");
+                        error!(?e, "failed to accept incoming connection");
 
                         // Active clients have already been incremented in the initial call to
                         // `poll_accept`, so we need to decrement them here.
@@ -169,11 +178,13 @@ where
             // Finally, poll the transport for new incoming connection futures and push them to the
             // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
+                let span = this.span.clone().entered();
+
                 if let Some(max) = this.options.max_clients {
                     if this.state.stats.specific.active_clients() >= max {
                         warn!(
-                            "Max connections reached ({}), rejecting new incoming connection",
-                            max
+                            limit = max,
+                            "max connections reached, rejecting new incoming connection",
                         );
 
                         continue;
@@ -184,7 +195,7 @@ where
                 // will be decremented.
                 this.state.stats.specific.increment_active_clients();
 
-                this.conn_tasks.push(accept);
+                this.conn_tasks.push(accept.with_span(span));
 
                 continue;
             }
@@ -199,53 +210,17 @@ where
     T: Transport<A>,
     A: Address,
 {
-    /// Handles an incoming connection. If this returns an error, the active connections counter
+    /// Handles an accepted connection. If this returns an error, the active connections counter
     /// should be decremented.
-    fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
+    fn on_accepted_connection(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
+        info!(?addr, "new connection");
 
-        info!("New connection from {:?}", addr);
-
-        // If authentication is enabled, start the authentication process
-        if let Some(ref auth) = self.auth {
-            let authenticator = Arc::clone(auth);
-            debug!("New connection from {:?}, authenticating", addr);
-            self.auth_tasks.spawn(async move {
-                let mut conn = Framed::new(io, auth::Codec::new_server());
-
-                debug!("Waiting for auth");
-
-                // Wait for the response
-                let auth = conn
-                    .next()
-                    .await
-                    .ok_or(RepError::SocketClosed)?
-                    .map_err(|e| RepError::Auth(e.to_string()))?;
-
-                debug!("Auth received: {:?}", auth);
-
-                let auth::Message::Auth(id) = auth else {
-                    conn.send(auth::Message::Reject).await?;
-                    conn.close().await?;
-                    return Err(RepError::Auth("Invalid auth message".to_string()));
-                };
-
-                // If authentication fails, send a reject message and close the connection
-                if !authenticator.authenticate(&id) {
-                    conn.send(auth::Message::Reject).await?;
-                    conn.close().await?;
-                    return Err(RepError::Auth("Authentication failed".to_string()));
-                }
-
-                // Send ack
-                conn.send(auth::Message::Ack).await?;
-
-                Ok(AuthResult { id, addr, stream: conn.into_inner() })
-            });
-        } else {
+        let Some(ref auth) = self.auth else {
             self.peer_states.insert(
                 addr.clone(),
                 StreamNotifyClose::new(PeerState {
+                    span: tracing::info_span!("peer", ?addr),
                     pending_requests: FuturesUnordered::new(),
                     conn: Framed::new(io, reqrep::Codec::new()),
                     addr,
@@ -254,14 +229,53 @@ where
                     compressor: self.compressor.clone(),
                 }),
             );
-        }
+
+            return Ok(());
+        };
+
+        // start the authentication process
+        let authenticator = Arc::clone(auth);
+        let span = tracing::info_span!("auth", ?addr);
+
+        let fut = async move {
+            let mut conn = Framed::new(io, auth::Codec::new_server());
+
+            // Wait for the response
+            let token = conn
+                .next()
+                .await
+                .ok_or(RepError::SocketClosed)?
+                .map_err(|e| RepError::Auth(e.to_string()))?;
+
+            debug!(?token, "auth received");
+
+            let auth::Message::Auth(id) = token else {
+                conn.send(auth::Message::Reject).await?;
+                conn.close().await?;
+                return Err(RepError::Auth("invalid auth message".to_string()));
+            };
+
+            // If authentication fails, send a reject message and close the connection
+            if !authenticator.authenticate(&id) {
+                conn.send(auth::Message::Reject).await?;
+                conn.close().await?;
+                return Err(RepError::Auth("authentication failed".to_string()));
+            }
+
+            // Send ack
+            conn.send(auth::Message::Ack).await?;
+
+            Ok(AuthResult { id, addr, stream: conn.into_inner() })
+        };
+
+        self.auth_tasks.spawn(fut.with_span(span));
 
         Ok(())
     }
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
-    type Item = Result<Request<A>, RepError>;
+    type Item = WithSpan<Result<Request<A>, RepError>>;
 
     /// Advances the state of the peer. Tries to poll all possible sources of progress equally.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -269,9 +283,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
 
         loop {
             let mut progress = false;
-            if let Some(msg) = this.egress_queue.pop_front() {
+            if let Some(msg) = this.egress_queue.pop_front().enter() {
                 let msg_len = msg.size();
-                match this.conn.start_send_unpin(msg) {
+                match this.conn.start_send_unpin(msg.inner) {
                     Ok(_) => {
                         this.state.stats.specific.increment_tx(msg_len);
 
@@ -295,63 +309,104 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(Some((id, mut payload)))) =
-                this.pending_requests.poll_next_unpin(cx)
-            {
-                let mut compression_type = 0;
-                let len_before = payload.len();
-                if let Some(ref compressor) = this.compressor {
-                    match compressor.compress(&payload) {
-                        Ok(compressed) => {
-                            payload = compressed;
-                            compression_type = compressor.compression_type() as u8;
-                        }
-                        Err(e) => {
-                            error!(err = ?e, "Failed to compress message");
+            // Then, try to drain the egress queue.
+            if this.conn.poll_ready_unpin(cx).is_ready() {
+                if let Some(msg) = this.egress_queue.pop_front().enter() {
+                    let msg_len = msg.size();
+
+                    debug!(msg_id = msg.id(), "sending response");
+                    match this.conn.start_send_unpin(msg.inner) {
+                        Ok(_) => {
+                            this.state.stats.specific.increment_tx(msg_len);
+
+                            // We might be able to send more queued messages
                             continue;
                         }
+                        Err(e) => {
+                            this.state.stats.specific.increment_failed_requests();
+                            error!(?e, "failed to send message to socket");
+                            // End this stream as we can't send any more messages
+                            return Poll::Ready(None);
+                        }
                     }
-
-                    debug!(
-                        "Compressed message {} from {} to {} bytes",
-                        id,
-                        len_before,
-                        payload.len()
-                    )
                 }
+            }
 
-                let msg = reqrep::Message::new(id, compression_type, payload);
-                this.egress_queue.push_back(msg);
+            // Then we check for completed requests, and push them onto the egress queue.
+            if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter() {
+                match result.inner {
+                    Err(_) => tracing::error!("response channel closed unexpectedly"),
+                    Ok(Response { msg_id, mut response }) => {
+                        let mut compression_type = 0;
+                        let len_before = response.len();
+                        if let Some(ref compressor) = this.compressor {
+                            match compressor.compress(&response) {
+                                Ok(compressed) => {
+                                    response = compressed;
+                                    compression_type = compressor.compression_type() as u8;
+                                }
+                                Err(e) => {
+                                    error!(?e, "failed to compress message");
+                                    continue;
+                                }
+                            }
 
-                progress = true;
+                            debug!(
+                                msg_id,
+                                len_before,
+                                len_after = response.len(),
+                                "compressed message"
+                            )
+                        }
+
+                        debug!(msg_id, "received response to send");
+
+                        let msg = reqrep::Message::new(msg_id, compression_type, response);
+                        this.egress_queue.push_back(msg.with_span(result.span));
+
+                        continue;
+                    }
+                }
             }
 
             // Finally we accept incoming requests from the peer.
-            match this.conn.poll_next_unpin(cx) {
-                Poll::Ready(Some(result)) => {
-                    trace!("Received message from peer {:?}: {:?}", this.addr, result);
-                    let msg = result?;
+            {
+                let _g = this.span.enter();
+                match this.conn.poll_next_unpin(cx) {
+                    Poll::Ready(Some(result)) => {
+                        let span = tracing::info_span!("request").entered();
 
-                    let (tx, rx) = oneshot::channel();
+                        trace!(?result, "received message");
+                        let msg = match result {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Poll::Ready(Some(Err(e.into()).with_span(span.clone())));
+                            }
+                        };
 
-                    // Add the pending request to the list
-                    this.pending_requests.push(PendingRequest { msg_id: msg.id(), response: rx });
+                        let (tx, rx) = oneshot::channel();
 
-                    let request = Request {
-                        source: this.addr.clone(),
-                        response: tx,
-                        compression_type: msg.header().compression_type(),
-                        msg: msg.into_payload(),
-                    };
+                        // Add the pending request to the list
+                        this.pending_requests.push(
+                            PendingRequest { msg_id: msg.id(), response: rx }
+                                .with_span(span.clone()),
+                        );
 
-                    return Poll::Ready(Some(Ok(request)));
+                        let request = Request {
+                            source: this.addr.clone(),
+                            response: tx,
+                            compression_type: msg.header().compression_type(),
+                            msg: msg.into_payload(),
+                        };
+
+                        return Poll::Ready(Some(Ok(request).with_span(span)));
+                    }
+                    Poll::Ready(None) => {
+                        error!("framed closed unexpectedly");
+                        return Poll::Ready(None);
+                    }
+                    Poll::Pending => {}
                 }
-                Poll::Ready(None) => {
-                    error!("Framed closed unexpectedly (peer {:?})", this.addr);
-                    return Poll::Ready(None);
-                }
-                Poll::Pending => {}
             }
 
             if progress {
@@ -368,13 +423,21 @@ struct PendingRequest {
     response: oneshot::Receiver<Bytes>,
 }
 
+/// A response to a [`PendingRequest`].
+struct Response {
+    msg_id: u32,
+    response: Bytes,
+}
+
 impl Future for PendingRequest {
-    type Output = Option<(u32, Bytes)>;
+    type Output = Result<Response, RecvError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.response.poll_unpin(cx) {
-            Poll::Ready(Ok(response)) => Poll::Ready(Some((self.msg_id, response))),
-            Poll::Ready(Err(_)) => Poll::Ready(None),
+            Poll::Ready(Ok(response)) => {
+                Poll::Ready(Ok(Response { msg_id: self.msg_id, response }))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Pending => Poll::Pending,
         }
     }

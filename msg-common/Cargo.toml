@@ -14,3 +14,5 @@ repository.workspace = true
 futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+derive_more.workspace = true
+tracing.workspace = true

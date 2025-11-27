@@ -76,7 +76,7 @@ impl Transport<SocketAddr> for Tcp {
 
         match listener.poll_accept(cx) {
             Poll::Ready(Ok((io, addr))) => {
-                debug!("Accepted connection from {}", addr);
+                debug!(%addr, "accepted connection");
 
                 Poll::Ready(Box::pin(async move {
                     io.set_nodelay(true)?;

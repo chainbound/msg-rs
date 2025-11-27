@@ -17,6 +17,8 @@ pub use channel::{Channel, channel};
 mod task;
 pub use task::JoinMap;
 
+pub mod span;
+
 /// Returns the current UNIX timestamp in microseconds.
 #[inline]
 pub fn unix_micros() -> u64 {
@@ -50,14 +52,17 @@ pub trait SocketAddrExt: Sized {
 }
 
 impl SocketAddrExt for SocketAddr {
+    #[inline]
     fn unspecified_v4() -> Self {
         Self::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))
     }
 
+    #[inline]
     fn unspecified_v6() -> Self {
         Self::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0))
     }
 
+    #[inline]
     fn as_unspecified(&self) -> Self {
         match self {
             Self::V4(_) => Self::unspecified_v4(),
@@ -73,6 +78,7 @@ pub trait IpAddrExt: Sized {
 }
 
 impl IpAddrExt for IpAddr {
+    #[inline]
     fn as_localhost(&self) -> Self {
         match self {
             Self::V4(_) => Self::V4(Ipv4Addr::LOCALHOST),

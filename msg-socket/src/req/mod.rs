@@ -1,6 +1,10 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use std::{sync::Arc, time::Duration};
+use msg_common::span::WithSpan;
+use std::{
+    sync::{Arc, atomic::AtomicUsize},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::oneshot;
 
@@ -19,6 +23,8 @@ use stats::ReqStats;
 
 /// The default buffer size for the socket.
 const DEFAULT_BUFFER_SIZE: usize = 1024;
+
+pub(crate) static DRIVER_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// Errors that can occur when using a request socket.
 #[derive(Debug, Error)]
@@ -39,10 +45,23 @@ pub enum ReqError {
     Connect(Box<dyn std::error::Error + Send + Sync>),
 }
 
-/// Commands that can be sent to the request socket driver.
-pub enum Command {
-    /// Send a request message and wait for a response.
-    Send { message: ReqMessage, response: oneshot::Sender<Result<Bytes, ReqError>> },
+/// A command to send a request message and wait for a response.
+#[derive(Debug)]
+pub struct SendCommand {
+    /// The request message to send.
+    pub message: WithSpan<ReqMessage>,
+    /// The channel to send the peer's response back.
+    pub response: oneshot::Sender<Result<Bytes, ReqError>>,
+}
+
+impl SendCommand {
+    /// Creates a new send command.
+    pub fn new(
+        message: WithSpan<ReqMessage>,
+        response: oneshot::Sender<Result<Bytes, ReqError>>,
+    ) -> Self {
+        Self { message, response }
+    }
 }
 
 /// The request socket options.
