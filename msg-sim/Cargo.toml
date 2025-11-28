@@ -14,3 +14,4 @@ repository.workspace = true
 [dependencies]
 pnet.workspace = true
 nix.workspace = true
+libc.workspace = true

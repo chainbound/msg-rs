@@ -6,14 +6,7 @@ use std::{collections::HashMap, io, net::IpAddr, time::Duration};
 mod protocol;
 pub use protocol::Protocol;
 
-#[cfg(target_os = "macos")]
-pub mod dummynet;
-#[cfg(target_os = "macos")]
-use dummynet::{PacketFilter, Pipe};
-
-#[cfg(target_os = "linux")]
 pub mod namespace;
-#[cfg(target_os = "linux")]
 use std::process::Command;
 
 pub mod assert;
@@ -26,10 +19,8 @@ pub struct SimulationConfig {
     /// The bandwidth in Kbps.
     pub bw: Option<u64>,
     /// The maximum burst size in kbit.
-    #[cfg(target_os = "linux")]
     pub burst: Option<u64>,
     /// The buffer size in bytes.
-    #[cfg(target_os = "linux")]
     pub limit: Option<u64>,
     /// The packet loss rate in percent.
     pub plr: Option<f64>,
@@ -88,25 +79,14 @@ pub struct Simulation {
     pub simulator_id: u8,
     pub endpoint: IpAddr,
     pub config: SimulationConfig,
-
-    #[cfg(target_os = "macos")]
-    active_pf: Option<PacketFilter>,
 }
 
 impl Simulation {
     fn new(id: u8, simulator_id: u8, endpoint: IpAddr, config: SimulationConfig) -> Self {
-        Self {
-            id,
-            simulator_id,
-            endpoint,
-            config,
-            #[cfg(target_os = "macos")]
-            active_pf: None,
-        }
+        Self { id, simulator_id, endpoint, config }
     }
 }
 
-#[cfg(target_os = "linux")]
 impl Simulation {
     /// Get the namespace name used for the simulation.
     #[inline]
@@ -200,42 +180,7 @@ impl Simulation {
     }
 }
 
-#[cfg(target_os = "macos")]
-impl Simulation {
-    fn start(&mut self) -> io::Result<()> {
-        // Create a dummynet pipe
-        let mut pipe = Pipe::new(self.id);
-
-        // Configure the pipe according to the simulation config.
-        if let Some(latency) = self.config.latency {
-            pipe = pipe.delay(latency.as_millis());
-        }
-
-        if let Some(bw) = self.config.bw {
-            pipe = pipe.bandwidth(bw);
-        }
-
-        if let Some(plr) = self.config.plr {
-            pipe = pipe.plr(plr);
-        }
-
-        let mut pf =
-            PacketFilter::new(pipe).anchor(format!("msg-sim-{}", self.id)).endpoint(self.endpoint);
-
-        if !self.config.protocols.is_empty() {
-            pf = pf.protocols(self.config.protocols.clone());
-        }
-
-        pf.enable()?;
-
-        self.active_pf = Some(pf);
-
-        Ok(())
-    }
-}
-
 impl Drop for Simulation {
-    #[cfg(target_os = "linux")]
     fn drop(&mut self) {
         let veth_host = self.veth_host_name();
         let network_namespace = self.namespace_name();
@@ -246,18 +191,10 @@ impl Drop for Simulation {
         // drops everything in there
         let _ = Command::new("sudo").args(["ip", "netns", "del", &network_namespace]).status();
     }
-
-    #[cfg(target_os = "macos")]
-    fn drop(&mut self) {
-        if let Some(pf) = self.active_pf.take() {
-            pf.destroy().unwrap();
-        }
-    }
 }
 
 #[cfg(test)]
 mod test {
-    #[cfg(target_os = "linux")]
     #[test]
     fn start_simulation() {
         use std::{
