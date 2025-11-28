@@ -288,10 +288,11 @@ mod helpers {
         assert!(private_key_path.exists(), "Private key file does not exist");
         assert!(ca_certificate_path.exists(), "CA Certificate file does not exist");
 
-        let mut acceptor_builder = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap();
+        let mut acceptor_builder = SslAcceptor::mozilla_modern(SslMethod::tls()).unwrap();
         acceptor_builder.set_certificate_file(certificate_path, SslFiletype::PEM).unwrap();
         acceptor_builder.set_private_key_file(private_key_path, SslFiletype::PEM).unwrap();
         acceptor_builder.set_ca_file(ca_certificate_path).unwrap();
+        acceptor_builder.set_cipher_list("ECDHE-RSA-AES128-GCM-SHA256").unwrap();
         acceptor_builder
     }
 
@@ -310,6 +311,11 @@ mod helpers {
         assert!(ca_certificate_path.exists(), "CA Certificate file does not exist");
 
         let mut connector_builder = SslConnector::builder(SslMethod::tls()).unwrap();
+        connector_builder
+            .set_ciphersuites(
+                "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+            )
+            .unwrap();
         connector_builder.set_certificate_file(certificate_path, SslFiletype::PEM).unwrap();
         connector_builder.set_private_key_file(private_key_path, SslFiletype::PEM).unwrap();
         connector_builder.set_ca_file(ca_certificate_path).unwrap();
