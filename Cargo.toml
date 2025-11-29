@@ -71,7 +71,7 @@ rcgen = "0.14"
 openssl = { version = "0.10" }
 
 # benchmarking & profiling
-criterion = { version = "0.5", features = ["async_tokio"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 pprof = { version = "0.15", features = ["flamegraph", "criterion"] }
 
 # simulation
