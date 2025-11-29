@@ -1,6 +1,9 @@
 use arc_swap::Guard;
 use bytes::Bytes;
-use msg_common::span::WithSpan;
+use msg_common::{
+    bufwriter::{BufWriter, Strategy},
+    span::WithSpan,
+};
 use rustc_hash::FxHashMap;
 use std::{
     marker::PhantomData,
@@ -13,7 +16,7 @@ use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, FramedRead};
 
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
@@ -26,6 +29,7 @@ use crate::{
         driver::{ConnectionCtl, ReqDriver},
         stats::ReqStats,
     },
+    state::SplitConnectionState,
     stats::SocketStats,
 };
 
@@ -66,7 +70,7 @@ where
         let transport = self.transport.take().expect("Transport has been moved already");
         // We initialize the connection as inactive, and let it be activated
         // by the backend task as soon as the driver is spawned.
-        let conn_state = ConnectionState::Inactive {
+        let conn_state = SplitConnectionState::Inactive {
             addr,
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
@@ -149,13 +153,15 @@ where
                 .map_err(|e| ReqError::Connect(Box::new(e)))?;
 
             let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
-            let framed = Framed::new(metered, reqrep::Codec::new());
+            let (read, write) = tokio::io::split(metered);
+            let reader = FramedRead::new(read, reqrep::Codec::new());
+            let writer = BufWriter::with_strategy(write, Strategy::Immediate);
 
-            ConnectionState::Active { channel: framed }
+            SplitConnectionState::Active { reader, writer }
         } else {
             // We initialize the connection as inactive, and let it be activated
             // by the backend task as soon as the driver is spawned.
-            ConnectionState::Inactive {
+            SplitConnectionState::Inactive {
                 addr: endpoint.clone(),
                 backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
             }

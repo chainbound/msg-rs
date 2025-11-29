@@ -1,6 +1,6 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use msg_common::span::WithSpan;
+use msg_common::{bufwriter, span::WithSpan};
 use std::{
     sync::{Arc, atomic::AtomicUsize},
     time::Duration,
@@ -80,6 +80,8 @@ pub struct ReqOptions {
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
     /// this threshold, it will not be compressed.
     min_compress_size: usize,
+    /// The buffering strategy for the underlying IO writer.
+    buffer_strategy: bufwriter::Strategy,
 }
 
 impl ReqOptions {
@@ -120,6 +122,11 @@ impl ReqOptions {
         self.min_compress_size = min_compress_size;
         self
     }
+
+    pub fn with_buffer_strategy(mut self, buffer_strategy: bufwriter::Strategy) -> Self {
+        self.buffer_strategy = buffer_strategy;
+        self
+    }
 }
 
 impl Default for ReqOptions {
@@ -131,6 +138,7 @@ impl Default for ReqOptions {
             backoff_duration: Duration::from_millis(200),
             retry_attempts: None,
             min_compress_size: 8192,
+            buffer_strategy: bufwriter::Strategy::Immediate,
         }
     }
 }

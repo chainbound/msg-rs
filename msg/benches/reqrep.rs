@@ -47,8 +47,7 @@ impl<T: Transport<A>, A: Address> PairBenchmark<T, A> {
 
             tokio::spawn(async move {
                 rep.map(|req| async move {
-                    let msg = req.msg().clone();
-                    req.respond(msg).unwrap();
+                    req.respond(Bytes::from_static(b"hello")).unwrap();
                 })
                 .buffer_unordered(PAR_FACTOR)
                 .for_each(|_| async {})

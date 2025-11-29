@@ -9,17 +9,23 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+use msg_common::{
+    bufwriter::{BufWriter, Strategy},
+    span::{EnterSpan as _, SpanExt as _, WithSpan},
+};
 use rustc_hash::FxHashMap;
 use tokio::{
+    io::{ReadHalf, WriteHalf},
     sync::{mpsc, oneshot},
     time::Interval,
 };
-use tokio_util::codec::Framed;
+use tokio_util::codec::{Framed, FramedRead};
 use tracing::Instrument;
 
 use super::{ReqError, ReqOptions};
-use crate::{ConnectionState, ExponentialBackoff, SendCommand, req::SocketState};
+use crate::{
+    ConnectionState, ExponentialBackoff, SendCommand, req::SocketState, state::SplitConnectionState,
+};
 
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{
@@ -40,8 +46,12 @@ type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Se
 ///
 /// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
 /// the framed buffer.
-pub(crate) type ConnectionCtl<Io, S, A> =
-    ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
+pub(crate) type ConnectionCtl<Io, S, A> = SplitConnectionState<
+    FramedRead<ReadHalf<MeteredIo<Io, S, A>>, reqrep::Codec>,
+    BufWriter<WriteHalf<MeteredIo<Io, S, A>>, reqrep::Message>,
+    ExponentialBackoff,
+    A,
+>;
 
 /// The request socket driver. Endless future that drives
 /// the socket forward.
@@ -240,7 +250,7 @@ where
     /// This is done when the connection is closed or an error occurs.
     #[inline]
     fn reset_connection(&mut self) {
-        self.conn_state = ConnectionState::Inactive {
+        self.conn_state = SplitConnectionState::Inactive {
             addr: self.addr.clone(),
             backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
         };
@@ -277,8 +287,16 @@ where
                             let metered =
                                 MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
 
-                            let framed = Framed::new(metered, reqrep::Codec::new());
-                            this.conn_state = ConnectionState::Active { channel: framed };
+                            let (read, write) = tokio::io::split(metered);
+
+                            let reader = FramedRead::new(read, reqrep::Codec::new());
+                            // TODO: Config
+                            let writer = BufWriter::with_strategy(
+                                write,
+                                this.options.buffer_strategy.clone(),
+                            );
+
+                            this.conn_state = SplitConnectionState::Active { reader, writer };
                         }
                         Err(e) => {
                             tracing::error!(?e, "failed to connect");
@@ -289,7 +307,7 @@ where
 
             // If the connection is inactive, try to connect to the server or poll the backoff
             // timer if we're already trying to connect.
-            if let ConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
+            if let SplitConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
                 let Poll::Ready(item) = backoff.poll_next_unpin(cx) else { return Poll::Pending };
 
                 let _span = tracing::info_span!(parent: &this.span, "connect").entered();
@@ -309,12 +327,13 @@ where
             }
 
             // If there is no active connection, continue polling the backoff
-            let ConnectionState::Active { ref mut channel } = this.conn_state else {
+            let SplitConnectionState::Active { ref mut reader, ref mut writer } = this.conn_state
+            else {
                 continue;
             };
 
             // Check for incoming messages from the socket
-            match channel.poll_next_unpin(cx) {
+            match reader.poll_next_unpin(cx) {
                 Poll::Ready(Some(Ok(msg))) => {
                     this.on_message(msg);
 
@@ -348,32 +367,25 @@ where
             // the `Framed` internal buffer. When all messages are written, we move on to flushing
             // the connection in the block below. We DO NOT rely on the `Framed` internal
             // backpressure boundary, because we do not call `poll_ready`.
-            if let Some(msg) = this.egress_queue.pop_front().enter() {
-                // Generate the new message
-                let size = msg.size();
-                tracing::debug!("Sending msg {}", msg.id());
-                // Write the message to the buffer.
-                match channel.start_send_unpin(msg.inner) {
-                    Ok(_) => {
-                        this.socket_state.stats.specific.increment_tx(size);
+            if writer.poll_ready_unpin(cx).is_ready() {
+                if let Some(msg) = this.egress_queue.pop_front().enter() {
+                    // Generate the new message
+                    let size = msg.size();
+                    tracing::debug!("Sending msg {}", msg.id());
+                    // Write the message to the buffer.
+                    match writer.start_send_unpin(msg.inner) {
+                        Ok(_) => {
+                            this.socket_state.stats.specific.increment_tx(size);
+                        }
+                        Err(e) => {
+                            tracing::error!(err = ?e, "Failed to send message to socket");
+
+                            // set the connection to inactive, so that it will be re-tried
+                            this.reset_connection();
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!(err = ?e, "Failed to send message to socket");
 
-                        // set the connection to inactive, so that it will be re-tried
-                        this.reset_connection();
-                    }
-                }
-
-                // We might be able to write more queued messages to the buffer.
-                continue;
-            }
-
-            // Try to flush the connection if any data was written to the buffer.
-            if !channel.write_buffer().is_empty() {
-                if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
-                    tracing::error!(err = ?e, "Failed to flush connection");
-                    this.reset_connection();
+                    // We might be able to write more queued messages to the buffer.
                     continue;
                 }
             }
@@ -395,8 +407,8 @@ where
                         "socket dropped, shutting down backend and flushing connection"
                     );
 
-                    if let ConnectionState::Active { ref mut channel } = this.conn_state {
-                        let _ = ready!(channel.poll_close_unpin(cx));
+                    if let SplitConnectionState::Active { ref mut writer, .. } = this.conn_state {
+                        let _ = ready!(writer.poll_close_unpin(cx));
                     };
 
                     return Poll::Ready(());

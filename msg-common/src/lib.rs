@@ -17,6 +17,7 @@ pub use channel::{Channel, channel};
 mod task;
 pub use task::JoinMap;
 
+pub mod bufwriter;
 pub mod span;
 
 /// Returns the current UNIX timestamp in microseconds.

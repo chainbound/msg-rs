@@ -27,3 +27,18 @@ impl<C, B, A> ConnectionState<C, B, A> {
         matches!(self, Self::Inactive { .. })
     }
 }
+
+pub enum SplitConnectionState<R, W, B, A> {
+    Active { reader: R, writer: W },
+    Inactive { addr: A, backoff: B },
+}
+
+impl<R, W, B, A> SplitConnectionState<R, W, B, A> {
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
+
+    pub fn is_inactive(&self) -> bool {
+        matches!(self, Self::Inactive { .. })
+    }
+}

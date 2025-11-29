@@ -5,7 +5,7 @@
 use std::{
     fmt::Debug,
     hash::Hash,
-    io,
+    io::{self, IoSlice},
     marker::PhantomData,
     net::SocketAddr,
     path::PathBuf,
@@ -91,6 +91,23 @@ where
         this.maybe_refresh();
 
         Pin::new(&mut this.inner).poll_write(cx, buf)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        // self.inner.is_write_vectored()
+        false
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+
+        this.maybe_refresh();
+
+        Pin::new(&mut this.inner).poll_write_vectored(cx, bufs)
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
