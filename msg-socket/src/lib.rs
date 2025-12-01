@@ -68,8 +68,8 @@ pub enum Profile {
     Balanced,
 }
 
-impl Profile {
-    pub fn default() -> Self {
+impl Default for Profile {
+    fn default() -> Self {
         Self::Balanced
     }
 }
