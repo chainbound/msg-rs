@@ -27,15 +27,14 @@ openssl.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 
+# Add jemalloc for extra perf on Linux systems.
+[target.'cfg(all(not(windows), not(target_env = "musl")))'.dev-dependencies]
+jemallocator = { version = "0.5.0", features = ["profiling"] }
+
 [features]
 default = []
 quic = ["msg-transport/quic"]
 tcp-tls = ["msg-transport/tcp-tls"]
-
-
-# Add jemalloc for extra perf on Linux systems.
-[target.'cfg(all(not(windows), not(target_env = "musl")))'.dependencies]
-jemallocator = { version = "0.5.0", features = ["profiling"] }
 
 [[bench]]
 name = "reqrep"
