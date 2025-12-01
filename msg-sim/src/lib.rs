@@ -10,7 +10,7 @@ pub use protocol::Protocol;
 
 use crate::{
     ip::{NetworkDevice, NetworkNamespace, Subnet},
-    network::{NetworkGraph, PeerId, PeerMap},
+    network::{NetworkGraph, PeerId},
 };
 
 pub mod namespace;
@@ -168,7 +168,9 @@ pub struct Simulator {
 
 impl Simulator {
     pub fn new(subnet: Subnet) -> Self {
-        Self { network: NetworkGraph { peers: PeerMap::new(), subnet } }
+        Self {
+            network: NetworkGraph { subnet, peers: Default::default(), links: Default::default() },
+        }
     }
 
     pub fn add_peers(&mut self, peer_1: PeerId, peer_2: PeerId) {

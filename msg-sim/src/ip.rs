@@ -69,6 +69,13 @@ impl NetworkNamespace {
     pub fn new(name: impl Into<String>) -> Self {
         Self { name: name.into(), devices: HashMap::new() }
     }
+
+    /// Create a `ip` command to run a command in the namespace of [`Self`].
+    pub fn ip_command(&self) -> Command {
+        let mut cmd = Command::new("sudo");
+        cmd.args(["ip", "netns", "exec", &self.name]).stderr(Stdio::piped());
+        cmd
+    }
 }
 
 impl Drop for NetworkNamespace {
