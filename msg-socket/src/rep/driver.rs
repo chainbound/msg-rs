@@ -16,6 +16,7 @@ use tokio::{
         oneshot::{self, error::RecvError},
     },
     task::JoinSet,
+    time::Interval,
 };
 use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
@@ -44,6 +45,9 @@ use super::RepError;
 pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_requests: FuturesUnordered<WithSpan<PendingRequest>>,
     conn: Framed<T, reqrep::Codec>,
+    /// The timer for the write buffer linger.
+    linger_timer: Option<Interval>,
+    write_buffer_size: usize,
     /// The address of the peer.
     addr: A,
     egress_queue: VecDeque<WithSpan<reqrep::Message>>,
@@ -113,7 +117,9 @@ where
                         }
 
                         this.state.stats.specific.increment_rx(size);
-                        let _ = this.to_socket.try_send(request);
+                        if this.to_socket.try_send(request).is_err() {
+                            error!(?peer, "to_socket channel full, dropping request");
+                        };
                     }
                     Err(e) => {
                         error!(?e, ?peer, "failed to receive message from peer");
@@ -133,12 +139,20 @@ where
 
                         let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?auth.addr);
 
+                        let linger_timer = this.options.write_buffer_linger.map(|duration| {
+                            let mut timer = tokio::time::interval(duration);
+                            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                            timer
+                        });
+
                         this.peer_states.insert(
                             auth.addr.clone(),
                             StreamNotifyClose::new(PeerState {
                                 span,
                                 pending_requests: FuturesUnordered::new(),
                                 conn,
+                                linger_timer,
+                                write_buffer_size: this.options.write_buffer_size,
                                 addr: auth.addr,
                                 egress_queue: VecDeque::with_capacity(128),
                                 state: Arc::clone(&this.state),
@@ -216,6 +230,12 @@ where
         let addr = io.peer_addr()?;
         info!(?addr, "new connection");
 
+        let linger_timer = self.options.write_buffer_linger.map(|duration| {
+            let mut timer = tokio::time::interval(duration);
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            timer
+        });
+
         let Some(ref auth) = self.auth else {
             self.peer_states.insert(
                 addr.clone(),
@@ -223,6 +243,8 @@ where
                     span: tracing::info_span!("peer", ?addr),
                     pending_requests: FuturesUnordered::new(),
                     conn: Framed::new(io, reqrep::Codec::new()),
+                    linger_timer,
+                    write_buffer_size: self.options.write_buffer_size,
                     addr,
                     egress_queue: VecDeque::with_capacity(128),
                     state: Arc::clone(&self.state),
@@ -301,11 +323,31 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
+            let mut just_flushed = false;
             // Try to flush the connection if any data was written to the buffer.
-            if !this.conn.write_buffer().is_empty() {
+            if this.conn.write_buffer().len() >= this.write_buffer_size {
                 if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
                     error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
                     return Poll::Ready(None);
+                }
+
+                just_flushed = true;
+
+                if let Some(ref mut linger_timer) = this.linger_timer {
+                    // Reset the linger timer.
+                    linger_timer.reset();
+                }
+            }
+
+            if let Some(ref mut linger_timer) = this.linger_timer {
+                if !just_flushed &&
+                    !this.conn.write_buffer().is_empty() &&
+                    linger_timer.poll_tick(cx).is_ready()
+                {
+                    if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                        error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
+                        return Poll::Ready(None);
+                    }
                 }
             }
 

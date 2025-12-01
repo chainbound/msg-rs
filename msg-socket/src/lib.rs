@@ -26,7 +26,7 @@ mod connection;
 pub use connection::*;
 
 /// The default buffer size for a socket.
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+const DEFAULT_BUFFER_SIZE: usize = 8192;
 
 /// A request Identifier.
 pub struct RequestId(u32);
@@ -55,4 +55,21 @@ pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite, A: Address> {
     id: Bytes,
     addr: A,
     stream: S,
+}
+
+/// The performance profile to tune socket options for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    /// Optimize for low latency.
+    Latency,
+    /// Optimize for high throughput.
+    Throughput,
+    /// Optimize for a balanced trade-off between latency and throughput.
+    Balanced,
+}
+
+impl Profile {
+    pub fn default() -> Self {
+        Self::Balanced
+    }
 }

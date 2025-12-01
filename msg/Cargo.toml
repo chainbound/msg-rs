@@ -34,8 +34,8 @@ tcp-tls = ["msg-transport/tcp-tls"]
 
 
 # Add jemalloc for extra perf on Linux systems.
-[target.'cfg(all(not(windows), not(target_env = "musl")))'.dependencies]
-jemallocator = { version = "0.5.0", features = ["profiling"] }
+[target.'cfg(all(not(windows), not(target_env = "msvc")))'.dev-dependencies]
+tikv-jemallocator = { version = "0.6.1", features = ["profiling"] }
 
 [[bench]]
 name = "reqrep"

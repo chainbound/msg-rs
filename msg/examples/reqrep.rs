@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqSocket, tcp::Tcp};
+use msg::{RepSocket, ReqOptions, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
@@ -10,7 +10,7 @@ async fn main() {
     rep.bind("0.0.0.0:4444").await.unwrap();
 
     // Initialize the request socket (client side) with a transport
-    let mut req = ReqSocket::new(Tcp::default());
+    let mut req = ReqSocket::with_options(Tcp::default(), ReqOptions::balanced());
     req.connect("0.0.0.0:4444").await.unwrap();
 
     tokio::spawn(async move {

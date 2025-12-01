@@ -1,6 +1,6 @@
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use msg_common::span::WithSpan;
+use msg_common::{constants::KiB, span::WithSpan};
 use std::{
     sync::{Arc, atomic::AtomicUsize},
     time::Duration,
@@ -18,7 +18,7 @@ mod socket;
 mod stats;
 pub use socket::*;
 
-use crate::stats::SocketStats;
+use crate::{Profile, stats::SocketStats};
 use stats::ReqStats;
 
 /// The default buffer size for the socket.
@@ -80,6 +80,48 @@ pub struct ReqOptions {
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
     /// this threshold, it will not be compressed.
     min_compress_size: usize,
+    /// The size of the write buffer in bytes.
+    write_buffer_size: usize,
+    /// The linger duration for the write buffer (how long to wait before flushing the buffer).
+    write_buffer_linger: Option<Duration>,
+}
+
+impl ReqOptions {
+    /// Creates new options based on the given profile.
+    pub fn new(profile: Profile) -> Self {
+        match profile {
+            Profile::Latency => Self::low_latency(),
+            Profile::Throughput => Self::high_throughput(),
+            Profile::Balanced => Self::balanced(),
+        }
+    }
+
+    /// Creates options optimized for low latency.
+    pub fn low_latency() -> Self {
+        Self {
+            write_buffer_size: 8 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(50)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for high throughput.
+    pub fn high_throughput() -> Self {
+        Self {
+            write_buffer_size: 256 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(200)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for a balanced trade-off between latency and throughput.
+    pub fn balanced() -> Self {
+        Self {
+            write_buffer_size: 32 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(100)),
+            ..Default::default()
+        }
+    }
 }
 
 impl ReqOptions {
@@ -120,6 +162,24 @@ impl ReqOptions {
         self.min_compress_size = min_compress_size;
         self
     }
+
+    /// Sets the size (max capacity) of the write buffer in bytes. When the buffer is full, it will
+    /// be flushed to the underlying transport.
+    ///
+    /// Default: 8KiB
+    pub fn with_write_buffer_size(mut self, size: usize) -> Self {
+        self.write_buffer_size = size;
+        self
+    }
+
+    /// Sets the linger duration for the write buffer. If `None`, the write buffer will only be
+    /// flushed when the buffer is full.
+    ///
+    /// Default: 100µs
+    pub fn with_write_buffer_linger(mut self, duration: Option<Duration>) -> Self {
+        self.write_buffer_linger = duration;
+        self
+    }
 }
 
 impl Default for ReqOptions {
@@ -131,6 +191,8 @@ impl Default for ReqOptions {
             backoff_duration: Duration::from_millis(200),
             retry_attempts: None,
             min_compress_size: 8192,
+            write_buffer_size: 8192,
+            write_buffer_linger: Some(Duration::from_micros(100)),
         }
     }
 }
