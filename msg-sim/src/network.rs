@@ -1,9 +1,8 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, hash_map::Entry},
     fmt::Display,
     io,
     net::{IpAddr, Ipv4Addr},
-    sync::{Arc, RwLock},
 };
 
 use crate::{
@@ -39,7 +38,20 @@ pub trait PeerConnect {
     fn connect(self);
 }
 
-pub type PeerMap = HashMap<PeerId, Arc<RwLock<Peer>>>;
+/// NOTE: very important to create a [`Link`] using [`Link::new`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Link(PeerId, PeerId);
+
+impl Link {
+    #[inline]
+    pub fn new(a: PeerId, b: PeerId) -> Self {
+        if a <= b { Link(a, b) } else { Link(b, a) }
+    }
+}
+
+pub type Links = HashSet<Link>;
+
+pub type PeerMap = HashMap<PeerId, Peer>;
 
 #[derive(Debug, Clone)]
 pub struct Peer {
@@ -54,24 +66,6 @@ impl Peer {
     }
 }
 
-impl PeerConnect for (Arc<RwLock<Peer>>, Arc<RwLock<Peer>>) {
-    fn connect(self) {
-        let (peer_1, peer_2) = self;
-
-        peer_1
-            .write()
-            .expect("not poisoned")
-            .peers
-            .insert(peer_2.read().expect("not poisoned").id, peer_2.clone());
-
-        peer_2
-            .write()
-            .expect("not poisoned")
-            .peers
-            .insert(peer_1.read().expect("not poisoned").id, peer_1.clone());
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkGraphError {
     #[error("io error: {0}")]
@@ -81,6 +75,7 @@ pub enum NetworkGraphError {
 #[derive(Debug, Clone)]
 pub struct NetworkGraph {
     pub peers: PeerMap,
+    pub links: Links,
     pub subnet: Subnet,
 }
 
@@ -90,24 +85,26 @@ impl NetworkGraph {
         peer_1_id: PeerId,
         peer_2_id: PeerId,
     ) -> Result<(), NetworkGraphError> {
-        let peer_1 = if let Some(peer_1) = self.peers.get(&peer_1_id) {
-            peer_1.clone()
-        } else {
-            let ns1 = ip::create_network_namespace(&peer_1_id.namespace_name())?;
-            let p = Arc::new(RwLock::new(Peer::new(peer_1_id, ns1)));
-            self.peers.insert(peer_1_id, p.clone());
-            p
+        if self.links.contains(&Link::new(peer_1_id, peer_2_id)) {
+            return Ok(());
+        }
+
+        if let Entry::Vacant(v) = self.peers.entry(peer_1_id) {
+            let ns = ip::create_network_namespace(&peer_1_id.namespace_name())?;
+            v.insert(Peer::new(peer_1_id, ns));
+        }
+
+        if let Entry::Vacant(v) = self.peers.entry(peer_2_id) {
+            let ns = ip::create_network_namespace(&peer_2_id.namespace_name())?;
+            v.insert(Peer::new(peer_2_id, ns));
+        }
+
+        let [Some(peer_1), Some(peer_2)] = self.peers.get_disjoint_mut([&peer_1_id, &peer_2_id])
+        else {
+            unreachable!("checked and inserted");
         };
 
-        let peer_2 = if let Some(peer_2) = self.peers.get(&peer_2_id) {
-            peer_2.clone()
-        } else {
-            let ns2 = ip::create_network_namespace(&peer_2_id.namespace_name())?;
-            let p = Arc::new(RwLock::new(Peer::new(peer_2_id, ns2)));
-            self.peers.insert(peer_2_id, p.clone());
-            p
-        };
-
+        // Create veth devices
         let veth1 = NetworkDevice::new_veth(
             peer_1_id.veth_address(self.subnet, peer_2_id),
             PeerId::veth_name(peer_2_id),
@@ -117,17 +114,16 @@ impl NetworkGraph {
             PeerId::veth_name(peer_1_id),
         );
 
-        (&mut peer_1.write().unwrap().namespace, &mut peer_2.write().unwrap().namespace)
-            .link(veth1, veth2)?;
+        (&mut peer_1.namespace, &mut peer_2.namespace).link(veth1, veth2)?;
 
-        (peer_1, peer_2).connect();
+        self.links.insert(Link::new(peer_1_id, peer_2_id));
 
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod msg_sim {
+mod msg_sim_network {
     use crate::{Simulator, Subnet};
     use std::net::Ipv4Addr;
 
