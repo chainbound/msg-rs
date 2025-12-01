@@ -58,18 +58,13 @@ pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite, A: Address> {
 }
 
 /// The performance profile to tune socket options for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq)]
 pub enum Profile {
+    /// Optimize for a balanced trade-off between latency and throughput.
+    #[default]
+    Balanced,
     /// Optimize for low latency.
     Latency,
     /// Optimize for high throughput.
     Throughput,
-    /// Optimize for a balanced trade-off between latency and throughput.
-    Balanced,
-}
-
-impl Default for Profile {
-    fn default() -> Self {
-        Self::Balanced
-    }
 }
