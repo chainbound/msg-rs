@@ -1,3 +1,4 @@
+/// The IP protocol used for communication.
 #[derive(Debug, Clone, Copy)]
 pub enum Protocol {
     Tcp,

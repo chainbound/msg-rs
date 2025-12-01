@@ -10,29 +10,6 @@ fn add_namespace_prefix<'a>(namespace: &'a str, args: Vec<&'a str>) -> Vec<&'a s
     prefix_args
 }
 
-pub fn create_namespace(name: &str) -> io::Result<()> {
-    let status = Command::new("sudo").args(["ip", "netns", "add", &name]).status()?;
-
-    assert_status(status, format!("Failed to create namespace {}", name))
-}
-
-/// Create Virtual Ethernet (veth) devices and link them
-///
-/// Note: device name length can be max 15 chars long
-pub fn create_veth_pair(name1: &str, name2: &str) -> io::Result<()> {
-    let status = Command::new("sudo")
-        .args(["ip", "link", "add", &name1, "type", "veth", "peer", "name", &name2])
-        .status()?;
-    assert_status(status, format!("Failed to create veth pair {}-{}", name1, name2))
-}
-
-#[inline]
-pub fn move_device_to_namespace(name: &str, namespace: &str) -> io::Result<()> {
-    let status =
-        Command::new("sudo").args(["ip", "link", "set", &name, "netns", &namespace]).status()?;
-    assert_status(status, format!("Failed to move device {} to namespace {}", name, namespace))
-}
-
 /// Generate a host IPv4 address from the namespace IPv4 address.
 /// This is done by incrementing the last octet of the IP by 1.
 #[inline]
