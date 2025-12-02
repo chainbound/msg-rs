@@ -20,9 +20,9 @@ const N_REQS: usize = 10_000;
 const MSG_SIZE: usize = 512;
 
 // Using jemalloc improves performance by ~10%
-#[cfg(all(not(windows), not(target_env = "musl")))]
+#[cfg(all(not(windows), not(target_env = "msvc")))]
 #[global_allocator]
-static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 struct PairBenchmark<T: Transport<A>, A: Address> {
     rt: Runtime,

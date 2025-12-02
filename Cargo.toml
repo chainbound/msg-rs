@@ -43,7 +43,13 @@ msg-sim = { path = "./msg-sim" }
 
 # async
 async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "net",
+    "io-util",
+    "macros",
+] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-openssl = { version = "0.6" }

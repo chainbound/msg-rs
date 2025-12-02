@@ -63,6 +63,8 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     pub(crate) conn_state: ConnectionCtl<T::Io, T::Stats, A>,
+    /// The timer for the write buffer linger.
+    pub(crate) linger_timer: Option<Interval>,
     /// The outgoing message queue.
     pub(crate) egress_queue: VecDeque<WithSpan<reqrep::Message>>,
     /// The currently pending requests waiting for a response.
@@ -369,12 +371,25 @@ where
                 continue;
             }
 
-            // Try to flush the connection if any data was written to the buffer.
-            if !channel.write_buffer().is_empty() {
+            if channel.write_buffer().len() >= this.options.write_buffer_size {
                 if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                     tracing::error!(err = ?e, "Failed to flush connection");
                     this.reset_connection();
                     continue;
+                }
+
+                if let Some(ref mut linger_timer) = this.linger_timer {
+                    // Reset the linger timer.
+                    linger_timer.reset();
+                }
+            }
+
+            if let Some(ref mut linger_timer) = this.linger_timer {
+                if !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
+                    if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
+                        tracing::error!(err = ?e, "Failed to flush connection");
+                        this.reset_connection();
+                    }
                 }
             }
 

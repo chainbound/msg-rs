@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use bytes::Bytes;
+use msg_common::constants::KiB;
 use msg_transport::Address;
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -6,7 +9,7 @@ use tokio::sync::oneshot;
 mod driver;
 mod socket;
 mod stats;
-use crate::stats::SocketStats;
+use crate::{Profile, stats::SocketStats};
 pub use socket::*;
 use stats::RepStats;
 
@@ -32,11 +35,56 @@ pub struct RepOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     min_compress_size: usize,
+    write_buffer_size: usize,
+    write_buffer_linger: Option<Duration>,
 }
 
 impl Default for RepOptions {
     fn default() -> Self {
-        Self { max_clients: None, min_compress_size: DEFAULT_MIN_COMPRESS_SIZE }
+        Self {
+            max_clients: None,
+            min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
+            write_buffer_size: 8192,
+            write_buffer_linger: Some(Duration::from_micros(100)),
+        }
+    }
+}
+
+impl RepOptions {
+    /// Creates new options based on the given profile.
+    pub fn new(profile: Profile) -> Self {
+        match profile {
+            Profile::Latency => Self::low_latency(),
+            Profile::Throughput => Self::high_throughput(),
+            Profile::Balanced => Self::balanced(),
+        }
+    }
+
+    /// Creates options optimized for low latency.
+    pub fn low_latency() -> Self {
+        Self {
+            write_buffer_size: 8 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(50)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for high throughput.
+    pub fn high_throughput() -> Self {
+        Self {
+            write_buffer_size: 256 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(200)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for a balanced trade-off between latency and throughput.
+    pub fn balanced() -> Self {
+        Self {
+            write_buffer_size: 32 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(100)),
+            ..Default::default()
+        }
     }
 }
 
@@ -51,6 +99,24 @@ impl RepOptions {
     /// If the payload is smaller than this value, it will not be compressed.
     pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
+        self
+    }
+
+    /// Sets the size (max capacity) of the write buffer in bytes. When the buffer is full, it will
+    /// be flushed to the underlying transport.
+    ///
+    /// Default: 8KiB
+    pub fn with_write_buffer_size(mut self, size: usize) -> Self {
+        self.write_buffer_size = size;
+        self
+    }
+
+    /// Sets the linger duration for the write buffer. If `None`, the write buffer will only be
+    /// flushed when the buffer is full.
+    ///
+    /// Default: 100µs
+    pub fn with_write_buffer_linger(mut self, duration: Option<Duration>) -> Self {
+        self.write_buffer_linger = duration;
         self
     }
 }
@@ -147,7 +213,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn reqrep_durable() {
         let _ = tracing_subscriber::fmt::try_init();
-        let random_port = rand::random::<u16>() + 10000;
+        let random_port = rand::rng().random_range(10000..65535);
         let addr = format!("0.0.0.0:{random_port}");
 
         // Initialize the request socket (client side) with a transport

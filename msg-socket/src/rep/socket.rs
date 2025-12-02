@@ -73,7 +73,7 @@ where
 {
     /// Creates a new reply socket with the default [`RepOptions`].
     pub fn new(transport: T) -> Self {
-        Self::with_options(transport, RepOptions::default())
+        Self::with_options(transport, RepOptions::balanced())
     }
 
     /// Sets the options for this socket.

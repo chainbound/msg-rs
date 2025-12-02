@@ -91,7 +91,7 @@ where
     A: Address,
 {
     pub fn new(transport: T) -> Self {
-        Self::with_options(transport, ReqOptions::default())
+        Self::with_options(transport, ReqOptions::balanced())
     }
 
     pub fn with_options(transport: T, options: ReqOptions) -> Self {
@@ -185,6 +185,12 @@ where
         let id = DRIVER_ID.fetch_add(1, Ordering::Relaxed);
         let span = tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), addr = ?endpoint);
 
+        let linger_timer = self.options.write_buffer_linger.map(|duration| {
+            let mut timer = tokio::time::interval(duration);
+            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            timer
+        });
+
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
             addr: endpoint,
@@ -194,6 +200,7 @@ where
             from_socket,
             transport,
             conn_state,
+            linger_timer,
             pending_requests,
             timeout_check_interval,
             conn_task: None,
