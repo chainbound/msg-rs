@@ -371,15 +371,12 @@ where
                 continue;
             }
 
-            let mut just_flushed = false;
             if channel.write_buffer().len() >= this.options.write_buffer_size {
                 if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                     tracing::error!(err = ?e, "Failed to flush connection");
                     this.reset_connection();
                     continue;
                 }
-
-                just_flushed = true;
 
                 if let Some(ref mut linger_timer) = this.linger_timer {
                     // Reset the linger timer.
@@ -388,10 +385,7 @@ where
             }
 
             if let Some(ref mut linger_timer) = this.linger_timer {
-                if !just_flushed &&
-                    !channel.write_buffer().is_empty() &&
-                    linger_timer.poll_tick(cx).is_ready()
-                {
+                if !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
                     if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                         tracing::error!(err = ?e, "Failed to flush connection");
                         this.reset_connection();

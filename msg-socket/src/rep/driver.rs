@@ -323,15 +323,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            let mut just_flushed = false;
             // Try to flush the connection if any data was written to the buffer.
             if this.conn.write_buffer().len() >= this.write_buffer_size {
                 if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
                     error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
                     return Poll::Ready(None);
                 }
-
-                just_flushed = true;
 
                 if let Some(ref mut linger_timer) = this.linger_timer {
                     // Reset the linger timer.
@@ -340,10 +337,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
             }
 
             if let Some(ref mut linger_timer) = this.linger_timer {
-                if !just_flushed &&
-                    !this.conn.write_buffer().is_empty() &&
-                    linger_timer.poll_tick(cx).is_ready()
-                {
+                if !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
                     if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
                         error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
                         return Poll::Ready(None);
