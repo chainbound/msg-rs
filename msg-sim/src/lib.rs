@@ -3,25 +3,27 @@
 
 //! Man(4) veth is a short introduction on the topic.
 
-use std::{io, net::IpAddr, time::Duration};
+use std::{net::IpAddr, time::Duration};
 
 mod protocol;
 pub use protocol::Protocol;
 
 use crate::{
-    ip::{NetworkDevice, NetworkNamespace, Subnet},
+    ip::Subnet,
     network::{NetworkGraph, PeerId},
 };
 
 pub mod namespace;
 
 pub mod assert;
+pub mod command;
 pub mod ip;
-pub mod ip_tc;
 pub mod network;
+pub mod tc;
 
 /// The impairments that can be applied to a network link.
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct LinkImpairment {
     /// The latency of outgoing packets.
     pub latency: Option<Duration>,
@@ -33,8 +35,6 @@ pub struct LinkImpairment {
     pub buffer_size_bytes: Option<u64>,
     /// The packet loss rate in percent.
     pub packet_loss_rate_percent: Option<f64>,
-    /// The supported protocols.
-    pub protocols: Vec<Protocol>,
 }
 
 /// A simulation represents the [`LinkImpairment`]s, applied to a
@@ -177,16 +177,6 @@ impl Simulator {
         if let Err(e) = self.network.add_peers(peer_1, peer_2) {
             tracing::error!(?e, ?peer_1, ?peer_2, "failed to add peers");
         }
-    }
-}
-
-pub trait VethLink {
-    fn link(self, veth1: NetworkDevice, veth2: NetworkDevice) -> io::Result<()>;
-}
-
-impl VethLink for (&mut NetworkNamespace, &mut NetworkNamespace) {
-    fn link(self, veth1: NetworkDevice, veth2: NetworkDevice) -> io::Result<()> {
-        ip::create_veth_pair(self.0, self.1, veth1, veth2)
     }
 }
 

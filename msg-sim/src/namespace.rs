@@ -1,8 +1,7 @@
-use std::io;
-use std::pin::Pin;
-use std::{fs::File, future::Future};
+use std::collections::HashMap;
 
-use nix::libc::setns;
+use crate::command;
+use crate::ip::NetworkDevice;
 
 // Run the code in the provided function `f` in the network namespace `namespace`
 // pub async fn run_on_namespace<T>(
@@ -22,3 +21,46 @@ use nix::libc::setns;
 //
 //     Ok(res)
 // }
+
+/// Return a `ip netns exec <namespace>` string used to prefix other commands.
+pub fn prefix_command(name: &str) -> String {
+    format!("sudo ip netns exec {}", name)
+}
+
+#[derive(Debug, Clone)]
+pub struct NetworkNamespace {
+    pub name: String,
+    pub devices: HashMap<String, NetworkDevice>,
+}
+
+impl NetworkNamespace {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), devices: HashMap::new() }
+    }
+
+    /// Return a `ip netns exec <namespace>` string used to prefix other commands.
+    pub fn prefix_command(&self) -> String {
+        prefix_command(&self.name)
+    }
+
+    pub fn loopback_up(&self) -> command::Result<command::Output> {
+        command::Runner::by_str(&format!("{} ip link set dev lo up", self.prefix_command()))
+    }
+}
+
+impl Drop for NetworkNamespace {
+    fn drop(&mut self) {
+        let result = command::Runner::by_str(&format!("sudo ip netns delete {}", self.name));
+
+        if let Err(e) = result {
+            tracing::error!(?e, "failed to delete network namespace");
+        }
+    }
+}
+
+/// Create the network namespace with the provided name.
+pub fn create(name: &str) -> command::Result<NetworkNamespace> {
+    command::Runner::by_str(&format!("sudo ip netns add {}", name))?;
+
+    Ok(NetworkNamespace::new(name.to_owned()))
+}
