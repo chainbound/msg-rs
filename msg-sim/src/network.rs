@@ -6,8 +6,9 @@ use std::{
 };
 
 use crate::{
-    VethLink as _,
-    ip::{self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, NetworkNamespace, Subnet},
+    command,
+    ip::{self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, Subnet},
+    namespace::{self, NetworkNamespace},
 };
 
 pub type PeerId = u8;
@@ -33,19 +34,13 @@ impl PeerIdExt for PeerId {
         Ipv4Addr::new(octects[12], octects[13], self, other).into()
     }
 }
-
-pub trait PeerConnect {
-    fn connect(self);
-}
-
-/// NOTE: very important to create a [`Link`] using [`Link::new`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Link(PeerId, PeerId);
 
 impl Link {
     #[inline]
     pub fn new(a: PeerId, b: PeerId) -> Self {
-        if a <= b { Link(a, b) } else { Link(b, a) }
+        Link(a, b)
     }
 }
 
@@ -66,10 +61,32 @@ impl Peer {
     }
 }
 
+pub trait PeerConnect {
+    fn connect(&mut self, other: &mut Self, subnet: Subnet) -> command::Result<()>;
+}
+
+impl PeerConnect for Peer {
+    fn connect(&mut self, other: &mut Self, subnet: Subnet) -> command::Result<()> {
+        // Create veth devices
+        let veth1 = NetworkDevice::new_veth(
+            self.id.veth_address(subnet, other.id),
+            PeerId::veth_name(other.id),
+        );
+        let veth2 = NetworkDevice::new_veth(
+            other.id.veth_address(subnet, self.id),
+            PeerId::veth_name(self.id),
+        );
+
+        ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum NetworkGraphError {
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    #[error("command error: {0}")]
+    Command(#[from] command::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -90,12 +107,12 @@ impl NetworkGraph {
         }
 
         if let Entry::Vacant(v) = self.peers.entry(peer_1_id) {
-            let ns = ip::create_network_namespace(&peer_1_id.namespace_name())?;
+            let ns = namespace::create(&peer_1_id.namespace_name())?;
             v.insert(Peer::new(peer_1_id, ns));
         }
 
         if let Entry::Vacant(v) = self.peers.entry(peer_2_id) {
-            let ns = ip::create_network_namespace(&peer_2_id.namespace_name())?;
+            let ns = namespace::create(&peer_2_id.namespace_name())?;
             v.insert(Peer::new(peer_2_id, ns));
         }
 
@@ -104,19 +121,13 @@ impl NetworkGraph {
             unreachable!("checked and inserted");
         };
 
-        // Create veth devices
-        let veth1 = NetworkDevice::new_veth(
-            peer_1_id.veth_address(self.subnet, peer_2_id),
-            PeerId::veth_name(peer_2_id),
-        );
-        let veth2 = NetworkDevice::new_veth(
-            peer_2_id.veth_address(self.subnet, peer_1_id),
-            PeerId::veth_name(peer_1_id),
-        );
+        peer_1.connect(peer_2, self.subnet)?;
 
-        (&mut peer_1.namespace, &mut peer_2.namespace).link(veth1, veth2)?;
+        peer_1.namespace.loopback_up()?;
+        peer_2.namespace.loopback_up()?;
 
         self.links.insert(Link::new(peer_1_id, peer_2_id));
+        self.links.insert(Link::new(peer_2_id, peer_1_id));
 
         Ok(())
     }

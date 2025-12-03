@@ -5,6 +5,11 @@ use std::{
     process::{Command, Stdio},
 };
 
+use crate::{
+    command::{self, Runner},
+    namespace::NetworkNamespace,
+};
+
 pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim-ns";
 
 pub trait IpAddrExt {
@@ -59,63 +64,6 @@ impl NetworkDevice {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct NetworkNamespace {
-    pub name: String,
-    pub devices: HashMap<String, NetworkDevice>,
-}
-
-impl NetworkNamespace {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), devices: HashMap::new() }
-    }
-
-    /// Create a `ip` command to run a command in the namespace of [`Self`].
-    pub fn ip_command(&self) -> Command {
-        let mut cmd = Command::new("sudo");
-        cmd.args(["ip", "netns", "exec", &self.name]).stderr(Stdio::piped());
-        cmd
-    }
-}
-
-impl Drop for NetworkNamespace {
-    fn drop(&mut self) {
-        let mut cmd = Command::new("sudo");
-        cmd.args(["ip", "netns", "delete", &self.name]).stderr(Stdio::piped());
-
-        tracing::debug!(?cmd, network = self.name, "dropping network namespace");
-
-        let result = cmd.spawn().and_then(|s| s.wait_with_output()).and_then(|output| {
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let error = format!("failed to veth pairi: {stderr}");
-                return Err(io::Error::other(error));
-            }
-            Ok(())
-        });
-
-        if let Err(e) = result {
-            tracing::error!(?e, "failed to delete network namespace");
-        }
-    }
-}
-
-/// Create the network namespace with the provided name.
-pub fn create_network_namespace(name: &str) -> io::Result<NetworkNamespace> {
-    let mut cmd = Command::new("sudo");
-    cmd.args(["ip", "netns", "add", name]);
-    tracing::debug!(?name, ?cmd, "creating namespace");
-
-    let output = cmd.stderr(Stdio::piped()).spawn()?.wait_with_output()?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let error = format!("failed to create namespace: {}", stderr);
-        return Err(io::Error::other(error));
-    }
-
-    Ok(NetworkNamespace::new(name.to_owned()))
-}
-
 /// Create Virtual Ethernet (veth) devices and link them
 ///
 /// Note: device name length can be max 15 chars long
@@ -124,37 +72,36 @@ pub fn create_veth_pair(
     ns2: &mut NetworkNamespace,
     veth1: NetworkDevice,
     veth2: NetworkDevice,
-) -> io::Result<()> {
-    let mut cmd = Command::new("sudo");
-    cmd.args([
-        "ip",
-        "link",
-        "add",
-        &veth1.name,
-        "netns",
-        &ns1.name,
-        "type",
-        "veth",
-        "peer",
-        "name",
-        &veth2.name,
-        "netns",
-        &ns2.name,
-    ])
-    .stderr(Stdio::piped());
-
-    tracing::debug!(?cmd);
-
-    let output = cmd.spawn()?.wait_with_output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let error = format!("failed to veth pairi: {stderr}");
-        return Err(io::Error::other(error));
-    }
+) -> command::Result<()> {
+    command::Runner::by_str(&format!(
+        "sudo ip link add {} netns {} type veth peer name {} netns {}",
+        &veth1.name, &ns1.name, &veth2.name, &ns2.name,
+    ))?;
+    command::Runner::by_str(&format!(
+        "{} ip addr add {} dev {}",
+        ns1.prefix_command(),
+        &veth1.address,
+        &veth1.name
+    ))?;
+    command::Runner::by_str(&format!(
+        "{} ip addr add {} dev {}",
+        ns2.prefix_command(),
+        &veth2.address,
+        &veth2.name
+    ))?;
+    command::Runner::by_str(&format!(
+        "{} ip link set dev {} up",
+        ns1.prefix_command(),
+        &veth1.name
+    ))?;
+    command::Runner::by_str(&format!(
+        "{} ip link set dev {} up",
+        ns2.prefix_command(),
+        &veth2.name
+    ))?;
 
     ns1.devices.insert(veth1.name.clone(), veth1);
-    ns1.devices.insert(veth2.name.clone(), veth2);
+    ns2.devices.insert(veth2.name.clone(), veth2);
 
     Ok(())
 }
