@@ -11,6 +11,7 @@ pub use protocol::Protocol;
 use crate::{
     ip::Subnet,
     network::{NetworkGraph, PeerId},
+    tc::LinkImpairment,
 };
 
 pub mod namespace;
@@ -20,22 +21,6 @@ pub mod command;
 pub mod ip;
 pub mod network;
 pub mod tc;
-
-/// The impairments that can be applied to a network link.
-#[derive(Debug, Clone)]
-#[allow(unused)]
-pub struct LinkImpairment {
-    /// The latency of outgoing packets.
-    pub latency: Option<Duration>,
-    /// The maximum bandwidth in Kbps.
-    pub bandwidth_kbps: Option<u64>,
-    /// The maximum burst size in kbit.
-    pub burst_kbit: Option<u64>,
-    /// The buffer size in bytes.
-    pub buffer_size_bytes: Option<u64>,
-    /// The packet loss rate in percent.
-    pub packet_loss_rate_percent: Option<f64>,
-}
 
 /// A simulation represents the [`LinkImpairment`]s, applied to a
 /// certain link with a given IP address.

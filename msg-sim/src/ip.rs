@@ -1,16 +1,15 @@
 use std::{
-    collections::HashMap,
-    io,
+    fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    process::{Command, Stdio},
+    str::FromStr,
 };
 
 use crate::{
-    command::{self, Runner},
+    command::{self},
     namespace::NetworkNamespace,
 };
 
-pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim-ns";
+pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
 
 pub trait IpAddrExt {
     fn to_ipv6_mapped(&self) -> Ipv6Addr;
@@ -37,30 +36,58 @@ impl Subnet {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NetworkDeviceType {
     Loopback,
-    Veth,
+    Veth(u8),
+}
+
+impl fmt::Display for NetworkDeviceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Loopback => write!(f, "lo"),
+            Self::Veth(num) => write!(f, "veth-{num}"),
+        }
+    }
+}
+
+impl FromStr for NetworkDeviceType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "lo" {
+            return Ok(NetworkDeviceType::Loopback);
+        }
+
+        // Must start with "veth-"
+        const PREFIX: &str = "veth-";
+        if let Some(num_str) = s.strip_prefix(PREFIX) {
+            // Parse the number
+            let num =
+                num_str.parse::<u8>().map_err(|_| format!("invalid veth index: {num_str}"))?;
+            return Ok(NetworkDeviceType::Veth(num));
+        }
+
+        Err(format!("unknown network device type: {s}"))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct NetworkDevice {
     pub address: IpAddr,
-    pub name: String,
     pub variant: NetworkDeviceType,
 }
 
 impl NetworkDevice {
+    pub fn new(address: IpAddr, variant: NetworkDeviceType) -> Self {
+        Self { address, variant }
+    }
     pub fn new_loopback() -> Self {
-        Self::new(IpAddr::V4(Ipv4Addr::LOCALHOST), "lo", NetworkDeviceType::Loopback)
+        Self::new(IpAddr::V4(Ipv4Addr::LOCALHOST), NetworkDeviceType::Loopback)
     }
 
-    pub fn new_veth(address: IpAddr, name: impl Into<String>) -> Self {
-        Self::new(address, name, NetworkDeviceType::Veth)
-    }
-
-    pub fn new(address: IpAddr, name: impl Into<String>, variant: NetworkDeviceType) -> Self {
-        Self { address, name: name.into(), variant }
+    pub fn new_veth(address: IpAddr, num: u8) -> Self {
+        Self::new(address, NetworkDeviceType::Veth(num))
     }
 }
 
@@ -72,36 +99,39 @@ pub fn create_veth_pair(
     ns2: &mut NetworkNamespace,
     veth1: NetworkDevice,
     veth2: NetworkDevice,
+    mask: u8,
 ) -> command::Result<()> {
     command::Runner::by_str(&format!(
         "sudo ip link add {} netns {} type veth peer name {} netns {}",
-        &veth1.name, &ns1.name, &veth2.name, &ns2.name,
+        &veth1.variant, &ns1.name, &veth2.variant, &ns2.name,
     ))?;
     command::Runner::by_str(&format!(
-        "{} ip addr add {} dev {}",
+        "{} ip addr add {}/{} dev {}",
         ns1.prefix_command(),
         &veth1.address,
-        &veth1.name
+        mask,
+        &veth1.variant
     ))?;
     command::Runner::by_str(&format!(
-        "{} ip addr add {} dev {}",
+        "{} ip addr add {}/{} dev {}",
         ns2.prefix_command(),
         &veth2.address,
-        &veth2.name
+        mask,
+        &veth2.variant
     ))?;
     command::Runner::by_str(&format!(
         "{} ip link set dev {} up",
         ns1.prefix_command(),
-        &veth1.name
+        &veth1.variant
     ))?;
     command::Runner::by_str(&format!(
         "{} ip link set dev {} up",
         ns2.prefix_command(),
-        &veth2.name
+        &veth2.variant
     ))?;
 
-    ns1.devices.insert(veth1.name.clone(), veth1);
-    ns2.devices.insert(veth2.name.clone(), veth2);
+    ns1.devices.insert(veth1.variant, veth1);
+    ns2.devices.insert(veth2.variant, veth2);
 
     Ok(())
 }

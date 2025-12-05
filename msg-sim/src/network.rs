@@ -1,14 +1,17 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
-    fmt::Display,
+    fmt::{Display, write},
     io,
     net::{IpAddr, Ipv4Addr},
 };
 
 use crate::{
     command,
-    ip::{self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, Subnet},
+    ip::{
+        self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, NetworkDeviceType, Subnet,
+    },
     namespace::{self, NetworkNamespace},
+    tc::LinkImpairment,
 };
 
 pub type PeerId = u8;
@@ -34,6 +37,7 @@ impl PeerIdExt for PeerId {
         Ipv4Addr::new(octects[12], octects[13], self, other).into()
     }
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Link(PeerId, PeerId);
 
@@ -41,6 +45,12 @@ impl Link {
     #[inline]
     pub fn new(a: PeerId, b: PeerId) -> Self {
         Link(a, b)
+    }
+}
+
+impl Display for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.0, self.1)
     }
 }
 
@@ -68,26 +78,24 @@ pub trait PeerConnect {
 impl PeerConnect for Peer {
     fn connect(&mut self, other: &mut Self, subnet: Subnet) -> command::Result<()> {
         // Create veth devices
-        let veth1 = NetworkDevice::new_veth(
-            self.id.veth_address(subnet, other.id),
-            PeerId::veth_name(other.id),
-        );
-        let veth2 = NetworkDevice::new_veth(
-            other.id.veth_address(subnet, self.id),
-            PeerId::veth_name(self.id),
-        );
+        let veth1 = NetworkDevice::new_veth(self.id.veth_address(subnet, other.id), other.id);
+        let veth2 = NetworkDevice::new_veth(other.id.veth_address(subnet, self.id), self.id);
 
-        ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2)
+        ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2, subnet.mask)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum NetworkGraphError {
+pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] io::Error),
     #[error("command error: {0}")]
     Command(#[from] command::Error),
+    #[error("link not found: {0}")]
+    LinkNotFound(Link),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub struct NetworkGraph {
@@ -97,11 +105,7 @@ pub struct NetworkGraph {
 }
 
 impl NetworkGraph {
-    pub fn add_peers(
-        &mut self,
-        peer_1_id: PeerId,
-        peer_2_id: PeerId,
-    ) -> Result<(), NetworkGraphError> {
+    pub fn add_peers(&mut self, peer_1_id: PeerId, peer_2_id: PeerId) -> Result<()> {
         if self.links.contains(&Link::new(peer_1_id, peer_2_id)) {
             return Ok(());
         }
@@ -129,19 +133,49 @@ impl NetworkGraph {
         self.links.insert(Link::new(peer_1_id, peer_2_id));
         self.links.insert(Link::new(peer_2_id, peer_1_id));
 
+        tracing::debug!(peers = ?self.peers, "added peers");
+
+        Ok(())
+    }
+
+    /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
+    /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
+    /// which is [`Link::0`].
+    pub fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
+        if !self.links.contains(&link) {
+            return Err(Error::LinkNotFound(link));
+        }
+
+        let peer = self.peers.get(&link.0).expect("to find peer, please report bug");
+        let veth = peer
+            .namespace
+            .devices
+            // FIXME: bad
+            .get(&NetworkDeviceType::Veth(link.1))
+            .expect("to find veth device, please report bug");
+
+        let tc_commands = impairment.to_tc_commands(&veth.variant.to_string());
+        let prefix = peer.namespace.prefix_command();
+
+        for tc_cmd in tc_commands {
+            command::Runner::by_str(&format!("{} {}", prefix, tc_cmd))?;
+        }
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod msg_sim_network {
-    use crate::{Simulator, Subnet};
+    use nix::unistd::sleep;
+
+    use crate::{Simulator, Subnet, network::Link, tc::LinkImpairment};
     use std::net::Ipv4Addr;
 
     #[test]
     fn add_peer_works() {
         let _ = tracing_subscriber::fmt::try_init();
-        let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 24);
+        let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
         let mut simulator = Simulator::new(subnet);
 
         let peer_1_id = 1;
@@ -153,5 +187,15 @@ mod msg_sim_network {
 
         let result = simulator.network.add_peers(peer_1_id, peer_3_id);
         assert!(result.is_ok(), "failed: {result:?}");
+
+        let impairment = LinkImpairment::default().with_packet_loss_rate_percent(50.0);
+
+        let result =
+            simulator.network.apply_impairment(Link::new(peer_1_id, peer_2_id), impairment);
+        assert!(result.is_ok(), "failed: {result:?}");
+
+        // unsafe {
+        //     sleep(u32::MAX);
+        // }
     }
 }
