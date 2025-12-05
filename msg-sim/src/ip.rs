@@ -99,26 +99,28 @@ pub fn create_veth_pair(
     ns2: &mut NetworkNamespace,
     veth1: NetworkDevice,
     veth2: NetworkDevice,
-    mask: u8,
 ) -> command::Result<()> {
+    // 1. Create veth devices in the appropriate namespaces.
     command::Runner::by_str(&format!(
         "sudo ip link add {} netns {} type veth peer name {} netns {}",
         &veth1.variant, &ns1.name, &veth2.variant, &ns2.name,
     ))?;
+
+    // 2. Add IP address and Point-to-Point mask to veth devices.
     command::Runner::by_str(&format!(
-        "{} ip addr add {}/{} dev {}",
+        "{} ip addr add {}/32 dev {}",
         ns1.prefix_command(),
         &veth1.address,
-        mask,
         &veth1.variant
     ))?;
     command::Runner::by_str(&format!(
-        "{} ip addr add {}/{} dev {}",
+        "{} ip addr add {}/32 dev {}",
         ns2.prefix_command(),
         &veth2.address,
-        mask,
         &veth2.variant
     ))?;
+
+    // 3. Turn on the devices.
     command::Runner::by_str(&format!(
         "{} ip link set dev {} up",
         ns1.prefix_command(),
@@ -127,6 +129,20 @@ pub fn create_veth_pair(
     command::Runner::by_str(&format!(
         "{} ip link set dev {} up",
         ns2.prefix_command(),
+        &veth2.variant
+    ))?;
+
+    // 4. Add explicit routing for the peers.
+    command::Runner::by_str(&format!(
+        "{} ip route add {} dev {}",
+        ns1.prefix_command(),
+        &veth2.address,
+        &veth1.variant
+    ))?;
+    command::Runner::by_str(&format!(
+        "{} ip route add {} dev {}",
+        ns2.prefix_command(),
+        &veth1.address,
         &veth2.variant
     ))?;
 

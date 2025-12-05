@@ -81,7 +81,7 @@ impl PeerConnect for Peer {
         let veth1 = NetworkDevice::new_veth(self.id.veth_address(subnet, other.id), other.id);
         let veth2 = NetworkDevice::new_veth(other.id.veth_address(subnet, self.id), self.id);
 
-        ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2, subnet.mask)
+        ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2)
     }
 }
 
@@ -194,8 +194,8 @@ mod msg_sim_network {
             simulator.network.apply_impairment(Link::new(peer_1_id, peer_2_id), impairment);
         assert!(result.is_ok(), "failed: {result:?}");
 
-        // unsafe {
-        //     sleep(u32::MAX);
-        // }
+        unsafe {
+            sleep(u32::MAX);
+        }
     }
 }
