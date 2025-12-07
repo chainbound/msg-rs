@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use crate::command;
-use crate::ip::{NetworkDevice, NetworkDeviceType};
+use crate::ip::NetworkDevice;
 
 // Run the code in the provided function `f` in the network namespace `namespace`
 // pub async fn run_on_namespace<T>(
@@ -30,12 +28,12 @@ pub fn prefix_command(name: &str) -> String {
 #[derive(Debug, Clone)]
 pub struct NetworkNamespace {
     pub name: String,
-    pub devices: HashMap<NetworkDeviceType, NetworkDevice>,
+    pub devices: Vec<NetworkDevice>,
 }
 
 impl NetworkNamespace {
     pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), devices: HashMap::new() }
+        Self { name: name.into(), devices: Vec::new() }
     }
 
     /// Return a `ip netns exec <namespace>` string used to prefix other commands.

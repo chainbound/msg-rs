@@ -1,24 +1,4 @@
-use std::{default, time::Duration};
-
-use crate::{command, namespace};
-
-/// Add the provided network emulation parameters for the device
-///
-/// These parameters are appended to the following command: `tc qdisc add dev <device_name>`
-#[inline]
-pub fn add_network_emulation_parameters(
-    namespace: &str,
-    device_name: &str,
-    parameters: Vec<&str>,
-) -> command::Result<command::Output> {
-    let parameters = parameters.join(" ");
-    command::Runner::by_str(&format!(
-        "{} tc qdisc add dev {} {}",
-        namespace::prefix_command(namespace),
-        device_name,
-        parameters
-    ))
-}
+use std::time::Duration;
 
 /// The impairments that can be applied to a network link.
 ///
@@ -66,24 +46,11 @@ impl LinkImpairment {
 }
 
 impl LinkImpairment {
-    /// Build tc commands implementing the recommended topology:
-    ///
-    ///     root qdisc: netem (latency/loss/jitter/etc.)
-    ///         └── optional child qdisc: tbf (bandwidth/burst/limit)
-    ///
-    /// This design:
-    ///   - works on all interface types (veth, dummy, physical)
-    ///   - works inside network namespaces
-    ///   - does not require sch_htb, sch_prio, or any classful qdisc support
-    ///   - never attaches to nonexistent parents or classes
-    ///   - ensures *all* traffic goes through netem (immediately effective)
-    ///
+    /// TODO: add tbf support for burst_kbit, buffer_size and bandwidth_kbps
     pub fn to_tc_commands(&self, iface: &str) -> Vec<String> {
         let mut cmds = Vec::new();
 
-        //
         // 1. Construct root netem parameters (delay, loss, etc.)
-        //
         let mut netem = Vec::new();
 
         if let Some(lat) = self.latency {
@@ -93,9 +60,7 @@ impl LinkImpairment {
             netem.push(format!("loss {}%", loss));
         }
 
-        //
         // 2. Install root netem
-        //
         cmds.push(format!(
             "tc qdisc replace dev {iface} root handle 10: netem {}",
             netem.join(" ")
