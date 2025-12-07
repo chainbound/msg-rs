@@ -10,9 +10,7 @@ use derive_more::Deref;
 
 use crate::{
     command,
-    ip::{
-        self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, NetworkDeviceType, Subnet,
-    },
+    ip::{self, IpAddrExt as _, MSG_SIM_NAMESPACE_PREFIX, NetworkDevice, Subnet, Veth},
     namespace::{self, NetworkNamespace},
     tc::LinkImpairment,
 };
@@ -98,8 +96,8 @@ pub trait PeerConnect {
 impl PeerConnect for Peer {
     fn connect(&mut self, other: &mut Self, subnet: Subnet) -> command::Result<()> {
         // Create veth devices
-        let veth1 = NetworkDevice::new_veth(self.id.veth_address(subnet, other.id), other.id);
-        let veth2 = NetworkDevice::new_veth(other.id.veth_address(subnet, self.id), self.id);
+        let veth1 = Veth::new(self.id.veth_address(subnet, other.id), other.id);
+        let veth2 = Veth::new(other.id.veth_address(subnet, self.id), self.id);
 
         ip::create_veth_pair(&mut self.namespace, &mut other.namespace, veth1, veth2)
     }
@@ -202,10 +200,15 @@ impl Network {
         let veth = peer
             .namespace
             .devices
-            .get(&NetworkDeviceType::Veth(link.1))
+            .iter()
+            .filter_map(|d| match d {
+                NetworkDevice::Veth(v) => Some(v),
+                _ => None,
+            })
+            .find(|v| v.id() == link.1)
             .expect("to find veth device, please report bug");
 
-        let tc_commands = impairment.to_tc_commands(&veth.variant.to_string());
+        let tc_commands = impairment.to_tc_commands(&veth.to_string());
         let prefix = peer.namespace.prefix_command();
 
         for tc_cmd in tc_commands {
@@ -219,7 +222,7 @@ impl Network {
 #[cfg(test)]
 mod msg_sim_network {
     use crate::{
-        Subnet,
+        ip::Subnet,
         network::{Link, Network},
         tc::LinkImpairment,
     };
