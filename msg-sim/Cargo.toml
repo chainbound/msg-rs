@@ -17,6 +17,7 @@ nix.workspace = true
 libc.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

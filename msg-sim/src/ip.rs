@@ -24,6 +24,7 @@ impl IpAddrExt for IpAddr {
     }
 }
 
+/// A subnet, composed of a base IP address and a netmask.
 #[derive(Debug, Clone, Copy)]
 pub struct Subnet {
     pub address: IpAddr,
