@@ -62,12 +62,11 @@ pub type PeerMap = HashMap<PeerId, Peer>;
 pub struct Peer {
     pub id: PeerId,
     pub namespace: NetworkNamespace,
-    pub peers: PeerMap,
 }
 
 impl Peer {
     pub fn new(id: PeerId, namespace: NetworkNamespace) -> Self {
-        Self { id, namespace, peers: PeerMap::new() }
+        Self { id, namespace }
     }
 }
 
@@ -167,15 +166,13 @@ impl NetworkGraph {
 
 #[cfg(test)]
 mod msg_sim_network {
-    use nix::unistd::sleep;
-
     use crate::{Simulator, Subnet, network::Link, tc::LinkImpairment};
     use std::net::Ipv4Addr;
 
     #[test]
     fn add_peer_works() {
         let _ = tracing_subscriber::fmt::try_init();
-        let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
+        let subnet = Subnet::new(Ipv4Addr::new(11, 0, 0, 0).into(), 16);
         let mut simulator = Simulator::new(subnet);
 
         let peer_1_id = 1;
@@ -193,9 +190,5 @@ mod msg_sim_network {
         let result =
             simulator.network.apply_impairment(Link::new(peer_1_id, peer_2_id), impairment);
         assert!(result.is_ok(), "failed: {result:?}");
-
-        unsafe {
-            sleep(u32::MAX);
-        }
     }
 }
