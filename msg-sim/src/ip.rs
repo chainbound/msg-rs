@@ -5,17 +5,20 @@ use std::{
 
 use derive_more::{Deref, DerefMut, From};
 
-use crate::{
-    command::{self},
-    namespace::NetworkNamespace,
-    network::PeerId,
-};
+use crate::network::PeerId;
 
 /// A prefix to use to name all network namespaces created by this crate.
 pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
 
+/// A prefix to use to name all links created by this crate.
+pub const MSG_SIM_LINK_PREFIX: &str = "msg";
+
 pub trait IpAddrExt {
     fn to_ipv6_mapped(&self) -> Ipv6Addr;
+
+    fn to_bits(&self) -> u128;
+
+    fn from_bits(bits: u128) -> Self;
 }
 
 impl IpAddrExt for IpAddr {
@@ -23,6 +26,21 @@ impl IpAddrExt for IpAddr {
         match self {
             IpAddr::V4(v4) => v4.to_ipv6_mapped(),
             IpAddr::V6(v6) => *v6,
+        }
+    }
+
+    fn to_bits(&self) -> u128 {
+        match self {
+            Self::V4(v4) => v4.to_bits().into(),
+            Self::V6(v6) => v6.to_bits(),
+        }
+    }
+
+    fn from_bits(bits: u128) -> Self {
+        if bits < u32::MAX as u128 {
+            Ipv4Addr::from_bits(bits as u32).into()
+        } else {
+            Ipv6Addr::from_bits(bits).into()
         }
     }
 }
@@ -124,55 +142,55 @@ impl Display for NetworkDevice {
     }
 }
 
-/// Create Virtual Ethernet (veth) devices and link them
-///
-/// Note: device name length can be max 15 chars long
-pub fn create_veth_pair(
-    ns1: &mut NetworkNamespace,
-    ns2: &mut NetworkNamespace,
-    veth1: Veth,
-    veth2: Veth,
-) -> command::Result<()> {
-    // 1. Create veth devices in the appropriate namespaces.
-    command::Runner::by_str(&format!(
-        "sudo ip link add {} netns {} type veth peer name {} netns {}",
-        &veth1, &ns1.name, &veth2, &ns2.name,
-    ))?;
-
-    // 2. Add IP address and Point-to-Point mask to veth devices.
-    command::Runner::by_str(&format!(
-        "{} ip addr add {}/32 dev {}",
-        ns1.prefix_command(),
-        &veth1.address,
-        &veth1
-    ))?;
-    command::Runner::by_str(&format!(
-        "{} ip addr add {}/32 dev {}",
-        ns2.prefix_command(),
-        &veth2.address,
-        &veth2
-    ))?;
-
-    // 3. Turn on the devices.
-    command::Runner::by_str(&format!("{} ip link set dev {} up", ns1.prefix_command(), &veth1))?;
-    command::Runner::by_str(&format!("{} ip link set dev {} up", ns2.prefix_command(), &veth2))?;
-
-    // 4. Add explicit routing for the peers.
-    command::Runner::by_str(&format!(
-        "{} ip route add {} dev {}",
-        ns1.prefix_command(),
-        &veth2.address,
-        &veth1
-    ))?;
-    command::Runner::by_str(&format!(
-        "{} ip route add {} dev {}",
-        ns2.prefix_command(),
-        &veth1.address,
-        &veth2
-    ))?;
-
-    ns1.devices.push(veth1.into());
-    ns2.devices.push(veth2.into());
-
-    Ok(())
-}
+// /// Create Virtual Ethernet (veth) devices and link them
+// ///
+// /// Note: device name length can be max 15 chars long
+// pub fn create_veth_pair(
+//     ns1: &mut NetworkNamespace,
+//     ns2: &mut NetworkNamespace,
+//     veth1: Veth,
+//     veth2: Veth,
+// ) -> command::Result<()> {
+//     // 1. Create veth devices in the appropriate namespaces.
+//     command::Runner::by_str(&format!(
+//         "sudo ip link add {} netns {} type veth peer name {} netns {}",
+//         &veth1, &ns1.name, &veth2, &ns2.name,
+//     ))?;
+//
+//     // 2. Add IP address and Point-to-Point mask to veth devices.
+//     command::Runner::by_str(&format!(
+//         "{} ip addr add {}/32 dev {}",
+//         ns1.prefix_command(),
+//         &veth1.address,
+//         &veth1
+//     ))?;
+//     command::Runner::by_str(&format!(
+//         "{} ip addr add {}/32 dev {}",
+//         ns2.prefix_command(),
+//         &veth2.address,
+//         &veth2
+//     ))?;
+//
+//     // 3. Turn on the devices.
+//     command::Runner::by_str(&format!("{} ip link set dev {} up", ns1.prefix_command(), &veth1))?;
+//     command::Runner::by_str(&format!("{} ip link set dev {} up", ns2.prefix_command(), &veth2))?;
+//
+//     // 4. Add explicit routing for the peers.
+//     command::Runner::by_str(&format!(
+//         "{} ip route add {} dev {}",
+//         ns1.prefix_command(),
+//         &veth2.address,
+//         &veth1
+//     ))?;
+//     command::Runner::by_str(&format!(
+//         "{} ip route add {} dev {}",
+//         ns2.prefix_command(),
+//         &veth1.address,
+//         &veth2
+//     ))?;
+//
+//     ns1.devices.push(veth1.into());
+//     ns2.devices.push(veth2.into());
+//
+//     Ok(())
+// }

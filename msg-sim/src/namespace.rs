@@ -1,4 +1,7 @@
-use crate::command;
+use std::io;
+use std::os::fd::{AsFd, AsRawFd};
+use std::path::{Path, PathBuf};
+
 use crate::ip::NetworkDevice;
 
 // Run the code in the provided function `f` in the network namespace `namespace`
@@ -25,40 +28,64 @@ pub fn prefix_command(name: &str) -> String {
     format!("sudo ip netns exec {}", name)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("rtnetlink error: {0}")]
+    RtNetlink(#[from] rtnetlink::Error),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
 pub struct NetworkNamespace {
     pub name: String,
+    pub file: tokio::fs::File,
     pub devices: Vec<NetworkDevice>,
 }
 
 impl NetworkNamespace {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self { name: name.into(), devices: Vec::new() }
+    pub fn path(name: &str) -> PathBuf {
+        Path::new("/run").join("netns").join(name)
     }
 
-    /// Return a `ip netns exec <namespace>` string used to prefix other commands.
-    pub fn prefix_command(&self) -> String {
-        prefix_command(&self.name)
+    pub async fn new(name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        rtnetlink::NetworkNamespace::add(name.clone()).await?;
+        let file = tokio::fs::File::open(Self::path(&name)).await?;
+
+        Ok(Self { name, devices: Vec::new(), file })
     }
 
-    pub fn loopback_up(&self) -> command::Result<command::Output> {
-        command::Runner::by_str(&format!("{} ip link set dev lo up", self.prefix_command()))
+    pub fn fd(&self) -> i32 {
+        self.file.as_fd().as_raw_fd()
     }
 }
 
 impl Drop for NetworkNamespace {
     fn drop(&mut self) {
-        let result = command::Runner::by_str(&format!("sudo ip netns delete {}", self.name));
+        let namespace = self.name.clone();
 
-        if let Err(e) = result {
-            tracing::error!(?e, "failed to delete network namespace");
+        let task = async {
+            if let Err(e) = rtnetlink::NetworkNamespace::del(namespace.clone()).await {
+                tracing::error!(?e, ?namespace, "failed to delete network namespace");
+            }
+        };
+
+        // If we are *inside* a Tokio runtime, we must use `block_in_place`
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+
+                handle.block_on(task)
+            });
+            return;
         }
+        // If we are NOT inside a runtime, we can safely create one
+        let rt =
+            tokio::runtime::Runtime::new().expect("failed to build temporary runtime for cleanup");
+
+        rt.block_on(task)
     }
-}
-
-/// Create the network namespace with the provided name.
-pub fn create(name: &str) -> command::Result<NetworkNamespace> {
-    command::Runner::by_str(&format!("sudo ip netns add {}", name))?;
-
-    Ok(NetworkNamespace::new(name.to_owned()))
 }
