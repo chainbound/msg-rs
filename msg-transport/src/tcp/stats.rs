@@ -2,7 +2,7 @@ use std::{os::fd::AsRawFd, time::Duration};
 
 use tokio::net::TcpStream;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TcpStats {
     /// The congestion window in bytes.
     pub congestion_window: u32,

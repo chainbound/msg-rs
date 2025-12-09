@@ -185,7 +185,7 @@ pub trait Transport<A: Address>: Send + Sync + Unpin + 'static {
     type Io: AsyncRead + AsyncWrite + PeerAddress<A> + Send + Unpin;
 
     /// The statistics for the transport (specifically its underlying IO object).
-    type Stats: Default + Debug + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error: Debug>;
+    type Stats: Default + Debug + Clone + Send + Sync + for<'a> TryFrom<&'a Self::Io, Error: Debug>;
 
     /// An error that occurred when setting up the connection.
     type Error: std::error::Error + From<io::Error> + Send + Sync;
