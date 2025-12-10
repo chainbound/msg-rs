@@ -5,4 +5,11 @@ pub mod command;
 pub mod ip;
 pub mod namespace;
 pub mod network;
+pub mod task;
 pub mod tc;
+
+pub trait TryClone: Sized {
+    type Error;
+
+    fn try_clone(&self) -> std::result::Result<Self, Self::Error>;
+}

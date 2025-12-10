@@ -1,19 +1,22 @@
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
     io,
     net::{IpAddr, Ipv4Addr},
     sync::atomic::{AtomicU8, Ordering},
+    time::Instant,
 };
 
 use derive_more::Deref;
 use rtnetlink::{LinkBridge, LinkVeth};
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
 
 use crate::{
-    command,
+    TryClone, command,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
+    task::DynRequest,
 };
 
 static PEER_ID_NEXT: AtomicU8 = AtomicU8::new(0);
@@ -119,6 +122,12 @@ pub enum Error {
     RtNetlink(#[from] rtnetlink::Error),
     #[error("network namespace error: {0}")]
     Namespace(#[from] namespace::Error),
+    #[error("tokio join error: {0}")]
+    Join(#[from] tokio::task::JoinError),
+    #[error("thread join error: {0:?}")]
+    Thread(Box<dyn std::any::Any + Send + 'static>),
+    #[error("task in namespace failed: {0}")]
+    NamespaceTask(#[from] namespace::TaskError<rtnetlink::Error>),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -188,6 +197,7 @@ impl Network {
 
         let namespace = format!("{MSG_SIM_NAMESPACE_PREFIX}-{peer_id}");
         let ns = NetworkNamespace::new(namespace.clone()).await?;
+        let (_handle, ns_tx) = ns.try_clone()?.spawn();
 
         let veth_name = format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}");
         let veth_br_name = format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}-br");
@@ -235,9 +245,24 @@ impl Network {
             })?;
 
         // FIXME: add address.
-        // let address =
-        //     IpAddr::from_bits(self.subnet.address.to_bits().saturating_add(peer_id.into()));
-        // self.rtnetlink_handle.address().add(0, address, self.subnet.mask).execute().await?;
+        let address =
+            IpAddr::from_bits(self.subnet.address.to_bits().saturating_add(peer_id.into()));
+        let handle = self.rtnetlink_handle.clone();
+        let mask = self.subnet.mask;
+
+        let namespace_file = ns.file.try_clone()?;
+
+        let res = ns_tx.submit(async move { 
+                handle
+                    .address()
+                    // FIXME: 5 is wrong!
+                    .add(5, address, mask)
+                    .execute()
+                    .await
+                    .inspect_err(|e| tracing::error!(?e, errno = ?io::Error::last_os_error(), "failed to add address"))
+        }).await.unwrap();
+        let res = res.receive().await.unwrap();
+
 
         let peer = Peer::new(peer_id, ns);
         self.peers.insert(peer_id, peer);
