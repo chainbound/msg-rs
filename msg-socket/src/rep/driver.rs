@@ -3,7 +3,7 @@ use std::{
     io,
     pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
 };
 
 use bytes::Bytes;
@@ -32,6 +32,12 @@ use msg_wire::{
 };
 
 use super::RepError;
+
+/// The bytes of a "PING" message. They can be used to be matched on an incoming request and send a
+/// response immediately, like an healthcheck.
+const PING: &[u8; 4] = b"PING";
+/// The bytes of a "PONG" response. See [`PING`].
+const PONG: &[u8; 4] = b"PONG";
 
 /// An object that represents a connected peer and associated state.
 ///
@@ -296,6 +302,37 @@ where
     }
 }
 
+impl<T: AsyncRead + AsyncWrite + Unpin, A: Address> PeerState<T, A> {
+    /// Prepares for shutting down by sending and flushing all messages in [`Self::egress_queue`].
+    /// When [`Poll::Ready`] is returned, the connection with this peer can be shutdown.
+    ///
+    /// TODO: there might be some [`Self::pending_requests`] yet to processed. TBD how to handle
+    /// them, for now they're dropped.
+    fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let messages = std::mem::take(&mut self.egress_queue);
+        let buffer_size = self.conn.write_buffer().len();
+        if messages.is_empty() && buffer_size == 0 {
+            debug!("flushed everything, closing connection");
+            return Poll::Ready(());
+        }
+
+        debug!(messages = ?messages.len(), write_buffer_size = ?buffer_size, "found data to send");
+
+        for msg in messages {
+            if let Err(e) = self.conn.start_send_unpin(msg.inner) {
+                error!(?e, "failed to send final messages to socket, closing");
+                return Poll::Ready(());
+            }
+        }
+
+        if let Err(e) = ready!(self.conn.poll_flush_unpin(cx)) {
+            error!(?e, "failed to flush on shutdown, giving up");
+        }
+
+        Poll::Ready(())
+    }
+}
+
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState<T, A> {
     type Item = WithSpan<Result<Request<A>, RepError>>;
 
@@ -407,7 +444,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
 
             // Finally we accept incoming requests from the peer.
             {
-                let _g = this.span.enter();
+                let _g = this.span.clone().entered();
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(result)) => {
                         let span = tracing::info_span!("request").entered();
@@ -421,11 +458,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         };
 
                         // NOTE: for this special message type, send back immediately a response.
-                        if msg.payload().as_ref() == b"msg-rs-ping-healthcheck" {
+                        if msg.payload().as_ref() == PING {
                             debug!("received ping healthcheck, responding pong");
 
-                            let msg = reqrep::Message::new(0, 0, (*"pong").into());
-                            let _res = this.conn.start_send_unpin(msg);
+                            let msg = reqrep::Message::new(0, 0, PONG.as_ref().into());
+                            if let Err(e) = this.conn.start_send_unpin(msg) {
+                                error!(?e, "failed to send pong response");
+                            }
                             continue;
                         }
 
@@ -449,28 +488,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     Poll::Ready(None) => {
                         warn!("framed closed, sending and flushing leftover data if any");
 
-                        let messages = std::mem::take(&mut this.egress_queue);
-                        let buffer_size = this.conn.write_buffer().len();
-                        if messages.is_empty() && buffer_size == 0 {
-                            debug!("flushed everything, closing connection");
+                        if this.poll_shutdown(cx).is_ready() {
                             return Poll::Ready(None);
                         }
-
-                        debug!(messages = ?messages.len(), write_buffer_size = ?buffer_size, "found data to send");
-
-                        for msg in messages {
-                            if let Err(e) = this.conn.start_send_unpin(msg.inner) {
-                                error!(?e, "failed to final messages to socket, closing");
-                                return Poll::Ready(None);
-                            }
-                        }
-
-                        if this.conn.poll_flush_unpin(cx).is_pending() {
-                            return Poll::Pending;
-                        }
-
-                        // Flushed, we good.
-                        return Poll::Ready(None);
                     }
                     Poll::Pending => {}
                 }
