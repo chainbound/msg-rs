@@ -13,6 +13,7 @@ use msg_wire::{
     reqrep,
 };
 
+mod conn_manager;
 mod driver;
 mod socket;
 mod stats;
