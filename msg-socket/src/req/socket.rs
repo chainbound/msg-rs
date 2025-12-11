@@ -23,7 +23,8 @@ use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
-        driver::{ConnectionCtl, ReqDriver},
+        conn_manager::{ConnCtl, ConnManager},
+        driver::ReqDriver,
         stats::ReqStats,
     },
     stats::SocketStats,
@@ -167,12 +168,7 @@ where
     }
 
     /// Internal method to initialize and spawn the driver.
-    fn spawn_driver(
-        &mut self,
-        endpoint: A,
-        transport: T,
-        conn_state: ConnectionCtl<T::Io, T::Stats, A>,
-    ) {
+    fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -191,19 +187,26 @@ where
             timer
         });
 
+        // Create connection manager
+        let conn_manager = ConnManager::new(
+            transport,
+            endpoint,
+            conn_ctl,
+            Arc::clone(&self.state.transport_stats),
+            self.options.auth_token.clone(),
+            span.clone(),
+        );
+
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
-            addr: endpoint,
             options: Arc::clone(&self.options),
             socket_state: self.state.clone(),
             id_counter: 0,
             from_socket,
-            transport,
-            conn_state,
+            conn_manager,
             linger_timer,
             pending_requests,
             timeout_check_interval,
-            conn_task: None,
             egress_queue: Default::default(),
             compressor: self.compressor.clone(),
             id,
