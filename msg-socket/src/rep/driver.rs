@@ -464,7 +464,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                             let msg = reqrep::Message::new(0, 0, PONG.as_ref().into());
                             if let Err(e) = this.conn.start_send_unpin(msg) {
                                 error!(?e, "failed to send pong response");
+                            } else if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                                error!(?e, "failed to flush pong response");
                             }
+
                             continue;
                         }
 
