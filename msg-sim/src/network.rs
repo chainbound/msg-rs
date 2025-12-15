@@ -1,25 +1,33 @@
+use futures::{Stream, StreamExt};
 use std::{
-    any::Any,
     collections::{HashMap, HashSet},
     fmt::{Debug, Display},
     io,
     net::{IpAddr, Ipv4Addr},
-    sync::atomic::{AtomicU8, Ordering},
-    time::Instant,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+    task::Context,
 };
 
 use derive_more::Deref;
-use rtnetlink::{LinkBridge, LinkVeth};
-use tokio::{sync::oneshot, task::JoinHandle};
+use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth};
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 
 use crate::{
-    TryClone, command,
+    command,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
     task::DynRequest,
+    wrappers,
 };
 
-static PEER_ID_NEXT: AtomicU8 = AtomicU8::new(0);
+static PEER_ID_NEXT: AtomicU8 = AtomicU8::new(1);
 
 /// TODO: support larger sizes, current means we can have at most 256 participants in the network.
 pub type PeerId = u8;
@@ -31,29 +39,13 @@ pub trait PeerIdExt: Display + Copy {
         format!("{MSG_SIM_NAMESPACE_PREFIX}-{self}")
     }
 
-    // fn set_namespace(self) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    //     let name = self.namespace_name();
-    //
-    //     let path = format!("/run/netns/{name}\0");
-    //
-    //     unsafe {
-    //         let fd = libc::open(path.as_bytes().as_ptr(), libc::O_RDONLY);
-    //         if fd < 0 {}
-    //
-    //         let result = libc::setns(fd, libc::CLONE_NEWNET);
-    //         if result == -1 {}
-    //     }
-    //
-    //     Ok(())
-    // }
-
     /// TODO: add docs.
     fn veth_address(self, subnet: Subnet, other: Self) -> IpAddr;
 }
 
 impl PeerIdExt for PeerId {
     fn veth_address(self, subnet: Subnet, other: Self) -> IpAddr {
-        let octects = subnet.address.to_ipv6_mapped().octets();
+        let octects = subnet.network_address.to_ipv6_mapped().octets();
 
         Ipv4Addr::new(octects[12], octects[13], self, other).into()
     }
@@ -128,6 +120,10 @@ pub enum Error {
     Thread(Box<dyn std::any::Any + Send + 'static>),
     #[error("task in namespace failed: {0}")]
     NamespaceTask(#[from] namespace::TaskError<rtnetlink::Error>),
+    #[error("failed to send task: {0}")]
+    SendError(#[from] mpsc::error::SendError<DynRequest>),
+    #[error("failed to receive task result: {0}")]
+    RecvError(#[from] oneshot::error::RecvError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -156,11 +152,15 @@ pub struct Network {
     subnet: Subnet,
 
     network_hub_namespace: NetworkNamespace,
+
+    /// A [`rtnetlink::Handle`] bound to _host namespace_.
     rtnetlink_handle: rtnetlink::Handle,
     _rtnetlink_socket_task: JoinHandle<()>,
 }
 
 impl Network {
+    const BRIDGE_NAME: &str = "msg-sim-br0";
+
     pub async fn new(subnet: Subnet) -> Result<Self> {
         let (connection, handle, _) = rtnetlink::new_connection()?;
         let _task = tokio::spawn(connection);
@@ -180,7 +180,7 @@ impl Network {
         network
             .rtnetlink_handle
             .link()
-            .add(LinkBridge::new("br0").up().setns_by_fd(fd).build())
+            .add(LinkBridge::new(Self::BRIDGE_NAME).up().setns_by_fd(fd).build())
             .execute()
             .await?;
 
@@ -194,48 +194,63 @@ impl Network {
     /// Adds a peer to the network.
     pub async fn add_peer(&mut self) -> Result<PeerId> {
         let peer_id = PEER_ID_NEXT.load(Ordering::Relaxed);
-
-        let namespace = format!("{MSG_SIM_NAMESPACE_PREFIX}-{peer_id}");
-        let ns = NetworkNamespace::new(namespace.clone()).await?;
-        let (_handle, ns_tx) = ns.try_clone()?.spawn();
-
-        let veth_name = format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}");
-        let veth_br_name = format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}-br");
-
-        let link = || LinkVeth::new(&veth_name, &veth_br_name);
-        let link_reversed = || LinkVeth::new(&veth_br_name, &veth_name);
+        let namespace_name = format!("{MSG_SIM_NAMESPACE_PREFIX}-{peer_id}");
+        let veth_name = Arc::new(format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}"));
+        let veth_br_name = Arc::new(format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}-br"));
 
         let _span =
-            tracing::debug_span!("add_peer", ?peer_id, %namespace, %veth_name, %veth_br_name)
+            tracing::debug_span!("add_peer", ?peer_id, %namespace_name, %veth_name, %veth_br_name)
                 .entered();
 
+        let network_namespace = NetworkNamespace::new(namespace_name.clone()).await?;
+
+        // 1. Add link.
         self.rtnetlink_handle
             .link()
-            .add(link().build())
+            .add(LinkVeth::new(&veth_name, &veth_br_name).build())
             .execute()
             .await
             .inspect_err(|e| tracing::debug!(?e, "failed to add link"))?;
 
-        // NOTE: I have to specify link unfortunately and not the single device, however the first
-        // end of the link is what matters;
+        // 2. Set the first device up, and move it to peer namespace
         self.rtnetlink_handle
             .link()
-            .set(link().up().setns_by_fd(ns.fd()).build())
+            .set(
+                LinkUnspec::new_with_name(&veth_name)
+                    .up()
+                    .setns_by_fd(network_namespace.fd())
+                    .build(),
+            )
             .execute()
             .await
             .inspect_err(|e| tracing::debug!(?e, "failed to set device up in namespace"))?;
 
-        // TODO: use the syscall `if_nametoindex` to get the bridge interface index.
-        // For now, we simply assume it's the first interface created on the network namespace and
-        // as such should have interface index 5.
-        let bridge_index = 5;
+        // 3. Add IP address to first device.
+        let address =
+            IpAddr::from_bits(self.subnet.network_address.to_bits().saturating_add(peer_id.into()));
+        let handle = network_namespace.rtnetlink_handle.clone();
+        let mask = self.subnet.netmask;
+        let v = veth_name.clone();
+
+        network_namespace
+            .task_sender
+            .submit(async move {
+                tracing::debug!(?address, ?mask, dev = ?v, "adding address to device");
+                let index = wrappers::if_nametoindex(&v).expect("to find device").get();
+
+                handle.address().add(index, address, mask).execute().await
+            })
+            .await?
+            .receive()
+            .await??;
+
+        // 4. Set the second device up, and move it to hub namespace
         self.rtnetlink_handle
             .link()
             .set(
-                link_reversed()
+                LinkUnspec::new_with_name(&veth_br_name)
                     .up()
                     .setns_by_fd(self.network_hub_namespace.fd())
-                    .controller(bridge_index)
                     .build(),
             )
             .execute()
@@ -244,27 +259,27 @@ impl Network {
                 tracing::debug!(?e, "failed to set link end up in namespace with bridge controller")
             })?;
 
-        // FIXME: add address.
-        let address =
-            IpAddr::from_bits(self.subnet.address.to_bits().saturating_add(peer_id.into()));
-        let handle = self.rtnetlink_handle.clone();
-        let mask = self.subnet.mask;
+        // 5. Set second device controlled by hub.
+        // TODO: would be nice to have the handle as "context".
+        let handle = self.network_hub_namespace.rtnetlink_handle.clone();
+        self.network_hub_namespace
+            .task_sender
+            .submit(async move {
+                // FIXME: this fails, seems I'm not running in the right namespace.
+                let index =
+                    wrappers::if_nametoindex(Self::BRIDGE_NAME).expect("to find bridge").get();
 
-        let namespace_file = ns.file.try_clone()?;
-
-        let res = ns_tx.submit(async move { 
                 handle
-                    .address()
-                    // FIXME: 5 is wrong!
-                    .add(5, address, mask)
+                    .link()
+                    .set(LinkUnspec::new_with_name(&veth_br_name).up().controller(index).build())
                     .execute()
                     .await
-                    .inspect_err(|e| tracing::error!(?e, errno = ?io::Error::last_os_error(), "failed to add address"))
-        }).await.unwrap();
-        let res = res.receive().await.unwrap();
+            })
+            .await?
+            .receive()
+            .await??;
 
-
-        let peer = Peer::new(peer_id, ns);
+        let peer = Peer::new(peer_id, network_namespace);
         self.peers.insert(peer_id, peer);
         PEER_ID_NEXT.store(peer_id + 1, Ordering::Relaxed);
 
@@ -333,30 +348,6 @@ mod msg_sim_network {
         let mut network = Network::new(subnet).await.unwrap();
 
         let _peer_id = network.add_peer().await.unwrap();
+        let _peer_id = network.add_peer().await.unwrap();
     }
-
-    // #[test]
-    // fn add_peer_works() {
-    //     let _ = tracing_subscriber::fmt::try_init();
-    //     let subnet = Subnet::new(Ipv4Addr::new(11, 0, 0, 0).into(), 16);
-    //     let mut network = Network::new(subnet);
-    //
-    //     let peer_1_id = network.add_peer().unwrap();
-    //     let peer_2_id = network.add_peer().unwrap();
-    //     let _peer_3_id = network.add_peer().unwrap();
-    //
-    //     let result = network.connect_to_all(peer_1_id);
-    //     assert!(result.is_ok(), "failed: {result:?}");
-    //
-    //     let impairment = LinkImpairment::default().with_packet_loss_rate_percent(50.0);
-    //
-    //     let result = network.apply_impairment(Link::new(peer_1_id, peer_2_id), impairment);
-    //     assert!(result.is_ok(), "failed: {result:?}");
-    //
-    //     peer_1_id.run_in_namespace(async {
-    //         // How to use the same veth to communicate with more peers? Otherwise it means I have
-    //         // to bind so many times and it's not possible for certain applications.
-    //         let listener = TcpListener::bind(addr)
-    //     });
-    // }
 }

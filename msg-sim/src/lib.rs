@@ -7,6 +7,7 @@ pub mod namespace;
 pub mod network;
 pub mod task;
 pub mod tc;
+pub mod wrappers;
 
 pub trait TryClone: Sized {
     type Error;

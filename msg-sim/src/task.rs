@@ -4,13 +4,17 @@ use tokio::sync::{mpsc, oneshot};
 
 // TODO: docs, and add context regarding network namespaces.
 
-pub type DynFuture<T = Box<dyn Any + Send + 'static>> = Pin<Box<dyn Future<Output = T> + Send>>;
+// TODO: refactor with it.
+type AnySendStatic = dyn Any + Send + 'static;
+
+pub type DynFuture<T = Box<AnySendStatic>> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 pub struct DynRequest {
     pub task: DynFuture,
-    pub tx: oneshot::Sender<Box<dyn Any + Send + 'static>>,
+    pub tx: oneshot::Sender<Box<AnySendStatic>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct DynRequestSender {
     tx: mpsc::Sender<DynRequest>,
 }
@@ -22,7 +26,7 @@ impl DynRequestSender {
 }
 
 pub struct DynRequestResponse<T: 'static> {
-    rx: oneshot::Receiver<Box<dyn Any + Send + 'static>>,
+    rx: oneshot::Receiver<Box<AnySendStatic>>,
     _marker: PhantomData<T>,
 }
 
@@ -40,7 +44,7 @@ impl DynRequestSender {
         &self,
         fut: F,
     ) -> std::result::Result<DynRequestResponse<T>, mpsc::error::SendError<DynRequest>> {
-        let task = Box::pin(async move { Box::new(fut.await) as Box<dyn Any + Send + 'static> });
+        let task = Box::pin(async move { Box::new(fut.await) as Box<AnySendStatic> });
 
         let (tx, rx) = oneshot::channel();
         let request = DynRequest { task, tx };

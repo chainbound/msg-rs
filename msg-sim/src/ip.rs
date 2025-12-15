@@ -48,13 +48,13 @@ impl IpAddrExt for IpAddr {
 /// A subnet, composed of a base IP address and a netmask.
 #[derive(Debug, Clone, Copy)]
 pub struct Subnet {
-    pub address: IpAddr,
-    pub mask: u8,
+    pub network_address: IpAddr,
+    pub netmask: u8,
 }
 
 impl Subnet {
     pub fn new(address: IpAddr, mask: u8) -> Self {
-        Self { address, mask }
+        Self { network_address: address, netmask: mask }
     }
 }
 
