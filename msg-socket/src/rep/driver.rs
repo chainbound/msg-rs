@@ -85,6 +85,8 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     pub(crate) conn_tasks: FuturesUnordered<WithSpan<T::Accept>>,
     /// A joinset of authentication tasks.
     pub(crate) auth_tasks: JoinSet<WithSpan<Result<AuthResult<T::Io, A>, RepError>>>,
+    /// A receiver of [`Transport::Control`]s changes.
+    pub(crate) control_rx: mpsc::Receiver<T::Control>,
 
     /// A span to use for general purpose notifications, not tied to a specific path.
     pub(crate) span: tracing::Span,
@@ -193,6 +195,10 @@ where
                 }
 
                 continue;
+            }
+
+            if let Poll::Ready(Some(cmd)) = this.control_rx.poll_recv(cx) {
+                this.transport.on_control(cmd);
             }
 
             // Finally, poll the transport for new incoming connection futures and push them to the

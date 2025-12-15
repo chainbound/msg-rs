@@ -1,3 +1,4 @@
+use arc_swap::ArcSwap;
 use core::fmt;
 use derive_more::{Deref, DerefMut, From};
 use futures::future::BoxFuture;
@@ -62,12 +63,16 @@ pub struct Server {
     /// The underlying TCP listener.
     listener: Option<TcpListener>,
     /// The OpenSSL acceptor for TLS handshake requests.
-    acceptor: Arc<SslAcceptor>,
+    acceptor: ArcSwap<SslAcceptor>,
 }
 
 impl Server {
     pub fn new(acceptor: SslAcceptor) -> Self {
-        Self { listener: None, acceptor: Arc::new(acceptor) }
+        Self { listener: None, acceptor: ArcSwap::new(Arc::new(acceptor)) }
+    }
+
+    pub fn swap_acceptor(&mut self, acceptor: SslAcceptor) {
+        self.acceptor.swap(Arc::new(acceptor));
     }
 }
 
@@ -188,12 +193,22 @@ impl TryFrom<&TcpTlsStream> for TcpStats {
     }
 }
 
+/// [`Transport::Control`] plane messages for this transport.
+#[derive(Clone)]
+pub enum Control {
+    /// Allow to swap the currently used TLS acceptor with the provided one,
+    /// keeping existing connections. One reason for using this could be to extend the current list
+    /// of root certificates.
+    SwapAcceptor(SslAcceptor),
+}
+
 #[async_trait::async_trait]
 impl Transport<SocketAddr> for TcpTls {
     type Stats = TcpStats;
     type Io = TcpTlsStream;
 
     type Error = Error;
+    type Control = Control;
 
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
     type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
@@ -251,7 +266,7 @@ impl Transport<SocketAddr> for TcpTls {
         let Some(ref listener) = server.listener else {
             return Poll::Ready(async_error(Error::IoKind(io::ErrorKind::NotConnected)));
         };
-        let tls_acceptor = server.acceptor.clone();
+        let tls_acceptor = server.acceptor.load();
 
         match listener.poll_accept(cx) {
             Poll::Ready(Ok((io, addr))) => {
@@ -269,6 +284,18 @@ impl Transport<SocketAddr> for TcpTls {
             }
             Poll::Ready(Err(e)) => Poll::Ready(async_error(e.into())),
             Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn on_control(&mut self, control: Self::Control) {
+        match control {
+            Self::Control::SwapAcceptor(acceptor) => {
+                let Some(server) = self.as_server_mut() else {
+                    tracing::warn!("called swap acceptor on a client instance, this is a no-op");
+                    return;
+                };
+                server.swap_acceptor(acceptor);
+            }
         }
     }
 }

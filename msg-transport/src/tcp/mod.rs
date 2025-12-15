@@ -41,6 +41,8 @@ impl Transport<SocketAddr> for Tcp {
     type Stats = TcpStats;
     type Io = TcpStream;
 
+    type Control = ();
+
     type Error = io::Error;
 
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
