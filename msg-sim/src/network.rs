@@ -1,21 +1,20 @@
-use futures::{Stream, StreamExt};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::{Debug, Display},
     io,
-    net::{IpAddr, Ipv4Addr},
-    pin::Pin,
+    net::IpAddr,
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicUsize, Ordering},
     },
-    task::Context,
 };
 
-use derive_more::Deref;
 use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth};
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc,
+        oneshot::{self},
+    },
     task::JoinHandle,
 };
 
@@ -27,10 +26,9 @@ use crate::{
     wrappers,
 };
 
-static PEER_ID_NEXT: AtomicU8 = AtomicU8::new(1);
+static PEER_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
-/// TODO: support larger sizes, current means we can have at most 256 participants in the network.
-pub type PeerId = u8;
+pub type PeerId = usize;
 
 pub trait PeerIdExt: Display + Copy {
     /// Get the network namespace name derived by the provided IP address.
@@ -40,14 +38,12 @@ pub trait PeerIdExt: Display + Copy {
     }
 
     /// TODO: add docs.
-    fn veth_address(self, subnet: Subnet, other: Self) -> IpAddr;
+    fn veth_address(self, subnet: Subnet) -> IpAddr;
 }
 
 impl PeerIdExt for PeerId {
-    fn veth_address(self, subnet: Subnet, other: Self) -> IpAddr {
-        let octects = subnet.network_address.to_ipv6_mapped().octets();
-
-        Ipv4Addr::new(octects[12], octects[13], self, other).into()
+    fn veth_address(self, subnet: Subnet) -> IpAddr {
+        IpAddr::from_bits(subnet.network_address.to_bits().saturating_add(self as u128))
     }
 }
 
@@ -74,16 +70,6 @@ impl Display for Link {
     }
 }
 
-#[derive(Debug, Clone, Default, Deref)]
-pub struct Links(HashSet<Link>);
-
-impl Links {
-    pub fn insert(&mut self, link: Link) {
-        self.0.insert(link);
-        self.0.insert(link.reversed());
-    }
-}
-
 pub type PeerMap = HashMap<PeerId, Peer>;
 
 #[derive(Debug)]
@@ -104,8 +90,6 @@ pub enum Error {
     Io(#[from] io::Error),
     #[error("command error: {0}")]
     Command(#[from] command::Error),
-    #[error("link not found: {0}")]
-    LinkNotFound(Link),
     #[error("peer not found: {0}")]
     PeerNotFound(PeerId),
     #[error("too many peers")]
@@ -148,7 +132,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Network {
     peers: PeerMap,
-    links: Links,
     subnet: Subnet,
 
     network_hub_namespace: NetworkNamespace,
@@ -170,7 +153,6 @@ impl Network {
 
         let network = Self {
             peers: PeerMap::default(),
-            links: Links::default(),
             subnet,
             network_hub_namespace: namespace_hub,
             rtnetlink_handle: handle,
@@ -226,12 +208,11 @@ impl Network {
             .inspect_err(|e| tracing::debug!(?e, "failed to set device up in namespace"))?;
 
         // 3. Add IP address to first device.
-        let address =
-            IpAddr::from_bits(self.subnet.network_address.to_bits().saturating_add(peer_id.into()));
-        let handle = network_namespace.rtnetlink_handle.clone();
+        let address = peer_id.veth_address(self.subnet);
         let mask = self.subnet.netmask;
         let v = veth_name.clone();
 
+        let handle = network_namespace.rtnetlink_handle.clone();
         network_namespace
             .task_sender
             .submit(async move {
@@ -260,12 +241,10 @@ impl Network {
             })?;
 
         // 5. Set second device controlled by hub.
-        // TODO: would be nice to have the handle as "context".
         let handle = self.network_hub_namespace.rtnetlink_handle.clone();
         self.network_hub_namespace
             .task_sender
             .submit(async move {
-                // FIXME: this fails, seems I'm not running in the right namespace.
                 let index =
                     wrappers::if_nametoindex(Self::BRIDGE_NAME).expect("to find bridge").get();
 
@@ -284,6 +263,23 @@ impl Network {
         PEER_ID_NEXT.store(peer_id + 1, Ordering::Relaxed);
 
         Ok(peer_id)
+    }
+
+    pub async fn run_in_namespace<T, F>(
+        &self,
+        peer_id: PeerId,
+        fut: F,
+    ) -> Result<impl Future<Output = std::result::Result<T, oneshot::error::RecvError>>>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
+        let Some(peer) = self.peers.get(&peer_id) else {
+            return Err(Error::PeerNotFound(peer_id));
+        };
+
+        let rx = peer.namespace.task_sender.submit(fut).await?.receive();
+        Ok(rx)
     }
 
     // /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
@@ -325,9 +321,16 @@ impl Network {
 
 #[cfg(test)]
 mod msg_sim_network {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, SocketAddr};
 
-    use crate::{ip::Subnet, network::Network};
+    use futures::StreamExt;
+    use msg_socket::{RepSocket, ReqSocket};
+    use msg_transport::tcp::Tcp;
+
+    use crate::{
+        ip::Subnet,
+        network::{Network, PeerIdExt},
+    };
 
     #[tokio::test(flavor = "multi_thread")]
     async fn create_network_works() {
@@ -344,10 +347,50 @@ mod msg_sim_network {
     #[tokio::test(flavor = "multi_thread")]
     async fn add_peer_works() {
         let _ = tracing_subscriber::fmt::try_init();
-        let subnet = Subnet::new(Ipv4Addr::new(11, 0, 0, 0).into(), 16);
+        let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
         let _peer_id = network.add_peer().await.unwrap();
         let _peer_id = network.add_peer().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn simulate_reqrep_works() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let subnet = Subnet::new(Ipv4Addr::new(13, 0, 0, 0).into(), 16);
+        let mut network = Network::new(subnet).await.unwrap();
+
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+
+        let address_2 = peer_2.veth_address(subnet);
+        let port_2 = 12345;
+
+        let task1 = network
+            .run_in_namespace(peer_2, async move {
+                let mut rep_socket = RepSocket::new(Tcp::default());
+                rep_socket.bind(SocketAddr::new(address_2, port_2)).await.unwrap();
+
+                if let Some(request) = rep_socket.next().await {
+                    let msg = request.msg().clone();
+                    request.respond(msg).unwrap();
+                }
+            })
+            .await
+            .unwrap();
+
+        let task2 = network
+            .run_in_namespace(peer_1, async move {
+                let mut req_socket = ReqSocket::new(Tcp::default());
+
+                req_socket.connect_sync(SocketAddr::new(address_2, port_2));
+                let response = req_socket.request("hello".into()).await.unwrap();
+                assert_eq!(response, "hello");
+            })
+            .await
+            .unwrap();
+
+        tokio::try_join!(task1, task2).unwrap();
     }
 }

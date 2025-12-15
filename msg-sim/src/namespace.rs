@@ -2,28 +2,21 @@ use std::io;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 
-use nix::sched::CloneFlags;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::TryClone;
 use crate::ip::NetworkDevice;
 use crate::namespace::helpers::current_netns;
 use crate::task::{DynRequest, DynRequestSender};
-use crate::{TryClone, wrappers};
 
+// TODO: add more docs.
 mod helpers {
     use std::{
         fs, io,
-        num::NonZeroU32,
         os::fd::{AsRawFd as _, BorrowedFd},
-        path::Path,
     };
 
     use nix::sched::CloneFlags;
-
-    pub fn if_nametoindex(name: &str) -> Option<NonZeroU32> {
-        let index = unsafe { nix::libc::if_nametoindex(name.as_ptr()) };
-        NonZeroU32::new(index)
-    }
 
     /// Kernel-stable network namespace identity
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -120,30 +113,6 @@ mod helpers {
     }
 }
 
-// Run the code in the provided function `f` in the network namespace `namespace`
-// pub async fn run_on_namespace<T>(
-//     namespace: &str,
-//     f: impl FnOnce() -> Pin<Box<dyn Future<Output = io::Result<T>> + Send>>,
-// ) -> io::Result<T> {
-//     let namespace_path = format!("/var/run/netns/{}", namespace);
-//
-//     let ns_fd = File::open(namespace_path)?;
-//     let host_ns_fd = File::open("/proc/1/ns/net")?;
-//
-//     // Use setns to switch to the network namespace
-//     setns(ns_fd, CloneFlags::CLONE_NEWNET)?;
-//     let res = f().await?;
-//     // Go back to the host network environment after calling `f`
-//     setns(host_ns_fd, CloneFlags::CLONE_NEWNET)?;
-//
-//     Ok(res)
-// }
-
-/// Return a `ip netns exec <namespace>` string used to prefix other commands.
-pub fn prefix_command(name: &str) -> String {
-    format!("sudo ip netns exec {}", name)
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("io error: {0}")]
@@ -197,48 +166,31 @@ impl NetworkNamespaceInner {
         let (tx, mut rx) = mpsc::channel(8);
 
         let handle = std::thread::spawn(move || {
-            // If the namespace thread panics, tasks will hang forever
-            //
-            // send() may succeed but never be processed
-            //
-            // NOTE: I don't know if this is true.
-            let result = std::panic::catch_unwind(|| {
-                let fd = self.file.as_fd();
-                let name = &self.name;
-                let _span = tracing::info_span!("spawn_namespace", ?name).entered();
+            let fd = self.file.as_fd();
+            let name = &self.name;
+            let _span = tracing::info_span!("spawn_namespace", ?name).entered();
 
-                let (_before, after) = helpers::setns_verified(fd)?;
-                let _guard = helpers::NetnsGuard::new(after)?;
+            let (_before, after) = helpers::setns_verified(fd)?;
+            let _guard = helpers::NetnsGuard::new(after)?;
 
-                let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-                tracing::info!("starting runtime");
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+            tracing::info!("starting runtime");
+            drop(_span);
 
-                drop(_span);
+            // TODO: tasks should have the [`rtnetlink::Handle`] as ctx.
+            rt.block_on(async move {
+                while let Some(DynRequest { task, tx }) = rx.recv().await {
+                    debug_assert_eq!(after, current_netns().expect("to check current namespace"));
+                    let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
 
-                rt.block_on(async move {
-                    while let Some(DynRequest { task, tx }) = rx.recv().await {
-                        debug_assert_eq!(
-                            after,
-                            current_netns().expect("to check current namespace")
-                        );
-                        let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
-
-                        let res = task.await;
-                        if tx.send(res).is_err() {
-                            tracing::error!("failed to send back task response, rx dropped");
-                        }
+                    let res = task.await;
+                    if tx.send(res).is_err() {
+                        tracing::error!("failed to send back task response, rx dropped");
                     }
-                });
-                Ok(())
+                }
             });
 
-            match result {
-                Ok(r) => r,
-                Err(panic) => {
-                    tracing::error!("namespace thread panicked: {:?}", panic);
-                    Err(Error::Thread("namespace thread panicked".to_owned()))
-                }
-            }
+            Ok(())
         });
 
         (handle, DynRequestSender::new(tx))
@@ -282,34 +234,6 @@ impl NetworkNamespace {
 
         Ok(Self { inner, task_sender, _receiver_task, rtnetlink_handle, _connection_task })
     }
-
-    // /// Runs the provided future in this network namespace. Running code on a different namespace
-    // /// requires spawning a dedicated OS thread, which will create its own asynchronous runtime.
-    // pub fn run<T, E, F>(
-    //     file: std::fs::File,
-    //     task: F,
-    // ) -> std::thread::JoinHandle<std::result::Result<T, TaskError<E>>>
-    // where
-    //     T: Send + 'static,
-    //     E: std::error::Error + Send + 'static,
-    //     F: Future<Output = std::result::Result<T, E>> + Send + 'static,
-    // {
-    //     std::thread::spawn(move || {
-    //         let flags = CloneFlags::from_bits_truncate(nix::libc::CLONE_NEWNET);
-    //         let fd = file.as_fd();
-    //
-    //         tracing::debug!(?fd, "settings namespace for thread");
-    //
-    //         nix::sched::setns(fd, flags)?;
-    //
-    //         // TODO: separate this, meaning spawn a thread and then expose channel for this.
-    //         // Question: is it possible to await between different runtimes? I don't think so. That
-    //         // is, sending a message on one runtime and wait in another for receiving it.
-    //
-    //         let rt = tokio::runtime::Builder::new_current_thread().build()?;
-    //         rt.block_on(task).map_err(TaskError::Task)
-    //     })
-    // }
 
     pub fn fd(&self) -> i32 {
         self.inner.file.as_fd().as_raw_fd()
