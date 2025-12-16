@@ -180,8 +180,8 @@ impl NetworkNamespaceInner {
             // TODO: tasks should have the [`rtnetlink::Handle`] as ctx.
             rt.block_on(async move {
                 while let Some(DynRequest { task, tx }) = rx.recv().await {
-                    debug_assert_eq!(after, current_netns().expect("to check current namespace"));
                     let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
+                    debug_assert_eq!(after, current_netns().expect("to check current namespace"));
 
                     let res = task.await;
                     if tx.send(res).is_err() {

@@ -23,6 +23,7 @@ use crate::{
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
     task::DynRequest,
+    tc::LinkImpairment,
     wrappers,
 };
 
@@ -39,6 +40,14 @@ pub trait PeerIdExt: Display + Copy {
 
     /// TODO: add docs.
     fn veth_address(self, subnet: Subnet) -> IpAddr;
+
+    fn veth_name(self) -> String {
+        format!("{MSG_SIM_LINK_PREFIX}{self}")
+    }
+
+    fn veth_br_name(self) -> String {
+        format!("{}-br", self.veth_name())
+    }
 }
 
 impl PeerIdExt for PeerId {
@@ -176,9 +185,9 @@ impl Network {
     /// Adds a peer to the network.
     pub async fn add_peer(&mut self) -> Result<PeerId> {
         let peer_id = PEER_ID_NEXT.load(Ordering::Relaxed);
-        let namespace_name = format!("{MSG_SIM_NAMESPACE_PREFIX}-{peer_id}");
-        let veth_name = Arc::new(format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}"));
-        let veth_br_name = Arc::new(format!("{MSG_SIM_LINK_PREFIX}-veth{peer_id}-br"));
+        let namespace_name = peer_id.namespace_name();
+        let veth_name = Arc::new(peer_id.veth_name());
+        let veth_br_name = Arc::new(peer_id.veth_br_name());
 
         let _span =
             tracing::debug_span!("add_peer", ?peer_id, %namespace_name, %veth_name, %veth_br_name)
@@ -258,6 +267,17 @@ impl Network {
             .receive()
             .await??;
 
+        // 6. Bring loopback up in peer namespace.
+        let handle = network_namespace.rtnetlink_handle.clone();
+        network_namespace
+            .task_sender
+            .submit(async move {
+                handle.link().set(LinkUnspec::new_with_name("lo").up().build()).execute().await
+            })
+            .await?
+            .receive()
+            .await??;
+
         let peer = Peer::new(peer_id, network_namespace);
         self.peers.insert(peer_id, peer);
         PEER_ID_NEXT.store(peer_id + 1, Ordering::Relaxed);
@@ -282,41 +302,34 @@ impl Network {
         Ok(rx)
     }
 
-    // /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
-    // /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
-    // /// which is [`Link::0`].
-    // pub fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
-    //     if !self.links.contains(&link) {
-    //         return Err(Error::LinkNotFound(link));
-    //     }
-    //
-    //     let _span = tracing::debug_span!("apply_impairment", ?link, ?impairment);
-    //
-    //     let peer = self.peers.get(&link.0).expect("to find peer, please report bug");
-    //     let veth = self
-    //         .peers
-    //         .get(&link.0)
-    //         .and_then(|peer| {
-    //             peer.namespace
-    //                 .devices
-    //                 .iter()
-    //                 .filter_map(|d| match d {
-    //                     NetworkDevice::Veth(v) => Some(v),
-    //                     _ => None,
-    //                 })
-    //                 .find(|v| v.id() == link.1)
-    //         })
-    //         .expect("to find veth device, please report bug");
-    //
-    //     let tc_commands = impairment.to_tc_commands(&veth.to_string());
-    //     let prefix = peer.namespace.prefix_command();
-    //
-    //     for tc_cmd in tc_commands {
-    //         command::Runner::by_str(&format!("{} {}", prefix, tc_cmd))?;
-    //     }
-    //
-    //     Ok(())
-    // }
+    /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
+    /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
+    /// which is [`Link::0`].
+    pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
+        let (p1, _) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
+            [Some(p1), Some(_p2)] => (p1, _p2),
+            [None, Some(_)] => return Err(Error::PeerNotFound(link.0)),
+            [Some(_), None] => return Err(Error::PeerNotFound(link.1)),
+            [None, None] => return Err(Error::PeerNotFound(link.0)),
+        };
+
+        let _span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
+
+        let handle = p1.namespace.rtnetlink_handle.clone();
+        let id = p1.id;
+        p1.namespace
+            .task_sender
+            .submit(async move {
+                let index = wrappers::if_nametoindex(&id.veth_name()).expect("to find dev").get();
+                // TODO: how to add netem?
+                handle.qdisc().replace(index as i32).root().handle(10, 0).execute().await
+            })
+            .await?
+            .receive()
+            .await??;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
