@@ -11,7 +11,7 @@ use crate::network::PeerId;
 pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
 
 /// A prefix to use to name all links created by this crate.
-pub const MSG_SIM_LINK_PREFIX: &str = "msg";
+pub const MSG_SIM_LINK_PREFIX: &str = "msg-veth";
 
 pub trait IpAddrExt {
     fn to_ipv6_mapped(&self) -> Ipv6Addr;
