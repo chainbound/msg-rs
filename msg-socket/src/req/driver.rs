@@ -4,7 +4,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll, ready},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use bytes::Bytes;
@@ -244,7 +244,7 @@ where
     fn reset_connection(&mut self) {
         self.conn_state = ConnectionState::Inactive {
             addr: self.addr.clone(),
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            backoff: ExponentialBackoff::new(self.options.backoff_duration, 16),
         };
     }
 }
