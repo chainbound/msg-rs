@@ -2,10 +2,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod command;
+pub mod dynch;
 pub mod ip;
 pub mod namespace;
 pub mod network;
-pub mod task;
 pub mod tc;
 pub mod wrappers;
 

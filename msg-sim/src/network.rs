@@ -20,9 +20,9 @@ use tokio::{
 
 use crate::{
     command,
+    dynch::DynRequest,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
-    task::DynRequest,
     tc::LinkImpairment,
     wrappers,
 };
