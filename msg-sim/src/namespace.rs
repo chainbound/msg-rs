@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::TryClone;
+use crate::dynch::{DynRequest, DynRequestSender};
 use crate::ip::NetworkDevice;
 use crate::namespace::helpers::current_netns;
-use crate::task::{DynRequest, DynRequestSender};
+use crate::{TryClone, dynch};
 
 // TODO: add more docs.
 mod helpers {
@@ -163,7 +163,7 @@ impl NetworkNamespaceInner {
     /// It will create a dedicated OS thread set with this network namespace, by calling
     /// `setns(2)`, which is thread-local.
     pub fn spawn(self) -> (std::thread::JoinHandle<Result<()>>, DynRequestSender) {
-        let (tx, mut rx) = mpsc::channel(8);
+        let (tx, mut rx) = dynch::channel(8);
 
         let handle = std::thread::spawn(move || {
             let fd = self.file.as_fd();
@@ -179,7 +179,8 @@ impl NetworkNamespaceInner {
 
             // TODO: tasks should have the [`rtnetlink::Handle`] as ctx.
             rt.block_on(async move {
-                while let Some(DynRequest { task, tx }) = rx.recv().await {
+                while let Some(req) = rx.recv().await {
+                    let (task, tx) = req.into_parts();
                     let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
                     debug_assert_eq!(after, current_netns().expect("to check current namespace"));
 
@@ -193,7 +194,7 @@ impl NetworkNamespaceInner {
             Ok(())
         });
 
-        (handle, DynRequestSender::new(tx))
+        (handle, tx)
     }
 }
 
