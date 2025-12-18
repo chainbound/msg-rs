@@ -87,7 +87,8 @@ async fn reqrep_works() {
 async fn reqrep_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let server_config = tcp_tls::config::Server::new(helpers::default_acceptor_builder().build());
+    let server_config =
+        tcp_tls::config::Server::new(helpers::default_acceptor_builder().build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 
@@ -119,7 +120,8 @@ async fn reqrep_tls_works() {
 async fn reqrep_tls_control_works() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let server_config = tcp_tls::config::Server::new(helpers::default_acceptor_builder().build());
+    let server_config =
+        tcp_tls::config::Server::new(helpers::default_acceptor_builder().build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 
@@ -159,7 +161,7 @@ async fn reqrep_tls_control_works() {
 
     // Now we don't set a trusted root certificate, and we swap the acceptor.
     let acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap().build();
-    rep.control(tcp_tls::Control::SwapAcceptor(acceptor)).await.unwrap();
+    rep.control(tcp_tls::Control::SwapAcceptor(acceptor.into())).await.unwrap();
     req.connect_sync(rep.local_addr().copied().unwrap());
 
     tokio::spawn(async move {
@@ -183,7 +185,7 @@ async fn reqrep_mutual_tls_works() {
     acceptor_builder.set_verify(
         openssl::ssl::SslVerifyMode::PEER | openssl::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
     );
-    let server_config = tcp_tls::config::Server::new(acceptor_builder.build());
+    let server_config = tcp_tls::config::Server::new(acceptor_builder.build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 

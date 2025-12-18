@@ -68,7 +68,7 @@ async fn main() {
     acceptor_builder.set_verify(
         openssl::ssl::SslVerifyMode::PEER | openssl::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
     );
-    let server_config = tcp_tls::config::Server::new(acceptor_builder.build());
+    let server_config = tcp_tls::config::Server::new(acceptor_builder.build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 

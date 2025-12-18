@@ -154,7 +154,7 @@ fn reqrep_multi_thread_tls(c: &mut Criterion) {
     );
 
     let rep = RepSocket::new(TcpTls::new_server(config::Server::new(
-        helpers::default_acceptor_builder().build(),
+        helpers::default_acceptor_builder().build().into(),
     )));
 
     let mut bench = PairBenchmark {

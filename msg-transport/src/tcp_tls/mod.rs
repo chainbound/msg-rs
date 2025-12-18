@@ -67,12 +67,12 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(acceptor: SslAcceptor) -> Self {
-        Self { listener: None, acceptor: ArcSwap::new(Arc::new(acceptor)) }
+    pub fn new(acceptor: Arc<SslAcceptor>) -> Self {
+        Self { listener: None, acceptor: ArcSwap::new(acceptor) }
     }
 
-    pub fn swap_acceptor(&mut self, acceptor: SslAcceptor) {
-        self.acceptor.swap(Arc::new(acceptor));
+    pub fn swap_acceptor(&mut self, acceptor: Arc<SslAcceptor>) {
+        self.acceptor.swap(acceptor);
     }
 }
 
@@ -199,7 +199,7 @@ pub enum Control {
     /// Allow to swap the currently used TLS acceptor with the provided one,
     /// keeping existing connections. One reason for using this could be to extend the current list
     /// of root certificates.
-    SwapAcceptor(SslAcceptor),
+    SwapAcceptor(Arc<SslAcceptor>),
 }
 
 #[async_trait::async_trait]
