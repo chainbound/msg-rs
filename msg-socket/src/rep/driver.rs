@@ -103,7 +103,7 @@ where
         loop {
             if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
                 let Some(result) = maybe_result.enter() else {
-                    warn!(?peer, "peer disconnected");
+                    debug!(?peer, "peer disconnected");
                     this.state.stats.specific.decrement_active_clients();
                     continue;
                 };
@@ -117,7 +117,7 @@ where
                         match try_decompress_payload(request.compression_type, request.msg) {
                             Ok(decompressed) => request.msg = decompressed,
                             Err(e) => {
-                                error!(?e, "failed to decompress message");
+                                debug!(?e, "failed to decompress message");
                                 continue;
                             }
                         }
@@ -128,7 +128,11 @@ where
                         };
                     }
                     Err(e) => {
-                        error!(?e, ?peer, "failed to receive message from peer");
+                        if e.is_connection_reset() {
+                            trace!(?peer, "connection reset")
+                        } else {
+                            error!(?e, ?peer, "failed to receive message from peer");
+                        }
                     }
                 }
 
@@ -167,7 +171,7 @@ where
                         );
                     }
                     Err(e) => {
-                        error!(?e, "failed to authenticate peer");
+                        debug!(?e, "failed to authenticate peer");
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -184,7 +188,7 @@ where
                         }
                     }
                     Err(e) => {
-                        error!(?e, "failed to accept incoming connection");
+                        debug!(?e, "failed to accept incoming connection");
 
                         // Active clients have already been incremented in the initial call to
                         // `poll_accept`, so we need to decrement them here.
@@ -486,7 +490,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         return Poll::Ready(Some(Ok(request).with_span(span)));
                     }
                     Poll::Ready(None) => {
-                        warn!("framed closed, sending and flushing leftover data if any");
+                        debug!("framed closed, sending and flushing leftover data if any");
 
                         if this.poll_shutdown(cx).is_ready() {
                             return Poll::Ready(None);

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{io, time::Duration};
 
 use bytes::Bytes;
 use msg_common::constants::KiB;
@@ -28,6 +28,17 @@ pub enum RepError {
     SocketClosed,
     #[error("Could not connect to any valid endpoints")]
     NoValidEndpoints,
+}
+
+impl RepError {
+    pub fn is_connection_reset(&self) -> bool {
+        match self {
+            Self::Io(e) | Self::Wire(msg_wire::reqrep::Error::Io(e)) => {
+                e.kind() == io::ErrorKind::ConnectionReset
+            }
+            _ => false,
+        }
+    }
 }
 
 /// The reply socket options.
