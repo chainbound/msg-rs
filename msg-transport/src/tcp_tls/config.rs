@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use openssl::ssl::{SslAcceptor, SslConnector};
 
@@ -27,11 +27,11 @@ impl Client {
 #[derive(Clone)]
 pub struct Server {
     /// The SSL acceptor for performing TLS handshakes with a client.
-    pub ssl_acceptor: SslAcceptor,
+    pub ssl_acceptor: Arc<SslAcceptor>,
 }
 
 impl Server {
-    pub fn new(ssl_acceptor: SslAcceptor) -> Self {
+    pub fn new(ssl_acceptor: Arc<SslAcceptor>) -> Self {
         Self { ssl_acceptor }
     }
 }

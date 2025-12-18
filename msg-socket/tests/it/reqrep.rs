@@ -6,6 +6,7 @@ use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
 };
+use openssl::ssl::{SslAcceptor, SslMethod};
 use tokio_stream::StreamExt;
 
 /// Helper functions.
@@ -86,7 +87,8 @@ async fn reqrep_works() {
 async fn reqrep_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let server_config = tcp_tls::config::Server::new(helpers::default_acceptor_builder().build());
+    let server_config =
+        tcp_tls::config::Server::new(helpers::default_acceptor_builder().build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 
@@ -112,6 +114,68 @@ async fn reqrep_tls_works() {
     assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }
 
+/// Test that changing the [`SslAcceptor`] at runtime works and results in not accepting the
+/// connection after modification.
+#[tokio::test]
+async fn reqrep_tls_control_works() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let server_config =
+        tcp_tls::config::Server::new(helpers::default_acceptor_builder().build().into());
+    let tcp_tls_server = TcpTls::new_server(server_config);
+    let mut rep = RepSocket::new(tcp_tls_server);
+
+    rep.bind("0.0.0.0:0").await.unwrap();
+
+    let domain = "localhost".to_string();
+    let ssl_connector = helpers::default_connector_builder().build();
+    let tcp_tls_client =
+        TcpTls::new_client(tcp_tls::config::Client::new(domain).with_ssl_connector(ssl_connector));
+    let mut req = ReqSocket::new(tcp_tls_client);
+
+    req.connect(rep.local_addr().unwrap()).await.unwrap();
+
+    // Happy case: the reply socket should receive one message, and then exit.
+    let handle = tokio::spawn(async move {
+        if let Some(request) = rep.next().await {
+            let msg = request.msg().clone();
+            request.respond(msg).unwrap();
+        }
+        rep
+    });
+
+    let hello = Bytes::from_static(b"hello");
+    let response = req.request(hello.clone()).await.unwrap();
+    assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
+
+    // By dropping the request socket, we terminate the task, and we can try the unhappy case with
+    // the configuration change.
+    drop(req);
+    let mut rep = handle.await.unwrap();
+
+    let domain = "localhost".to_string();
+    let ssl_connector = helpers::default_connector_builder().build();
+    let tcp_tls_client =
+        TcpTls::new_client(tcp_tls::config::Client::new(domain).with_ssl_connector(ssl_connector));
+    let mut req = ReqSocket::new(tcp_tls_client);
+
+    // Now we don't set a trusted root certificate, and we swap the acceptor.
+    let acceptor = SslAcceptor::mozilla_intermediate(SslMethod::tls()).unwrap().build();
+    rep.control(tcp_tls::Control::SwapAcceptor(acceptor.into())).await.unwrap();
+    req.connect_sync(rep.local_addr().copied().unwrap());
+
+    tokio::spawn(async move {
+        if let Some(request) = rep.next().await {
+            let msg = request.msg().clone();
+            request.respond(msg).unwrap();
+        }
+    });
+
+    // If we now try to send a message, it will hang because of connection didn't succeed.
+    let hello = Bytes::from_static(b"hello");
+    tokio::time::timeout(Duration::from_secs(1), req.request(hello.clone())).await.unwrap_err();
+}
+
 #[tokio::test]
 async fn reqrep_mutual_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
@@ -121,7 +185,7 @@ async fn reqrep_mutual_tls_works() {
     acceptor_builder.set_verify(
         openssl::ssl::SslVerifyMode::PEER | openssl::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
     );
-    let server_config = tcp_tls::config::Server::new(acceptor_builder.build());
+    let server_config = tcp_tls::config::Server::new(acceptor_builder.build().into());
     let tcp_tls_server = TcpTls::new_server(server_config);
     let mut rep = RepSocket::new(tcp_tls_server);
 

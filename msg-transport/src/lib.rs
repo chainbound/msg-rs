@@ -197,6 +197,9 @@ pub trait Transport<A: Address>: Send + Sync + Unpin + 'static {
     /// [`Transport::poll_accept`].
     type Accept: Future<Output = Result<Self::Io, Self::Error>> + Send + Unpin;
 
+    /// Control-plane messages that modify the runtime behavior of the transport.
+    type Control: Send + Sync + Unpin;
+
     /// Returns the local address this transport is bound to (if it is bound).
     fn local_addr(&self) -> Option<A>;
 
@@ -210,6 +213,10 @@ pub trait Transport<A: Address>: Send + Sync + Unpin + 'static {
     /// Poll for incoming connections. If an inbound connection is received, a future representing
     /// a pending inbound connection is returned. The future will resolve to [`Transport::Accept`].
     fn poll_accept(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Accept>;
+
+    /// Applies a control-plane message to the transport. It is expected to update internal state
+    /// only and should not perform long-running operations.
+    fn on_control(&mut self, _ctrl: Self::Control) {}
 }
 
 /// Extension trait for transports that provides additional methods.

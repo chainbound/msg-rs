@@ -108,6 +108,8 @@ impl Transport<PathBuf> for Ipc {
     type Stats = NoStats;
     type Io = IpcStream;
 
+    type Control = ();
+
     type Error = io::Error;
 
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;

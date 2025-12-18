@@ -95,6 +95,8 @@ impl Transport<SocketAddr> for Quic {
     type Stats = quinn::ConnectionStats;
     type Io = QuicStream;
 
+    type Control = ();
+
     type Error = Error;
 
     type Connect = BoxFuture<'static, Result<Self::Io, Self::Error>>;
