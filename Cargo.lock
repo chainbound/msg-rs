@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "msg"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "criterion",
@@ -927,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "derive_more",
  "futures",
@@ -938,14 +938,14 @@ dependencies = [
 
 [[package]]
 name = "msg-sim"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "pnet",
 ]
 
 [[package]]
 name = "msg-socket"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -989,7 +989,7 @@ dependencies = [
 
 [[package]]
 name = "msg-wire"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "bytes",
  "flate2",
