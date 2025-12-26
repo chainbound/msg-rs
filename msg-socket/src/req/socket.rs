@@ -1,20 +1,20 @@
-use arc_swap::Guard;
-use bytes::Bytes;
-use msg_common::span::WithSpan;
-use rustc_hash::FxHashMap;
 use std::{
     marker::PhantomData,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, atomic::Ordering},
-    time::Duration,
 };
+
+use arc_swap::Guard;
+use bytes::Bytes;
+use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::Framed;
 
+use msg_common::span::WithSpan;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
@@ -69,7 +69,10 @@ where
         // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
             addr,
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            backoff: ExponentialBackoff::new(
+                self.options.backoff_duration,
+                self.options.retry_attempts,
+            ),
         };
 
         self.spawn_driver(addr, transport, conn_state)
@@ -158,7 +161,10 @@ where
             // by the backend task as soon as the driver is spawned.
             ConnectionState::Inactive {
                 addr: endpoint.clone(),
-                backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+                backoff: ExponentialBackoff::new(
+                    self.options.backoff_duration,
+                    self.options.retry_attempts,
+                ),
             }
         };
 
@@ -189,11 +195,11 @@ where
 
         // Create connection manager
         let conn_manager = ConnManager::new(
+            Arc::clone(&self.options),
             transport,
             endpoint,
             conn_ctl,
             Arc::clone(&self.state.transport_stats),
-            self.options.auth_token.clone(),
             span.clone(),
         );
 

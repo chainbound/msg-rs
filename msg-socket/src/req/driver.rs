@@ -8,7 +8,6 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, SinkExt, StreamExt};
-use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -21,6 +20,7 @@ use crate::{
     req::{SocketState, conn_manager::ConnManager},
 };
 
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use msg_transport::{Address, Transport};
 use msg_wire::{
     compression::{Compressor, try_decompress_payload},
@@ -108,7 +108,7 @@ where
     /// Handle an incoming command from the socket frontend.
     fn on_send(&mut self, cmd: SendCommand) {
         let SendCommand { mut message, response } = cmd;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         // We want ot inherit the span from the socket frontend
         let span =

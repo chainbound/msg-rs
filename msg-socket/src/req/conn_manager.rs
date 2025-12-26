@@ -3,7 +3,6 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Duration,
 };
 
 use bytes::Bytes;
@@ -12,7 +11,7 @@ use msg_common::span::{EnterSpan as _, WithSpan};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use crate::{ConnectionState, ExponentialBackoff};
+use crate::{ConnectionState, ExponentialBackoff, ReqOptions};
 
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{auth, reqrep};
@@ -36,6 +35,8 @@ pub(crate) type ConnCtl<Io, S, A> = ConnectionState<Conn<Io, S, A>, ExponentialB
 
 /// Manages the connection lifecycle: connecting, reconnecting, and maintaining the connection.
 pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
+    /// Options inherited from the socket.
+    options: Arc<ReqOptions>,
     /// The connection task which handles the connection to the server.
     conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
@@ -47,8 +48,6 @@ pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
     addr: A,
     /// Transport stats for metering IO.
     transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
-    /// Authentication token for the connection.
-    auth_token: Option<Bytes>,
 
     /// A span to use for connection-related logging.
     span: tracing::Span,
@@ -90,21 +89,21 @@ where
     A: Address,
 {
     pub(crate) fn new(
+        options: Arc<ReqOptions>,
         transport: T,
         addr: A,
         conn_ctl: ConnCtl<T::Io, T::Stats, A>,
         transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
-        auth_token: Option<Bytes>,
         span: tracing::Span,
     ) -> Self {
-        Self { conn_task: None, conn_ctl, transport, addr, transport_stats, auth_token, span }
+        Self { options, conn_task: None, conn_ctl, transport, addr, transport_stats, span }
     }
 
     /// Start the connection task to the server, handling authentication if necessary.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
     fn try_connect(&mut self) {
         let connect = self.transport.connect(self.addr.clone());
-        let token = self.auth_token.clone();
+        let token = self.options.auth_token.clone();
 
         let task = async move {
             let io = connect.await?;
@@ -127,7 +126,10 @@ where
     pub(crate) fn reset_connection(&mut self) {
         self.conn_ctl = ConnectionState::Inactive {
             addr: self.addr.clone(),
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            backoff: ExponentialBackoff::new(
+                self.options.backoff_duration,
+                self.options.retry_attempts,
+            ),
         };
     }
 

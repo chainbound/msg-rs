@@ -1,13 +1,14 @@
-use arc_swap::ArcSwap;
-use bytes::Bytes;
-use msg_common::{constants::KiB, span::WithSpan};
 use std::{
     sync::{Arc, atomic::AtomicUsize},
     time::Duration,
 };
+
+use arc_swap::ArcSwap;
+use bytes::Bytes;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+use msg_common::{constants::KiB, span::WithSpan};
 use msg_wire::{
     compression::{CompressionType, Compressor},
     reqrep,
@@ -71,11 +72,11 @@ pub struct ReqOptions {
     /// Optional authentication token.
     auth_token: Option<Bytes>,
     /// Timeout duration for requests.
-    timeout: std::time::Duration,
+    timeout: Duration,
     /// Wether to block on initial connection to the target.
     blocking_connect: bool,
     /// The backoff duration for the underlying transport on reconnections.
-    backoff_duration: std::time::Duration,
+    backoff_duration: Duration,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
     retry_attempts: Option<usize>,
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
@@ -190,7 +191,7 @@ impl Default for ReqOptions {
             timeout: std::time::Duration::from_secs(5),
             blocking_connect: false,
             backoff_duration: Duration::from_millis(200),
-            retry_attempts: None,
+            retry_attempts: Some(24),
             min_compress_size: 8192,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
