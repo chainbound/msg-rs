@@ -106,7 +106,10 @@ where
             addr.clone(),
             ConnectionState::Inactive {
                 addr,
-                backoff: ExponentialBackoff::new(self.options.initial_backoff, 16),
+                backoff: ExponentialBackoff::new(
+                    self.options.initial_backoff,
+                    self.options.retry_attempts,
+                ),
             },
         );
     }

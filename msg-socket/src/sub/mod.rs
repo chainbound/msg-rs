@@ -66,6 +66,8 @@ pub struct SubOptions {
     read_buffer_size: usize,
     /// The initial backoff for reconnecting to a publisher.
     initial_backoff: Duration,
+    /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
+    retry_attempts: Option<usize>,
 }
 
 impl SubOptions {
@@ -95,6 +97,13 @@ impl SubOptions {
         self.initial_backoff = initial_backoff;
         self
     }
+
+    /// Sets the maximum number of retry attempts. If `None`, the connection will retry
+    /// indefinitely.
+    pub fn with_retry_attempts(mut self, retry_attempts: usize) -> Self {
+        self.retry_attempts = Some(retry_attempts);
+        self
+    }
 }
 
 impl Default for SubOptions {
@@ -104,6 +113,7 @@ impl Default for SubOptions {
             ingress_buffer_size: DEFAULT_BUFFER_SIZE,
             read_buffer_size: 8192,
             initial_backoff: Duration::from_millis(100),
+            retry_attempts: Some(24),
         }
     }
 }
