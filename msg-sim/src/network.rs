@@ -9,7 +9,16 @@ use std::{
     },
 };
 
-use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth};
+use futures::StreamExt as _;
+use nix::libc::{NLM_F_ACK, NLM_F_CREATE, NLM_F_REPLACE, NLM_F_REQUEST, TCA_OPTIONS};
+use rtnetlink::{
+    LinkBridge, LinkUnspec, LinkVeth,
+    packet_core::{DefaultNla, NetlinkMessage},
+    packet_route::{
+        RouteNetlinkMessage,
+        tc::{TcAttribute, TcHandle, TcMessage},
+    },
+};
 use tokio::{
     sync::{
         mpsc,
@@ -315,14 +324,78 @@ impl Network {
 
         let _span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
 
-        let handle = p1.namespace.rtnetlink_handle.clone();
+        let mut handle = p1.namespace.rtnetlink_handle.clone();
         let id = p1.id;
         p1.namespace
             .task_sender
             .submit(async move {
                 let index = wrappers::if_nametoindex(&id.veth_name()).expect("to find dev").get();
                 // TODO: how to add netem?
-                handle.qdisc().replace(index as i32).root().handle(10, 0).execute().await
+
+                tracing::debug!(?index, "found dev");
+
+                let mut tc_message = TcMessage::with_index(index as i32);
+                tc_message.header.parent = TcHandle::ROOT;
+                tc_message.header.handle = TcHandle::from(0x0001_0000);
+                tc_message.header.info = 0; // leave unset for qdisc
+
+                // Build tc-prio-qopt (fixed-header options blob)
+                let bands: u32 = 3;
+                let priomap: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+
+                let mut qopt = Vec::with_capacity(4 + priomap.len());
+                qopt.extend_from_slice(&bands.to_ne_bytes()); // native endian
+                qopt.extend_from_slice(&priomap);
+
+                tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
+                // IMPORTANT: send raw TCA_OPTIONS bytes, not nested TcOption NLAs
+                tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, qopt)));
+
+                let mut nl_req =
+                    NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
+                nl_req.header.flags =
+                    (NLM_F_CREATE | NLM_F_REPLACE | NLM_F_REQUEST | NLM_F_ACK) as u16;
+
+                tracing::error!("FLAGS = {:#x}", nl_req.header.flags);
+
+                let mut res = handle.request(nl_req).unwrap();
+                while let Some(res) = res.next().await {
+                    use rtnetlink::Error;
+                    use rtnetlink::packet_core::NetlinkPayload;
+                    if let NetlinkPayload::Error(err) = res.payload {
+                        tracing::error!(?err, "error");
+                        return Err(Error::NetlinkError(err));
+                    }
+                }
+
+                Ok(())
+
+                // // TODO: change protocol
+                // let flags = TcU32SelectorFlags::default();
+                // let mut selector = TcU32Selector::default();
+                // let mut key = TcU32Key::default();
+                // key.mask = u32::MAX;
+                // key.off = 16;
+                // key.offmask = 0;
+                // // What if it is an IPv6
+                // key.val = 0x0a000002;
+                // selector.nkeys = 1;
+                // selector.flags = flags;
+                // // NOTE: val is an IP address here
+                // selector.keys = vec![key];
+                // selector.offmask = 0;
+                // selector.offshift = 0;
+                // selector.off = 0;
+                // selector.offoff = 0;
+                // selector.hoff = 0;
+                // selector.hmask = 0;
+                //
+                // handle
+                //     .traffic_filter(5)
+                //     .add()
+                //     .protocol(ETH_P_IP as u16)
+                //     .parent(0x00010000)
+                //     .u32(&[TcFilterU32Option::Selector(selector)])
             })
             .await?
             .receive()
@@ -342,7 +415,8 @@ mod msg_sim_network {
 
     use crate::{
         ip::Subnet,
-        network::{Network, PeerIdExt},
+        network::{Link, Network, PeerIdExt},
+        tc::LinkImpairment,
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -405,5 +479,20 @@ mod msg_sim_network {
             .unwrap();
 
         tokio::try_join!(task1, task2).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apply_impairment_works() {
+        let _ = tracing_subscriber::fmt::try_init();
+        let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
+        let mut network = Network::new(subnet).await.unwrap();
+
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+
+        network
+            .apply_impairment(Link::new(peer_1, peer_2), LinkImpairment::default())
+            .await
+            .unwrap();
     }
 }
