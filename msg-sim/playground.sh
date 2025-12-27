@@ -65,15 +65,13 @@ sudo ip netns exec ns3 ip addr add 10.0.0.3/24 dev ns3-hub
 ##############################################
 echo "[+] Applying impairment ONLY for ns1 -> ns2"
 
-# Root qdisc
 sudo ip netns exec ns1 tc qdisc add dev ns1-hub root handle 1: prio
 
-# Netem qdisc for band 3
-sudo ip netns exec ns1 tc qdisc add dev ns1-hub parent 1:3 handle 30: netem loss 40%
+sudo ip netns exec ns1 tc qdisc add dev ns1-hub parent 1:3 \
+  netem loss 40% delay 40ms
 
-# Filter: match DESTINATION 10.0.0.2 only
-sudo ip netns exec ns1 tc filter add dev ns1-hub protocol ip parent 1: prio 3 u32 \
-  match ip dst 10.0.0.2/32 flowid 1:3
+sudo ip netns exec ns1 tc filter add dev ns1-hub protocol ip parent 1: \
+  u32 match ip dst 10.0.0.2/32 flowid 1:3
 
 ##############################################
 # 5. Instructions

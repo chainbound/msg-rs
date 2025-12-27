@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use rtnetlink::{
+    Handle,
     packet_core::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST, NetlinkMessage},
     packet_route::{
         RouteNetlinkMessage,
@@ -80,36 +81,41 @@ impl LinkImpairment {
     }
 }
 
-// async fn setup_tc_with_netem(
-//     handle: &rtnetlink::Handle,
-//     ifindex: i32,
-// ) -> Result<(), rtnetlink::Error> {
-//     // 1. Root prio qdisc (using existing API)
-//     handle
-//         .qdisc()
-//         .add(ifindex)
-//         .root()
-//         .handle(1, 0)
-//         .message_mut() // Get mutable reference to message
-//         .attributes
-//         .push(TcAttribute::Kind("prio".to_string()));
-//     handle.qdisc().add(ifindex).root().handle(1, 0).execute().await?;
-//
-//     // 2. Netem qdisc with loss (raw approach)
+fn netem_loss_probability(percent: f64) -> u32 {
+    ((percent / 100.0) * (u32::MAX as f64)) as u32
+}
+
+// async fn setup_tc_with_netem(handle: &Handle, ifindex: i32) -> Result<(), rtnetlink::Error> {
+//     // === Build TcMessage ===
 //     let mut message = TcMessage::with_index(ifindex);
-//     message.header.parent = 0x00010003.into(); // 1:3
-//     message.header.handle = 0x001e0000.into(); // 30:
+//
+//     // parent 1:3
+//     message.header.parent = 0x0001_0003u32.into();
+//
+//     // handle 30:
+//     message.header.handle = 0x001e_0000u32.into();
+//
+//     // tc qdisc kind
 //     message.attributes.push(TcAttribute::Kind("netem".to_string()));
 //
-//     // Would need netem-specific option structures here
-//     message.attributes.push(TcAttribute::Options(vec![]));
+//     // === Build TCA_OPTIONS ===
+//     let loss = netem_loss_probability(40.0);
 //
+//     let options = vec![TcAttribute::NetemLoss(loss)];
+//
+//     message.attributes.push(TcAttribute::Options(options));
+//
+//     // === Wrap into netlink message ===
 //     let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(message));
+//
 //     req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
 //
+//     // === Send ===
 //     let mut response = handle.request(req)?;
-//     while let Some(msg) = response.next().await {
-//         try_nl!(msg);
+//
+//     while let Some(msg) = response.try_next().await? {
+//         // ACK / ERROR handled here
+//         msg.payload.inner_error().map_err(|e| rtnetlink::Error::NetlinkError(e))?;
 //     }
 //
 //     Ok(())

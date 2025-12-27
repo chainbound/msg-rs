@@ -241,29 +241,29 @@ impl NetworkNamespace {
     }
 }
 
-impl Drop for NetworkNamespace {
-    fn drop(&mut self) {
-        let namespace = self.inner.name.clone();
-
-        let task = async {
-            if let Err(e) = rtnetlink::NetworkNamespace::del(namespace.clone()).await {
-                tracing::error!(?e, ?namespace, "failed to delete network namespace");
-            }
-        };
-
-        // If we are *inside* a Tokio runtime, we must use `block_in_place`
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(|| {
-                let handle = tokio::runtime::Handle::current();
-
-                handle.block_on(task)
-            });
-            return;
-        }
-        // If we are NOT inside a runtime, we can safely create one
-        let rt =
-            tokio::runtime::Runtime::new().expect("failed to build temporary runtime for cleanup");
-
-        rt.block_on(task)
-    }
-}
+// impl Drop for NetworkNamespace {
+//     fn drop(&mut self) {
+//         let namespace = self.inner.name.clone();
+//
+//         let task = async {
+//             if let Err(e) = rtnetlink::NetworkNamespace::del(namespace.clone()).await {
+//                 tracing::error!(?e, ?namespace, "failed to delete network namespace");
+//             }
+//         };
+//
+//         // If we are *inside* a Tokio runtime, we must use `block_in_place`
+//         if tokio::runtime::Handle::try_current().is_ok() {
+//             tokio::task::block_in_place(|| {
+//                 let handle = tokio::runtime::Handle::current();
+//
+//                 handle.block_on(task)
+//             });
+//             return;
+//         }
+//         // If we are NOT inside a runtime, we can safely create one
+//         let rt =
+//             tokio::runtime::Runtime::new().expect("failed to build temporary runtime for cleanup");
+//
+//         rt.block_on(task)
+//     }
+// }
