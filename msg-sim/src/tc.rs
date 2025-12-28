@@ -1,122 +1,164 @@
-use std::time::Duration;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use futures::StreamExt as _;
-use rtnetlink::{
-    Handle,
-    packet_core::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST, NetlinkMessage},
-    packet_route::{
-        RouteNetlinkMessage,
-        tc::{TcAttribute, TcMessage},
-    },
-    try_nl,
+use rtnetlink::packet_core::NetlinkMessage;
+use rtnetlink::packet_route::tc::TcFilterFlowerOption;
+use rtnetlink::packet_route::{
+    RouteNetlinkMessage,
+    tc::{TcAttribute, TcHandle, TcMessage, TcOption},
 };
+
+use rtnetlink::packet_core::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
+
+const ETH_P_IP: u16 = nix::libc::ETH_P_IP as u16;
+const ETH_P_IPV6: u16 = nix::libc::ETH_P_IPV6 as u16;
 
 /// The impairments that can be applied to a network link.
 ///
-/// Each field corresponds to a feature supported by Linux `tc`.
-/// None = the impairment is not applied.
-#[derive(Debug, Clone, Default)]
+/// Each field corresponds to a feature supported by Linux `netem`.
+///
+/// TODO: add support for bandwidth, burst and custom buffer sizes.
+///
+/// For netem compatibility, it is important the fields are in this exact order.
+///
+/// From <linux/pkt_sched.h>:
+///
+/// ```c
+/// struct tc_netem_qopt {
+///     __u32 latency;
+///     __u32 limit;
+///     __u32 loss;
+///     __u32 gap;
+///     __u32 duplicate;
+///     __u32 jitter;
+/// };
+/// ```
+#[derive(Debug, Clone, Copy)]
 pub struct LinkImpairment {
-    /// Latency to introduce (applied by the netem qdisc).
-    pub latency: Option<Duration>,
-    /// Maximum bandwidth in kilobits per second (applied by TBF).
-    pub bandwidth_kbps: Option<u64>,
-    /// Maximum allowed burst size in kilobits.
-    pub burst_kbit: Option<u64>,
-    /// Maximum buffer (queue) size in bytes.
-    pub buffer_size_bytes: Option<u64>,
-    /// Probability of packet loss, in percent (applied by netem).
-    pub packet_loss_rate_percent: Option<f64>,
+    /// Latency to introduce, in microseconds.
+    pub latency: u32,
+    /// fifo limit (packets).
+    pub limit: u32,
+    /// Packet loss.
+    pub loss: u32,
+    /// Re-ordering gap.
+    pub gap: u32,
+    /// Random packet duplication.
+    pub duplicate: u32,
+    /// Random jitter, in microseconds.
+    pub jitter: u32,
 }
 
-impl LinkImpairment {
-    pub fn with_latency(mut self, duration: Duration) -> Self {
-        self.latency = Some(duration);
-        self
-    }
-
-    pub fn with_bandwidth_kbps(mut self, kbps: u64) -> Self {
-        self.bandwidth_kbps = Some(kbps);
-        self
-    }
-
-    pub fn with_burst_kbit(mut self, burst: u64) -> Self {
-        self.burst_kbit = Some(burst);
-        self
-    }
-
-    pub fn with_buffer_size_bytes(mut self, bytes: u64) -> Self {
-        self.buffer_size_bytes = Some(bytes);
-        self
-    }
-
-    pub fn with_packet_loss_rate_percent(mut self, pct: f64) -> Self {
-        self.packet_loss_rate_percent = Some(pct);
-        self
+impl Default for LinkImpairment {
+    fn default() -> Self {
+        Self {
+            latency: 0,
+            limit: 1_000, // netem default limit
+            loss: 0,
+            gap: 0,
+            duplicate: 0,
+            jitter: 0,
+        }
     }
 }
 
 impl LinkImpairment {
-    /// TODO: add tbf support for burst_kbit, buffer_size and bandwidth_kbps
-    pub fn to_tc_commands(&self, iface: &str) -> Vec<String> {
-        let mut cmds = Vec::new();
+    pub fn loss_probability(percent: f64) -> u32 {
+        (percent / 100.0 * u32::MAX as f64) as u32
+    }
 
-        // 1. Construct root netem parameters (delay, loss, etc.)
-        let mut netem = Vec::new();
-
-        if let Some(lat) = self.latency {
-            netem.push(format!("delay {}ms", lat.as_millis()));
-        }
-        if let Some(loss) = self.packet_loss_rate_percent {
-            netem.push(format!("loss {}%", loss));
-        }
-
-        // 2. Install root netem
-        cmds.push(format!(
-            "tc qdisc replace dev {iface} root handle 10: netem {}",
-            netem.join(" ")
-        ));
-
-        cmds
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut vec = Vec::with_capacity(4 * 6);
+        vec.extend_from_slice(&self.latency.to_ne_bytes());
+        vec.extend_from_slice(&self.limit.to_ne_bytes());
+        vec.extend_from_slice(&self.loss.to_ne_bytes());
+        vec.extend_from_slice(&self.gap.to_ne_bytes());
+        vec.extend_from_slice(&self.duplicate.to_ne_bytes());
+        vec.extend_from_slice(&self.jitter.to_ne_bytes());
+        vec
     }
 }
 
-fn netem_loss_probability(percent: f64) -> u32 {
-    ((percent / 100.0) * (u32::MAX as f64)) as u32
+fn ipv4_mask(prefix_len: u8) -> Ipv4Addr {
+    let mask_u32 = u32::MAX << (32 - prefix_len);
+    Ipv4Addr::from(mask_u32)
 }
 
-// async fn setup_tc_with_netem(handle: &Handle, ifindex: i32) -> Result<(), rtnetlink::Error> {
-//     // === Build TcMessage ===
-//     let mut message = TcMessage::with_index(ifindex);
-//
-//     // parent 1:3
-//     message.header.parent = 0x0001_0003u32.into();
-//
-//     // handle 30:
-//     message.header.handle = 0x001e_0000u32.into();
-//
-//     // tc qdisc kind
-//     message.attributes.push(TcAttribute::Kind("netem".to_string()));
-//
-//     // === Build TCA_OPTIONS ===
-//     let loss = netem_loss_probability(40.0);
-//
-//     let options = vec![TcAttribute::NetemLoss(loss)];
-//
-//     message.attributes.push(TcAttribute::Options(options));
-//
-//     // === Wrap into netlink message ===
-//     let mut req = NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(message));
-//
-//     req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
-//
-//     // === Send ===
-//     let mut response = handle.request(req)?;
-//
-//     while let Some(msg) = response.try_next().await? {
-//         // ACK / ERROR handled here
-//         msg.payload.inner_error().map_err(|e| rtnetlink::Error::NetlinkError(e))?;
-//     }
-//
-//     Ok(())
-// }
+fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
+    let mask_u128 = u128::MAX << (128 - prefix_len);
+    Ipv6Addr::from(mask_u128)
+}
+
+/// Creates an RTM_NEWTFILTER request that classifies packets by destination IP
+/// (IPv4 or IPv6) into `classid` (e.g. 1:3 under a prio qdisc).
+///
+/// - `ifindex`: interface index of dev (ns1-hub)
+/// - `parent`: the qdisc handle you attach the filter to (e.g. 1:0 => 0x0001_0000)
+/// - `pref`: filter preference/priority (like `prio`/`pref` in tc); 0 is fine if you
+///   don't care about ordering.
+/// - `dst`: the destination IP to match
+/// - `prefix_len`: /32, /128, etc.
+/// - `classid`: the class you want to direct into (e.g. 1:3 => 0x0001_0003)
+pub fn build_flower_dst_filter_add_request(
+    interface_index: i32,
+    parent: TcHandle,
+    pref: u16,
+    dst: IpAddr,
+    prefix_len: u8,
+    classid: u32,
+) -> NetlinkMessage<RouteNetlinkMessage> {
+    // Pick protocol and build the family-specific flower keys.
+    let (proto_ethertype, match_opts): (u16, Vec<TcOption>) = match dst {
+        IpAddr::V4(v4) => {
+            let mask = ipv4_mask(prefix_len);
+            (
+                ETH_P_IP,
+                vec![
+                    TcOption::Flower(TcFilterFlowerOption::Ipv4Dst(v4)),
+                    TcOption::Flower(TcFilterFlowerOption::Ipv4DstMask(mask)),
+                ],
+            )
+        }
+        IpAddr::V6(v6) => {
+            let mask = ipv6_mask(prefix_len);
+            (
+                ETH_P_IPV6,
+                vec![
+                    TcOption::Flower(TcFilterFlowerOption::Ipv6Dst(v6)),
+                    TcOption::Flower(TcFilterFlowerOption::Ipv6DstMask(mask)),
+                ],
+            )
+        }
+    };
+
+    let mut tc_msg = TcMessage::with_index(interface_index);
+    tc_msg.header.parent = parent;
+    tc_msg.header.handle = TcHandle::from(0u32); // kernel can auto-assign if you don't care
+    tc_msg.header.info = ((pref as u32) << 16) | (proto_ethertype.to_be() as u32);
+
+    // TCA_KIND = "flower"
+    tc_msg.attributes.push(TcAttribute::Kind("flower".to_string()));
+
+    // Build TCA_OPTIONS (flower options)
+    //
+    // iproute2 always includes:
+    // - CLASSID (flowid)
+    // - FLAGS (often 0)
+    // - KEY_ETH_TYPE (derived from protocol)
+    // plus the actual match keys (IPv4/IPv6 dst + mask).
+    let opts: Vec<TcOption> = [
+        vec![
+            TcOption::Flower(TcFilterFlowerOption::ClassId(classid)),
+            TcOption::Flower(TcFilterFlowerOption::Flags(0)),
+            TcOption::Flower(TcFilterFlowerOption::EthType(proto_ethertype)),
+        ],
+        match_opts,
+    ]
+    .concat();
+
+    tc_msg.attributes.push(TcAttribute::Options(opts));
+
+    let mut nl_req = NetlinkMessage::from(RouteNetlinkMessage::NewTrafficFilter(tc_msg));
+    nl_req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL;
+
+    nl_req
+}
