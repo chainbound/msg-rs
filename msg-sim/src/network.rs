@@ -10,7 +10,7 @@ use std::{
 };
 
 use futures::StreamExt as _;
-use nix::libc::{NLM_F_ACK, NLM_F_CREATE, NLM_F_REPLACE, NLM_F_REQUEST, TCA_OPTIONS};
+use nix::libc::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REPLACE, NLM_F_REQUEST, TCA_OPTIONS};
 use rtnetlink::{
     LinkBridge, LinkUnspec, LinkVeth,
     packet_core::{DefaultNla, NetlinkMessage},
@@ -26,15 +26,18 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::Instrument as _;
 
 use crate::{
     command,
     dynch::DynRequest,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
-    tc::LinkImpairment,
+    tc::{LinkImpairment, build_flower_dst_filter_add_request},
     wrappers,
 };
+
+use rtnetlink::packet_core::NetlinkPayload;
 
 static PEER_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
@@ -212,20 +215,25 @@ impl Network {
             .await
             .inspect_err(|e| tracing::debug!(?e, "failed to add link"))?;
 
-        // 2. Set the first device up, and move it to peer namespace
+        // 2. Move devices to corresponding namespaces.
+        self.rtnetlink_handle
+            .link()
+            .set(LinkUnspec::new_with_name(&veth_name).setns_by_fd(network_namespace.fd()).build())
+            .execute()
+            .await
+            .inspect_err(|e| tracing::debug!(?e, "failed to set device in namespace"))?;
         self.rtnetlink_handle
             .link()
             .set(
-                LinkUnspec::new_with_name(&veth_name)
-                    .up()
-                    .setns_by_fd(network_namespace.fd())
+                LinkUnspec::new_with_name(&veth_br_name)
+                    .setns_by_fd(self.network_hub_namespace.fd())
                     .build(),
             )
             .execute()
             .await
-            .inspect_err(|e| tracing::debug!(?e, "failed to set device up in namespace"))?;
+            .inspect_err(|e| tracing::debug!(?e, "failed to set link end in hub namespace"))?;
 
-        // 3. Add IP address to first device.
+        // 3. Bring first device up, and assign IP address. Lastly, bring loopback up.
         let address = peer_id.veth_address(self.subnet);
         let mask = self.subnet.netmask;
         let v = veth_name.clone();
@@ -237,28 +245,19 @@ impl Network {
                 tracing::debug!(?address, ?mask, dev = ?v, "adding address to device");
                 let index = wrappers::if_nametoindex(&v).expect("to find device").get();
 
-                handle.address().add(index, address, mask).execute().await
+                handle
+                    .link()
+                    .set(LinkUnspec::new_with_name(&veth_name).up().build())
+                    .execute()
+                    .await?;
+                handle.address().add(index, address, mask).execute().await?;
+                handle.link().set(LinkUnspec::new_with_name("lo").up().build()).execute().await
             })
             .await?
             .receive()
             .await??;
 
-        // 4. Set the second device up, and move it to hub namespace
-        self.rtnetlink_handle
-            .link()
-            .set(
-                LinkUnspec::new_with_name(&veth_br_name)
-                    .up()
-                    .setns_by_fd(self.network_hub_namespace.fd())
-                    .build(),
-            )
-            .execute()
-            .await
-            .inspect_err(|e| {
-                tracing::debug!(?e, "failed to set link end up in namespace with bridge controller")
-            })?;
-
-        // 5. Set second device controlled by hub.
+        // 4. Set second device controlled by hub and up.
         let handle = self.network_hub_namespace.rtnetlink_handle.clone();
         self.network_hub_namespace
             .task_sender
@@ -268,20 +267,14 @@ impl Network {
 
                 handle
                     .link()
-                    .set(LinkUnspec::new_with_name(&veth_br_name).up().controller(index).build())
+                    .set(LinkUnspec::new_with_name(&veth_br_name).controller(index).build())
+                    .execute()
+                    .await?;
+                handle
+                    .link()
+                    .set(LinkUnspec::new_with_name(&veth_br_name).up().build())
                     .execute()
                     .await
-            })
-            .await?
-            .receive()
-            .await??;
-
-        // 6. Bring loopback up in peer namespace.
-        let handle = network_namespace.rtnetlink_handle.clone();
-        network_namespace
-            .task_sender
-            .submit(async move {
-                handle.link().set(LinkUnspec::new_with_name("lo").up().build()).execute().await
             })
             .await?
             .receive()
@@ -315,88 +308,102 @@ impl Network {
     /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
     /// which is [`Link::0`].
     pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
-        let (p1, _) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
-            [Some(p1), Some(_p2)] => (p1, _p2),
+        let (p1, p2) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
+            [Some(p1), Some(p2)] => (p1, p2),
             [None, Some(_)] => return Err(Error::PeerNotFound(link.0)),
             [Some(_), None] => return Err(Error::PeerNotFound(link.1)),
             [None, None] => return Err(Error::PeerNotFound(link.0)),
         };
 
-        let _span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
+        let span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
 
         let mut handle = p1.namespace.rtnetlink_handle.clone();
         let id = p1.id;
+        let p2_id = p2.id;
+        let subnet = self.subnet;
+
         p1.namespace
             .task_sender
-            .submit(async move {
-                let index = wrappers::if_nametoindex(&id.veth_name()).expect("to find dev").get();
-                // TODO: how to add netem?
+            .submit(
+                async move {
+                    let index =
+                        wrappers::if_nametoindex(&id.veth_name()).expect("to find dev").get();
 
-                tracing::debug!(?index, "found dev");
+                    let mut tc_message = TcMessage::with_index(index as i32);
+                    tc_message.header.parent = TcHandle::ROOT;
+                    tc_message.header.handle = TcHandle::from(0x0001_0000);
 
-                let mut tc_message = TcMessage::with_index(index as i32);
-                tc_message.header.parent = TcHandle::ROOT;
-                tc_message.header.handle = TcHandle::from(0x0001_0000);
-                tc_message.header.info = 0; // leave unset for qdisc
+                    // Build tc-prio-qopt (fixed-header options blob)
+                    let bands: u32 = 3;
+                    let priomap: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
 
-                // Build tc-prio-qopt (fixed-header options blob)
-                let bands: u32 = 3;
-                let priomap: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+                    let mut qopt = Vec::with_capacity(4 + priomap.len());
+                    qopt.extend_from_slice(&bands.to_ne_bytes()); // native endian
+                    qopt.extend_from_slice(&priomap);
 
-                let mut qopt = Vec::with_capacity(4 + priomap.len());
-                qopt.extend_from_slice(&bands.to_ne_bytes()); // native endian
-                qopt.extend_from_slice(&priomap);
+                    tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
+                    tc_message
+                        .attributes
+                        .push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, qopt)));
 
-                tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
-                // IMPORTANT: send raw TCA_OPTIONS bytes, not nested TcOption NLAs
-                tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, qopt)));
+                    let mut nl_req =
+                        NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
+                    nl_req.header.flags =
+                        (NLM_F_CREATE | NLM_F_REPLACE | NLM_F_REQUEST | NLM_F_ACK) as u16;
 
-                let mut nl_req =
-                    NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
-                nl_req.header.flags =
-                    (NLM_F_CREATE | NLM_F_REPLACE | NLM_F_REQUEST | NLM_F_ACK) as u16;
-
-                tracing::error!("FLAGS = {:#x}", nl_req.header.flags);
-
-                let mut res = handle.request(nl_req).unwrap();
-                while let Some(res) = res.next().await {
-                    use rtnetlink::Error;
-                    use rtnetlink::packet_core::NetlinkPayload;
-                    if let NetlinkPayload::Error(err) = res.payload {
-                        tracing::error!(?err, "error");
-                        return Err(Error::NetlinkError(err));
+                    let mut res = handle.request(nl_req).unwrap();
+                    while let Some(res) = res.next().await {
+                        if let NetlinkPayload::Error(e) = res.payload {
+                            tracing::debug!(?e, "failed to create prio qdisc");
+                            return Err(rtnetlink::Error::NetlinkError(e));
+                        }
                     }
+
+                    let mut tc_message = TcMessage::with_index(index as i32);
+                    tc_message.header.parent = TcHandle::from(0x0001_0003); // Band 3
+                    tc_message.header.handle = TcHandle::from(0x0003_0000);
+
+                    tc_message.attributes.push(TcAttribute::Kind("netem".to_string()));
+                    // IMPORTANT: send raw TCA_OPTIONS bytes, not nested TcOption NLAs
+                    tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(
+                        TCA_OPTIONS,
+                        impairment.to_bytes(),
+                    )));
+
+                    let mut nl_req =
+                        NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
+                    nl_req.header.flags =
+                        (NLM_F_CREATE | NLM_F_EXCL | NLM_F_REQUEST | NLM_F_ACK) as u16;
+
+                    let mut res = handle.request(nl_req).unwrap();
+                    while let Some(res) = res.next().await {
+                        if let NetlinkPayload::Error(e) = res.payload {
+                            tracing::debug!(?e, "failed to add netem");
+                            return Err(rtnetlink::Error::NetlinkError(e));
+                        }
+                    }
+
+                    let nl_req = build_flower_dst_filter_add_request(
+                        index as i32,
+                        TcHandle::from(0x0001_0000),
+                        0,
+                        p2_id.veth_address(subnet),
+                        32,
+                        0x0001_0003,
+                    );
+
+                    let mut res = handle.request(nl_req).unwrap();
+                    while let Some(msg) = res.next().await {
+                        if let NetlinkPayload::Error(e) = msg.payload {
+                            tracing::debug!(?e, "failed to add filter");
+                            return Err(rtnetlink::Error::NetlinkError(e));
+                        }
+                    }
+
+                    Ok(())
                 }
-
-                Ok(())
-
-                // // TODO: change protocol
-                // let flags = TcU32SelectorFlags::default();
-                // let mut selector = TcU32Selector::default();
-                // let mut key = TcU32Key::default();
-                // key.mask = u32::MAX;
-                // key.off = 16;
-                // key.offmask = 0;
-                // // What if it is an IPv6
-                // key.val = 0x0a000002;
-                // selector.nkeys = 1;
-                // selector.flags = flags;
-                // // NOTE: val is an IP address here
-                // selector.keys = vec![key];
-                // selector.offmask = 0;
-                // selector.offshift = 0;
-                // selector.off = 0;
-                // selector.offoff = 0;
-                // selector.hoff = 0;
-                // selector.hmask = 0;
-                //
-                // handle
-                //     .traffic_filter(5)
-                //     .add()
-                //     .protocol(ETH_P_IP as u16)
-                //     .parent(0x00010000)
-                //     .u32(&[TcFilterU32Option::Selector(selector)])
-            })
+                .instrument(span.clone()),
+            )
             .await?
             .receive()
             .await??;
@@ -489,10 +496,15 @@ mod msg_sim_network {
 
         let peer_1 = network.add_peer().await.unwrap();
         let peer_2 = network.add_peer().await.unwrap();
+        let _peer_3 = network.add_peer().await.unwrap();
 
-        network
-            .apply_impairment(Link::new(peer_1, peer_2), LinkImpairment::default())
-            .await
-            .unwrap();
+        let impairment = LinkImpairment {
+            loss: LinkImpairment::loss_probability(50.0),
+            jitter: 1_000_000,
+            latency: 4 * 1_000_000,
+            duplicate: LinkImpairment::loss_probability(50.0),
+            ..Default::default()
+        };
+        network.apply_impairment(Link::new(peer_1, peer_2), impairment).await.unwrap();
     }
 }
