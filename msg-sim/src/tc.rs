@@ -2,7 +2,8 @@ use std::io::{self, Read as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
 
-use rtnetlink::packet_core::NetlinkMessage;
+use nix::libc::TCA_OPTIONS;
+use rtnetlink::packet_core::{DefaultNla, NLM_F_REPLACE, NetlinkMessage};
 use rtnetlink::packet_route::tc::TcFilterFlowerOption;
 use rtnetlink::packet_route::{
     RouteNetlinkMessage,
@@ -154,6 +155,99 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
     Ipv6Addr::from(mask_u128)
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QdiscRequestInner {
+    pub interface_index: i32,
+    pub parent: TcHandle,
+    pub handle: TcHandle,
+}
+impl QdiscRequestInner {
+    pub fn new(index: i32) -> Self {
+        Self { interface_index: index, parent: TcHandle::ROOT, handle: TcHandle::default() }
+    }
+
+    pub fn with_parent(mut self, parent: TcHandle) -> Self {
+        self.parent = parent;
+        self
+    }
+
+    pub fn with_handle(mut self, handle: TcHandle) -> Self {
+        self.handle = handle;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QdiscPrioRequest {
+    pub inner: QdiscRequestInner,
+    pub bands: u32,
+    pub priomap: [u8; 16],
+}
+
+impl QdiscPrioRequest {
+    pub fn new(inner: QdiscRequestInner) -> Self {
+        Self { inner, bands: DEFAULT_PRIORITY_BANDS, priomap: DEFAULT_PRIORITY_MAP }
+    }
+
+    pub fn with_bands(mut self, bands: u32) -> Self {
+        self.bands = bands;
+        self
+    }
+
+    pub fn with_priomap(mut self, priomap: [u8; 16]) -> Self {
+        self.priomap = priomap;
+        self
+    }
+
+    pub fn build(self) -> NetlinkMessage<RouteNetlinkMessage> {
+        let mut tc_message = TcMessage::with_index(self.inner.interface_index);
+        tc_message.header.parent = TcHandle::ROOT;
+        tc_message.header.handle = TcHandle::from(0x0001_0000);
+
+        let mut qopt = Vec::new();
+        qopt.extend_from_slice(&DEFAULT_PRIORITY_BANDS.to_ne_bytes());
+        qopt.extend_from_slice(&DEFAULT_PRIORITY_MAP);
+
+        tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
+        tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, qopt)));
+
+        let mut nl_req = NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
+        nl_req.header.flags = NLM_F_CREATE | NLM_F_REPLACE | NLM_F_REQUEST | NLM_F_ACK;
+
+        nl_req
+    }
+}
+
+pub struct QDiscNetemRequest {
+    pub inner: QdiscRequestInner,
+    pub impairment: LinkImpairment,
+}
+
+impl QDiscNetemRequest {
+    pub fn new(inner: QdiscRequestInner, impairment: LinkImpairment) -> Self {
+        Self { inner, impairment }
+    }
+
+    pub fn build(mut self) -> NetlinkMessage<RouteNetlinkMessage> {
+        let mut tc_message = TcMessage::with_index(self.inner.interface_index);
+        tc_message.header.parent = self.inner.parent;
+        tc_message.header.handle = self.inner.handle;
+
+        self.impairment.latency = (self.impairment.latency as f64 * *TICK_IN_USEC) as u32;
+        self.impairment.jitter = (self.impairment.jitter as f64 * *TICK_IN_USEC) as u32;
+
+        tc_message.attributes.push(TcAttribute::Kind("netem".to_string()));
+        tc_message
+            .attributes
+            .push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, self.impairment.to_bytes())));
+
+        let mut nl_req = NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
+        nl_req.header.flags = NLM_F_CREATE | NLM_F_EXCL | NLM_F_REQUEST | NLM_F_ACK;
+
+        nl_req
+    }
+}
+
 /// Creates an RTM_NEWTFILTER request that classifies packets by destination IP
 /// (IPv4 or IPv6) into `classid` (e.g. 1:3 under a prio qdisc).
 ///
@@ -164,67 +258,90 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
 /// - `dst`: the destination IP to match
 /// - `prefix_len`: /32, /128, etc.
 /// - `classid`: the class you want to direct into (e.g. 1:3 => 0x0001_0003)
-pub fn build_flower_dst_filter_add_request(
-    interface_index: i32,
-    parent: TcHandle,
-    pref: u16,
-    dst: IpAddr,
-    prefix_len: u8,
-    classid: u32,
-) -> NetlinkMessage<RouteNetlinkMessage> {
-    // Pick protocol and build the family-specific flower keys.
-    let (proto_ethertype, match_opts): (u16, Vec<TcOption>) = match dst {
-        IpAddr::V4(v4) => {
-            let mask = ipv4_mask(prefix_len);
-            (
-                ETH_P_IP,
-                vec![
-                    TcOption::Flower(TcFilterFlowerOption::Ipv4Dst(v4)),
-                    TcOption::Flower(TcFilterFlowerOption::Ipv4DstMask(mask)),
-                ],
-            )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FlowerFilterRequest {
+    pub inner: QdiscRequestInner,
+    pub destination: IpAddr,
+    pub prefix: u8,
+    pub class_id: u32,
+}
+
+impl FlowerFilterRequest {
+    pub fn new(inner: QdiscRequestInner, destination: IpAddr) -> Self {
+        Self {
+            class_id: (inner.parent.major as u32) << 16 | 0x0003,
+            inner,
+            destination,
+            prefix: 32,
+            // Priority band 3.
         }
-        IpAddr::V6(v6) => {
-            let mask = ipv6_mask(prefix_len);
-            (
-                ETH_P_IPV6,
-                vec![
-                    TcOption::Flower(TcFilterFlowerOption::Ipv6Dst(v6)),
-                    TcOption::Flower(TcFilterFlowerOption::Ipv6DstMask(mask)),
-                ],
-            )
-        }
-    };
+    }
 
-    let mut tc_msg = TcMessage::with_index(interface_index);
-    tc_msg.header.parent = parent;
-    tc_msg.header.handle = TcHandle::from(0u32); // kernel can auto-assign if you don't care
-    tc_msg.header.info = ((pref as u32) << 16) | (proto_ethertype.to_be() as u32);
+    pub fn with_prefix(mut self, prefix: u8) -> Self {
+        self.prefix = prefix;
+        self
+    }
 
-    // TCA_KIND = "flower"
-    tc_msg.attributes.push(TcAttribute::Kind("flower".to_string()));
+    pub fn with_class_id(mut self, class_id: u32) -> Self {
+        self.class_id = class_id;
+        self
+    }
 
-    // Build TCA_OPTIONS (flower options)
-    //
-    // iproute2 always includes:
-    // - CLASSID (flowid)
-    // - FLAGS (often 0)
-    // - KEY_ETH_TYPE (derived from protocol)
-    // plus the actual match keys (IPv4/IPv6 dst + mask).
-    let opts: Vec<TcOption> = [
-        vec![
-            TcOption::Flower(TcFilterFlowerOption::ClassId(classid)),
-            TcOption::Flower(TcFilterFlowerOption::Flags(0)),
-            TcOption::Flower(TcFilterFlowerOption::EthType(proto_ethertype)),
-        ],
-        match_opts,
-    ]
-    .concat();
+    pub fn build(self) -> NetlinkMessage<RouteNetlinkMessage> {
+        // Pick protocol and build the family-specific flower keys.
+        let (proto_ethertype, match_opts): (u16, Vec<TcOption>) = match self.destination {
+            IpAddr::V4(v4) => {
+                let mask = ipv4_mask(self.prefix);
+                (
+                    ETH_P_IP,
+                    vec![
+                        TcOption::Flower(TcFilterFlowerOption::Ipv4Dst(v4)),
+                        TcOption::Flower(TcFilterFlowerOption::Ipv4DstMask(mask)),
+                    ],
+                )
+            }
+            IpAddr::V6(v6) => {
+                let mask = ipv6_mask(self.prefix);
+                (
+                    ETH_P_IPV6,
+                    vec![
+                        TcOption::Flower(TcFilterFlowerOption::Ipv6Dst(v6)),
+                        TcOption::Flower(TcFilterFlowerOption::Ipv6DstMask(mask)),
+                    ],
+                )
+            }
+        };
 
-    tc_msg.attributes.push(TcAttribute::Options(opts));
+        let mut tc_msg = TcMessage::with_index(self.inner.interface_index);
+        tc_msg.header.parent = self.inner.parent;
+        // kernel can auto-assign if you don't care
+        tc_msg.header.handle = TcHandle::from(0u32);
+        tc_msg.header.info = proto_ethertype.to_be() as u32;
 
-    let mut nl_req = NetlinkMessage::from(RouteNetlinkMessage::NewTrafficFilter(tc_msg));
-    nl_req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL;
+        tc_msg.attributes.push(TcAttribute::Kind("flower".to_string()));
 
-    nl_req
+        // Build TCA_OPTIONS (flower options)
+        //
+        // iproute2 always includes:
+        // - CLASSID (flowid)
+        // - FLAGS (often 0)
+        // - KEY_ETH_TYPE (derived from protocol)
+        // plus the actual match keys (IPv4/IPv6 dst + mask).
+        let opts: Vec<TcOption> = [
+            vec![
+                TcOption::Flower(TcFilterFlowerOption::ClassId(self.class_id)),
+                TcOption::Flower(TcFilterFlowerOption::Flags(0)),
+                TcOption::Flower(TcFilterFlowerOption::EthType(proto_ethertype)),
+            ],
+            match_opts,
+        ]
+        .concat();
+
+        tc_msg.attributes.push(TcAttribute::Options(opts));
+
+        let mut nl_req = NetlinkMessage::from(RouteNetlinkMessage::NewTrafficFilter(tc_msg));
+        nl_req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_CREATE | NLM_F_EXCL;
+
+        nl_req
+    }
 }
