@@ -33,7 +33,10 @@ use crate::{
     dynch::DynRequest,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
-    tc::{LinkImpairment, build_flower_dst_filter_add_request},
+    tc::{
+        DEFAULT_PRIORITY_BANDS, DEFAULT_PRIORITY_MAP, LinkImpairment, TICK_IN_USEC,
+        build_flower_dst_filter_add_request,
+    },
     wrappers,
 };
 
@@ -307,7 +310,11 @@ impl Network {
     /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
     /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
     /// which is [`Link::0`].
-    pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
+    pub async fn apply_impairment(
+        &mut self,
+        link: Link,
+        mut impairment: LinkImpairment,
+    ) -> Result<()> {
         let (p1, p2) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
             [Some(p1), Some(p2)] => (p1, p2),
             [None, Some(_)] => return Err(Error::PeerNotFound(link.0)),
@@ -333,13 +340,9 @@ impl Network {
                     tc_message.header.parent = TcHandle::ROOT;
                     tc_message.header.handle = TcHandle::from(0x0001_0000);
 
-                    // Build tc-prio-qopt (fixed-header options blob)
-                    let bands: u32 = 3;
-                    let priomap: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
-
-                    let mut qopt = Vec::with_capacity(4 + priomap.len());
-                    qopt.extend_from_slice(&bands.to_ne_bytes()); // native endian
-                    qopt.extend_from_slice(&priomap);
+                    let mut qopt = Vec::new();
+                    qopt.extend_from_slice(&DEFAULT_PRIORITY_BANDS.to_ne_bytes());
+                    qopt.extend_from_slice(&DEFAULT_PRIORITY_MAP);
 
                     tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
                     tc_message
@@ -363,8 +366,10 @@ impl Network {
                     tc_message.header.parent = TcHandle::from(0x0001_0003); // Band 3
                     tc_message.header.handle = TcHandle::from(0x0003_0000);
 
+                    impairment.latency = (impairment.latency as f64 * *TICK_IN_USEC) as u32;
+                    impairment.jitter = (impairment.jitter as f64 * *TICK_IN_USEC) as u32;
+
                     tc_message.attributes.push(TcAttribute::Kind("netem".to_string()));
-                    // IMPORTANT: send raw TCA_OPTIONS bytes, not nested TcOption NLAs
                     tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(
                         TCA_OPTIONS,
                         impairment.to_bytes(),
@@ -500,8 +505,8 @@ mod msg_sim_network {
 
         let impairment = LinkImpairment {
             loss: LinkImpairment::loss_probability(50.0),
-            jitter: 1_000_000,
-            latency: 4 * 1_000_000,
+            jitter: 100_000,
+            latency: 1_000_000,
             duplicate: LinkImpairment::loss_probability(50.0),
             ..Default::default()
         };

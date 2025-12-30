@@ -1,4 +1,6 @@
+use std::io::{self, Read as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::LazyLock;
 
 use rtnetlink::packet_core::NetlinkMessage;
 use rtnetlink::packet_route::tc::TcFilterFlowerOption;
@@ -12,6 +14,68 @@ use rtnetlink::packet_core::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST}
 const ETH_P_IP: u16 = nix::libc::ETH_P_IP as u16;
 const ETH_P_IPV6: u16 = nix::libc::ETH_P_IPV6 as u16;
 
+pub const DEFAULT_PRIORITY_BANDS: u32 = 3;
+pub const DEFAULT_PRIORITY_MAP: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
+
+pub const NANOSECONDS_IN_SECOND: u32 = 1_000_000_000;
+
+pub const TIME_UNITS_PER_SEC: f64 = 1000000.0;
+
+pub const PSCHED_PATH: &str = "/proc/net/psched";
+
+// trait UnsignedIntegerExt {
+//     const BYTES: usize;
+//
+//     fn from_ne_slice(bytes: &[u8]) -> Self;
+// }
+//
+// impl UnsignedIntegerExt for u32 {
+//     const BYTES: usize = (u32::BITS / 8) as usize;
+//
+//     fn from_ne_slice(slice: &[u8]) -> Self {
+//         let mut buf = [0u8; Self::BYTES];
+//
+//         for (i, b) in buf.iter_mut().enumerate() {
+//             *b = slice.get(i).copied().unwrap_or_default();
+//         }
+//
+//         u32::from_ne_bytes(buf)
+//     }
+// }
+
+/// Adapted from "iproute2/tc/tc_core.c".
+///
+/// It reads the file `/proc/net/psched`, which exposes the packet scheduler time base used by the
+/// kernel traffic control subsystem. It expresses how to convert between: scheduler ticks and
+/// microseconds.
+///
+/// The file returns four quantities, and the first two packet scheduler’s time scaling factor
+/// (ticks per microsecond) expressed as numerator and denominator.
+pub fn tc_core_init() -> io::Result<f64> {
+    let mut file = std::fs::File::open(PSCHED_PATH)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+
+    let mut iter = contents.split_whitespace();
+
+    let t2us = u32::from_str_radix(iter.next().expect("t2us"), 16).expect("t2us hex");
+    let us2t = u32::from_str_radix(iter.next().expect("us2t"), 16).expect("us2t hex");
+
+    // Number of ticks within a microsecond.
+    let tick_in_usec = t2us as f64 / us2t as f64;
+
+    tracing::debug!(t2us, us2t, tick_in_usec, "read {PSCHED_PATH}");
+
+    Ok(tick_in_usec)
+}
+
+pub static TICK_IN_USEC: LazyLock<f64> =
+    LazyLock::new(|| tc_core_init().expect("to read /proc/net/psched"));
+
+pub fn usec_to_ticks(delay_usec: u32, tick_in_usec: f64) -> u32 {
+    (delay_usec as f64 / tick_in_usec).round() as u32
+}
+
 /// The impairments that can be applied to a network link.
 ///
 /// Each field corresponds to a feature supported by Linux `netem`.
@@ -24,17 +88,18 @@ const ETH_P_IPV6: u16 = nix::libc::ETH_P_IPV6 as u16;
 ///
 /// ```c
 /// struct tc_netem_qopt {
-///     __u32 latency;
+///     __u32 latency; /* Expressed in packet scheduler ticks */
 ///     __u32 limit;
 ///     __u32 loss;
 ///     __u32 gap;
 ///     __u32 duplicate;
-///     __u32 jitter;
+///     __u32 jitter; /* Expressed in packet scheduler ticks */
 /// };
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct LinkImpairment {
-    /// Latency to introduce, in microseconds.
+    /// Latency to introduce, in microseconds. When processed, it is converted into appropriate
+    /// packet scheduler ticks.
     pub latency: u32,
     /// fifo limit (packets).
     pub limit: u32,
@@ -44,7 +109,8 @@ pub struct LinkImpairment {
     pub gap: u32,
     /// Random packet duplication.
     pub duplicate: u32,
-    /// Random jitter, in microseconds.
+    /// Random jitter, in microseconds. When processed, it is converted into appropriate
+    /// packet scheduler ticks.
     pub jitter: u32,
 }
 
