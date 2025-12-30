@@ -34,8 +34,8 @@ use crate::{
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
     tc::{
-        DEFAULT_PRIORITY_BANDS, DEFAULT_PRIORITY_MAP, LinkImpairment, TICK_IN_USEC,
-        build_flower_dst_filter_add_request,
+        DEFAULT_PRIORITY_BANDS, DEFAULT_PRIORITY_MAP, FlowerFilterRequest, LinkImpairment,
+        QDiscNetemRequest, QdiscPrioRequest, QdiscRequestInner, TICK_IN_USEC,
     },
     wrappers,
 };
@@ -333,28 +333,16 @@ impl Network {
             .task_sender
             .submit(
                 async move {
-                    let index =
-                        wrappers::if_nametoindex(&id.veth_name()).expect("to find dev").get();
+                    let index = wrappers::if_nametoindex(&id.veth_name())
+                        .expect("to find dev")
+                        .get() as i32;
 
-                    let mut tc_message = TcMessage::with_index(index as i32);
-                    tc_message.header.parent = TcHandle::ROOT;
-                    tc_message.header.handle = TcHandle::from(0x0001_0000);
+                    let prio_request = QdiscPrioRequest::new(
+                        QdiscRequestInner::new(index).with_handle(TcHandle::from(0x0001_0000)),
+                    )
+                    .build();
 
-                    let mut qopt = Vec::new();
-                    qopt.extend_from_slice(&DEFAULT_PRIORITY_BANDS.to_ne_bytes());
-                    qopt.extend_from_slice(&DEFAULT_PRIORITY_MAP);
-
-                    tc_message.attributes.push(TcAttribute::Kind("prio".to_string()));
-                    tc_message
-                        .attributes
-                        .push(TcAttribute::Other(DefaultNla::new(TCA_OPTIONS, qopt)));
-
-                    let mut nl_req =
-                        NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
-                    nl_req.header.flags =
-                        (NLM_F_CREATE | NLM_F_REPLACE | NLM_F_REQUEST | NLM_F_ACK) as u16;
-
-                    let mut res = handle.request(nl_req).unwrap();
+                    let mut res = handle.request(prio_request)?;
                     while let Some(res) = res.next().await {
                         if let NetlinkPayload::Error(e) = res.payload {
                             tracing::debug!(?e, "failed to create prio qdisc");
@@ -362,42 +350,30 @@ impl Network {
                         }
                     }
 
-                    let mut tc_message = TcMessage::with_index(index as i32);
-                    tc_message.header.parent = TcHandle::from(0x0001_0003); // Band 3
-                    tc_message.header.handle = TcHandle::from(0x0003_0000);
+                    let netem_request = QDiscNetemRequest::new(
+                        QdiscRequestInner::new(index)
+                            .with_parent(TcHandle::from(0x0001_0003))
+                            .with_handle(TcHandle::from(0x0003_0000)),
+                        impairment,
+                    )
+                    .build();
 
-                    impairment.latency = (impairment.latency as f64 * *TICK_IN_USEC) as u32;
-                    impairment.jitter = (impairment.jitter as f64 * *TICK_IN_USEC) as u32;
-
-                    tc_message.attributes.push(TcAttribute::Kind("netem".to_string()));
-                    tc_message.attributes.push(TcAttribute::Other(DefaultNla::new(
-                        TCA_OPTIONS,
-                        impairment.to_bytes(),
-                    )));
-
-                    let mut nl_req =
-                        NetlinkMessage::from(RouteNetlinkMessage::NewQueueDiscipline(tc_message));
-                    nl_req.header.flags =
-                        (NLM_F_CREATE | NLM_F_EXCL | NLM_F_REQUEST | NLM_F_ACK) as u16;
-
-                    let mut res = handle.request(nl_req).unwrap();
+                    let mut res = handle.request(netem_request)?;
                     while let Some(res) = res.next().await {
+                        tracing::debug!(?res, "received res");
                         if let NetlinkPayload::Error(e) = res.payload {
                             tracing::debug!(?e, "failed to add netem");
                             return Err(rtnetlink::Error::NetlinkError(e));
                         }
                     }
 
-                    let nl_req = build_flower_dst_filter_add_request(
-                        index as i32,
-                        TcHandle::from(0x0001_0000),
-                        0,
+                    let request = FlowerFilterRequest::new(
+                        QdiscRequestInner::new(index).with_parent(TcHandle::from(0x0001_0000)),
                         p2_id.veth_address(subnet),
-                        32,
-                        0x0001_0003,
-                    );
+                    )
+                    .build();
 
-                    let mut res = handle.request(nl_req).unwrap();
+                    let mut res = handle.request(request)?;
                     while let Some(msg) = res.next().await {
                         if let NetlinkPayload::Error(e) = msg.payload {
                             tracing::debug!(?e, "failed to add filter");
