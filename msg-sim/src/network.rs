@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     collections::HashMap,
     fmt::{Debug, Display},
     io,
@@ -10,15 +11,7 @@ use std::{
 };
 
 use futures::StreamExt as _;
-use nix::libc::{NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REPLACE, NLM_F_REQUEST, TCA_OPTIONS};
-use rtnetlink::{
-    LinkBridge, LinkUnspec, LinkVeth,
-    packet_core::{DefaultNla, NetlinkMessage},
-    packet_route::{
-        RouteNetlinkMessage,
-        tc::{TcAttribute, TcHandle, TcMessage},
-    },
-};
+use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth, packet_route::tc::TcHandle};
 use tokio::{
     sync::{
         mpsc,
@@ -29,13 +22,11 @@ use tokio::{
 use tracing::Instrument as _;
 
 use crate::{
-    command,
-    dynch::DynRequest,
+    dynch::DynFuture,
     ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
     namespace::{self, NetworkNamespace},
     tc::{
-        DEFAULT_PRIORITY_BANDS, DEFAULT_PRIORITY_MAP, FlowerFilterRequest, LinkImpairment,
-        QDiscNetemRequest, QdiscPrioRequest, QdiscRequestInner, TICK_IN_USEC,
+        FlowerFilterRequest, LinkImpairment, QDiscNetemRequest, QdiscPrioRequest, QdiscRequestInner,
     },
     wrappers,
 };
@@ -94,17 +85,17 @@ impl Display for Link {
     }
 }
 
-pub type PeerMap = HashMap<PeerId, Peer>;
+pub type PeerMap = HashMap<PeerId, Peer<PeerContext>>;
 
 #[derive(Debug)]
-pub struct Peer {
+pub struct Peer<Ctx = ()> {
     pub id: PeerId,
-    pub namespace: NetworkNamespace,
+    pub namespace: NetworkNamespace<Ctx>,
 }
 
 impl Peer {
-    pub fn new(id: PeerId, namespace: NetworkNamespace) -> Self {
-        Self { id, namespace }
+    pub fn new<Ctx>(id: PeerId, namespace: NetworkNamespace<Ctx>) -> Peer<Ctx> {
+        Peer { id, namespace }
     }
 }
 
@@ -112,8 +103,6 @@ impl Peer {
 pub enum Error {
     #[error("io error: {0}")]
     Io(#[from] io::Error),
-    #[error("command error: {0}")]
-    Command(#[from] command::Error),
     #[error("peer not found: {0}")]
     PeerNotFound(PeerId),
     #[error("too many peers")]
@@ -129,12 +118,21 @@ pub enum Error {
     #[error("task in namespace failed: {0}")]
     NamespaceTask(#[from] namespace::TaskError<rtnetlink::Error>),
     #[error("failed to send task: {0}")]
-    SendError(#[from] mpsc::error::SendError<DynRequest>),
+    SendError(#[from] mpsc::error::SendError<()>),
     #[error("failed to receive task result: {0}")]
     RecvError(#[from] oneshot::error::RecvError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug)]
+pub struct PeerContext {
+    handle: rtnetlink::Handle,
+    _connection_task: tokio::task::JoinHandle<()>,
+
+    subnet: Subnet,
+    peer_id: usize,
+}
 
 /// The [`Network`] represents a global view of all linked devices running a network emulation.
 ///
@@ -158,7 +156,7 @@ pub struct Network {
     peers: PeerMap,
     subnet: Subnet,
 
-    network_hub_namespace: NetworkNamespace,
+    network_hub_namespace: NetworkNamespace<PeerContext>,
 
     /// A [`rtnetlink::Handle`] bound to _host namespace_.
     rtnetlink_handle: rtnetlink::Handle,
@@ -172,7 +170,15 @@ impl Network {
         let (connection, handle, _) = rtnetlink::new_connection()?;
         let _task = tokio::spawn(connection);
 
-        let namespace_hub = NetworkNamespace::new(Self::hub_namespace_name()).await?;
+        let make_ctx = move || {
+            let (handle, _connection_task) = rtnetlink::new_connection()
+                .map(|(connection, handle, _)| (handle, tokio::task::spawn(connection)))
+                .unwrap();
+
+            PeerContext { handle, subnet, peer_id: 0, _connection_task }
+        };
+
+        let namespace_hub = NetworkNamespace::new(Self::hub_namespace_name(), make_ctx).await?;
         let fd = namespace_hub.fd();
 
         let network = Self {
@@ -208,7 +214,17 @@ impl Network {
             tracing::debug_span!("add_peer", ?peer_id, %namespace_name, %veth_name, %veth_br_name)
                 .entered();
 
-        let network_namespace = NetworkNamespace::new(namespace_name.clone()).await?;
+        let subnet = self.subnet;
+
+        let make_ctx = move || {
+            let (handle, _connection_task) = rtnetlink::new_connection()
+                .map(|(connection, handle, _)| (handle, tokio::task::spawn(connection)))
+                .unwrap();
+
+            PeerContext { handle, peer_id, subnet, _connection_task }
+        };
+
+        let network_namespace = NetworkNamespace::new(namespace_name.clone(), make_ctx).await?;
 
         // 1. Add link.
         self.rtnetlink_handle
@@ -237,47 +253,53 @@ impl Network {
             .inspect_err(|e| tracing::debug!(?e, "failed to set link end in hub namespace"))?;
 
         // 3. Bring first device up, and assign IP address. Lastly, bring loopback up.
-        let address = peer_id.veth_address(self.subnet);
-        let mask = self.subnet.netmask;
         let v = veth_name.clone();
 
-        let handle = network_namespace.rtnetlink_handle.clone();
         network_namespace
             .task_sender
-            .submit(async move {
-                tracing::debug!(?address, ?mask, dev = ?v, "adding address to device");
-                let index = wrappers::if_nametoindex(&v).expect("to find device").get();
+            .submit(|ctx| {
+                Box::pin(async move {
+                    let address = ctx.peer_id.veth_address(ctx.subnet);
+                    let mask = ctx.subnet.netmask;
+                    tracing::debug!(?address, ?mask, dev = ?v, "adding address to device");
+                    let index = wrappers::if_nametoindex(&v).expect("to find device").get();
 
-                handle
-                    .link()
-                    .set(LinkUnspec::new_with_name(&veth_name).up().build())
-                    .execute()
-                    .await?;
-                handle.address().add(index, address, mask).execute().await?;
-                handle.link().set(LinkUnspec::new_with_name("lo").up().build()).execute().await
+                    ctx.handle
+                        .link()
+                        .set(LinkUnspec::new_with_name(&veth_name).up().build())
+                        .execute()
+                        .await?;
+                    ctx.handle.address().add(index, address, mask).execute().await?;
+                    ctx.handle
+                        .link()
+                        .set(LinkUnspec::new_with_name("lo").up().build())
+                        .execute()
+                        .await
+                })
             })
             .await?
             .receive()
             .await??;
 
         // 4. Set second device controlled by hub and up.
-        let handle = self.network_hub_namespace.rtnetlink_handle.clone();
         self.network_hub_namespace
             .task_sender
-            .submit(async move {
-                let index =
-                    wrappers::if_nametoindex(Self::BRIDGE_NAME).expect("to find bridge").get();
+            .submit(|ctx| {
+                Box::pin(async move {
+                    let index =
+                        wrappers::if_nametoindex(Self::BRIDGE_NAME).expect("to find bridge").get();
 
-                handle
-                    .link()
-                    .set(LinkUnspec::new_with_name(&veth_br_name).controller(index).build())
-                    .execute()
-                    .await?;
-                handle
-                    .link()
-                    .set(LinkUnspec::new_with_name(&veth_br_name).up().build())
-                    .execute()
-                    .await
+                    ctx.handle
+                        .link()
+                        .set(LinkUnspec::new_with_name(&veth_br_name).controller(index).build())
+                        .execute()
+                        .await?;
+                    ctx.handle
+                        .link()
+                        .set(LinkUnspec::new_with_name(&veth_br_name).up().build())
+                        .execute()
+                        .await
+                })
             })
             .await?
             .receive()
@@ -296,8 +318,10 @@ impl Network {
         fut: F,
     ) -> Result<impl Future<Output = std::result::Result<T, oneshot::error::RecvError>>>
     where
-        T: Send + 'static,
-        F: Future<Output = T> + Send + 'static,
+        T: Any + Send + 'static,
+        // The caller provides a function that can borrow `ctx` for some `'a`,
+        // and returns a future that may also live for `'a`.
+        F: for<'a> FnOnce(&'a mut PeerContext) -> DynFuture<'a, T> + Send + 'static,
     {
         let Some(peer) = self.peers.get(&peer_id) else {
             return Err(Error::PeerNotFound(peer_id));
@@ -310,11 +334,7 @@ impl Network {
     /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
     /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
     /// which is [`Link::0`].
-    pub async fn apply_impairment(
-        &mut self,
-        link: Link,
-        mut impairment: LinkImpairment,
-    ) -> Result<()> {
+    pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
         let (p1, p2) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
             [Some(p1), Some(p2)] => (p1, p2),
             [None, Some(_)] => return Err(Error::PeerNotFound(link.0)),
@@ -322,69 +342,71 @@ impl Network {
             [None, None] => return Err(Error::PeerNotFound(link.0)),
         };
 
-        let span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
-
-        let mut handle = p1.namespace.rtnetlink_handle.clone();
-        let id = p1.id;
         let p2_id = p2.id;
-        let subnet = self.subnet;
 
         p1.namespace
             .task_sender
-            .submit(
-                async move {
-                    let index = wrappers::if_nametoindex(&id.veth_name())
-                        .expect("to find dev")
-                        .get() as i32;
+            .submit(move |ctx| {
+                let span = tracing::debug_span!("apply_impairment", ?link, ?impairment).entered();
+                {
+                    Box::pin(
+                        async move {
+                            let index = wrappers::if_nametoindex(&ctx.peer_id.veth_name())
+                                .expect("to find dev")
+                                .get() as i32;
 
-                    let prio_request = QdiscPrioRequest::new(
-                        QdiscRequestInner::new(index).with_handle(TcHandle::from(0x0001_0000)),
-                    )
-                    .build();
+                            let prio_request = QdiscPrioRequest::new(
+                                QdiscRequestInner::new(index)
+                                    .with_handle(TcHandle::from(0x0001_0000)),
+                            )
+                            .build();
 
-                    let mut res = handle.request(prio_request)?;
-                    while let Some(res) = res.next().await {
-                        if let NetlinkPayload::Error(e) = res.payload {
-                            tracing::debug!(?e, "failed to create prio qdisc");
-                            return Err(rtnetlink::Error::NetlinkError(e));
+                            let mut res = ctx.handle.request(prio_request)?;
+                            while let Some(res) = res.next().await {
+                                if let NetlinkPayload::Error(e) = res.payload {
+                                    tracing::debug!(?e, "failed to create prio qdisc");
+                                    return Err(rtnetlink::Error::NetlinkError(e));
+                                }
+                            }
+
+                            let netem_request = QDiscNetemRequest::new(
+                                QdiscRequestInner::new(index)
+                                    .with_parent(TcHandle::from(0x0001_0003))
+                                    .with_handle(TcHandle::from(0x0003_0000)),
+                                impairment,
+                            )
+                            .build();
+
+                            let mut res = ctx.handle.request(netem_request)?;
+                            while let Some(res) = res.next().await {
+                                tracing::debug!(?res, "received res");
+                                if let NetlinkPayload::Error(e) = res.payload {
+                                    tracing::debug!(?e, "failed to add netem");
+                                    return Err(rtnetlink::Error::NetlinkError(e));
+                                }
+                            }
+
+                            let request = FlowerFilterRequest::new(
+                                QdiscRequestInner::new(index)
+                                    .with_parent(TcHandle::from(0x0001_0000)),
+                                p2_id.veth_address(ctx.subnet),
+                            )
+                            .build();
+
+                            let mut res = ctx.handle.request(request)?;
+                            while let Some(msg) = res.next().await {
+                                if let NetlinkPayload::Error(e) = msg.payload {
+                                    tracing::debug!(?e, "failed to add filter");
+                                    return Err(rtnetlink::Error::NetlinkError(e));
+                                }
+                            }
+
+                            Ok(())
                         }
-                    }
-
-                    let netem_request = QDiscNetemRequest::new(
-                        QdiscRequestInner::new(index)
-                            .with_parent(TcHandle::from(0x0001_0003))
-                            .with_handle(TcHandle::from(0x0003_0000)),
-                        impairment,
+                        .instrument(span.clone()),
                     )
-                    .build();
-
-                    let mut res = handle.request(netem_request)?;
-                    while let Some(res) = res.next().await {
-                        tracing::debug!(?res, "received res");
-                        if let NetlinkPayload::Error(e) = res.payload {
-                            tracing::debug!(?e, "failed to add netem");
-                            return Err(rtnetlink::Error::NetlinkError(e));
-                        }
-                    }
-
-                    let request = FlowerFilterRequest::new(
-                        QdiscRequestInner::new(index).with_parent(TcHandle::from(0x0001_0000)),
-                        p2_id.veth_address(subnet),
-                    )
-                    .build();
-
-                    let mut res = handle.request(request)?;
-                    while let Some(msg) = res.next().await {
-                        if let NetlinkPayload::Error(e) = msg.payload {
-                            tracing::debug!(?e, "failed to add filter");
-                            return Err(rtnetlink::Error::NetlinkError(e));
-                        }
-                    }
-
-                    Ok(())
                 }
-                .instrument(span.clone()),
-            )
+            })
             .await?
             .receive()
             .await??;
@@ -443,25 +465,29 @@ mod msg_sim_network {
         let port_2 = 12345;
 
         let task1 = network
-            .run_in_namespace(peer_2, async move {
-                let mut rep_socket = RepSocket::new(Tcp::default());
-                rep_socket.bind(SocketAddr::new(address_2, port_2)).await.unwrap();
+            .run_in_namespace(peer_2, move |_| {
+                Box::pin(async move {
+                    let mut rep_socket = RepSocket::new(Tcp::default());
+                    rep_socket.bind(SocketAddr::new(address_2, port_2)).await.unwrap();
 
-                if let Some(request) = rep_socket.next().await {
-                    let msg = request.msg().clone();
-                    request.respond(msg).unwrap();
-                }
+                    if let Some(request) = rep_socket.next().await {
+                        let msg = request.msg().clone();
+                        request.respond(msg).unwrap();
+                    }
+                })
             })
             .await
             .unwrap();
 
         let task2 = network
-            .run_in_namespace(peer_1, async move {
-                let mut req_socket = ReqSocket::new(Tcp::default());
+            .run_in_namespace(peer_1, move |_| {
+                Box::pin(async move {
+                    let mut req_socket = ReqSocket::new(Tcp::default());
 
-                req_socket.connect_sync(SocketAddr::new(address_2, port_2));
-                let response = req_socket.request("hello".into()).await.unwrap();
-                assert_eq!(response, "hello");
+                    req_socket.connect_sync(SocketAddr::new(address_2, port_2));
+                    let response = req_socket.request("hello".into()).await.unwrap();
+                    assert_eq!(response, "hello");
+                })
             })
             .await
             .unwrap();

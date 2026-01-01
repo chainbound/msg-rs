@@ -18,31 +18,7 @@ const ETH_P_IPV6: u16 = nix::libc::ETH_P_IPV6 as u16;
 pub const DEFAULT_PRIORITY_BANDS: u32 = 3;
 pub const DEFAULT_PRIORITY_MAP: [u8; 16] = [0, 1, 2, 2, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1];
 
-pub const NANOSECONDS_IN_SECOND: u32 = 1_000_000_000;
-
-pub const TIME_UNITS_PER_SEC: f64 = 1000000.0;
-
 pub const PSCHED_PATH: &str = "/proc/net/psched";
-
-// trait UnsignedIntegerExt {
-//     const BYTES: usize;
-//
-//     fn from_ne_slice(bytes: &[u8]) -> Self;
-// }
-//
-// impl UnsignedIntegerExt for u32 {
-//     const BYTES: usize = (u32::BITS / 8) as usize;
-//
-//     fn from_ne_slice(slice: &[u8]) -> Self {
-//         let mut buf = [0u8; Self::BYTES];
-//
-//         for (i, b) in buf.iter_mut().enumerate() {
-//             *b = slice.get(i).copied().unwrap_or_default();
-//         }
-//
-//         u32::from_ne_bytes(buf)
-//     }
-// }
 
 /// Adapted from "iproute2/tc/tc_core.c".
 ///
