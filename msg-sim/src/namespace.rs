@@ -2,9 +2,9 @@ use std::io;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
-use crate::dynch::{DynRequest, DynRequestSender};
+use crate::dynch::DynRequestSender;
 use crate::ip::NetworkDevice;
 use crate::namespace::helpers::current_netns;
 use crate::{TryClone, dynch};
@@ -123,8 +123,8 @@ pub enum Error {
     Nix(#[from] nix::Error),
     #[error("thread error: {0}")]
     Thread(String),
-    #[error("failed to send task: {0}")]
-    SendError(#[from] mpsc::error::SendError<DynRequest>),
+    #[error("failed to send task, channel closed")]
+    ChannelClosed,
     #[error("failed to receive task result: {0}")]
     RecvError(#[from] oneshot::error::RecvError),
 }
@@ -162,7 +162,10 @@ impl NetworkNamespaceInner {
     ///
     /// It will create a dedicated OS thread set with this network namespace, by calling
     /// `setns(2)`, which is thread-local.
-    pub fn spawn(self) -> (std::thread::JoinHandle<Result<()>>, DynRequestSender) {
+    pub fn spawn<Ctx: 'static>(
+        self,
+        make_ctx: impl FnOnce() -> Ctx + Send + 'static,
+    ) -> (std::thread::JoinHandle<Result<()>>, DynRequestSender<Ctx>) {
         let (tx, mut rx) = dynch::channel(8);
 
         let handle = std::thread::spawn(move || {
@@ -172,6 +175,8 @@ impl NetworkNamespaceInner {
 
             let (_before, after) = helpers::setns_verified(fd)?;
             let _guard = helpers::NetnsGuard::new(after)?;
+
+            let mut ctx = make_ctx();
 
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
             tracing::info!("starting runtime");
@@ -184,7 +189,7 @@ impl NetworkNamespaceInner {
                     let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
                     debug_assert_eq!(after, current_netns().expect("to check current namespace"));
 
-                    let res = task.await;
+                    let res = task(&mut ctx).await;
                     if tx.send(res).is_err() {
                         tracing::error!("failed to send back task response, rx dropped");
                     }
@@ -199,21 +204,18 @@ impl NetworkNamespaceInner {
 }
 
 #[derive(Debug)]
-pub struct NetworkNamespace {
+pub struct NetworkNamespace<Ctx = ()> {
     inner: NetworkNamespaceInner,
-    pub rtnetlink_handle: rtnetlink::Handle,
-    pub task_sender: DynRequestSender,
+    pub task_sender: DynRequestSender<Ctx>,
 
     pub _receiver_task: std::thread::JoinHandle<Result<()>>,
-    pub _connection_task: tokio::task::JoinHandle<()>,
 }
 
 impl NetworkNamespace {
-    pub fn path(name: &str) -> PathBuf {
-        Path::new("/run").join("netns").join(name)
-    }
-
-    pub async fn new(name: impl Into<String>) -> Result<Self> {
+    pub async fn new<Ctx: 'static>(
+        name: impl Into<String>,
+        make_ctx: impl FnOnce() -> Ctx + Send + 'static,
+    ) -> Result<NetworkNamespace<Ctx>> {
         let name = name.into();
         rtnetlink::NetworkNamespace::add(name.clone()).await?;
         let path = Self::path(&name);
@@ -222,18 +224,15 @@ impl NetworkNamespace {
         let file = tokio::fs::File::open(path).await?.into_std().await;
 
         let inner = NetworkNamespaceInner { name, file, devices: Vec::new() };
-        let (_receiver_task, task_sender) = inner.try_clone()?.spawn();
+        let (_receiver_task, task_sender) = inner.try_clone()?.spawn(make_ctx);
 
-        let (rtnetlink_handle, _connection_task) = task_sender
-            .submit(async move {
-                rtnetlink::new_connection()
-                    .map(|(connection, handle, _)| (handle, tokio::task::spawn(connection)))
-            })
-            .await?
-            .receive()
-            .await??;
+        Ok(NetworkNamespace::<Ctx> { inner, task_sender, _receiver_task })
+    }
+}
 
-        Ok(Self { inner, task_sender, _receiver_task, rtnetlink_handle, _connection_task })
+impl<Ctx> NetworkNamespace<Ctx> {
+    pub fn path(name: &str) -> PathBuf {
+        Path::new("/run").join("netns").join(name)
     }
 
     pub fn fd(&self) -> i32 {
