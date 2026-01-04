@@ -23,7 +23,7 @@ use tracing::Instrument as _;
 
 use crate::{
     dynch::DynFuture,
-    ip::{IpAddrExt as _, MSG_SIM_LINK_PREFIX, MSG_SIM_NAMESPACE_PREFIX, Subnet},
+    ip::{IpAddrExt as _, Subnet},
     namespace::{self, NetworkNamespace},
     tc::{
         FlowerFilterRequest, LinkImpairment, QDiscNetemRequest, QdiscPrioRequest, QdiscRequestInner,
@@ -35,7 +35,13 @@ use rtnetlink::packet_core::NetlinkPayload;
 
 static PEER_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
+/// The type used to identify peers within the network.
 pub type PeerId = usize;
+
+/// A prefix to use to name all network namespaces created by this crate.
+pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
+/// A prefix to use to name all links created by this crate.
+pub const MSG_SIM_LINK_PREFIX: &str = "msg-veth";
 
 pub trait PeerIdExt: Display + Copy {
     /// Get the network namespace name derived by the provided IP address.
@@ -44,13 +50,15 @@ pub trait PeerIdExt: Display + Copy {
         format!("{MSG_SIM_NAMESPACE_PREFIX}-{self}")
     }
 
-    /// TODO: add docs.
+    /// Compute the address of the veth device associated to this peer, given a subnet.
     fn veth_address(self, subnet: Subnet) -> IpAddr;
 
+    /// Compute the name of the veth device associated to this peer.
     fn veth_name(self) -> String {
         format!("{MSG_SIM_LINK_PREFIX}{self}")
     }
 
+    /// Compute the name of the veth device linked to the central bridge of the network.
     fn veth_br_name(self) -> String {
         format!("{}-br", self.veth_name())
     }
@@ -62,6 +70,7 @@ impl PeerIdExt for PeerId {
     }
 }
 
+/// A ordered pair of peers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Link(PeerId, PeerId);
 
@@ -69,13 +78,6 @@ impl Link {
     #[inline]
     pub fn new(a: PeerId, b: PeerId) -> Self {
         Link(a, b)
-    }
-
-    pub fn reversed(self) -> Self {
-        let mut copy = self;
-        copy.0 = self.1;
-        copy.1 = self.0;
-        copy
     }
 }
 
@@ -85,7 +87,7 @@ impl Display for Link {
     }
 }
 
-pub type PeerMap = HashMap<PeerId, Peer<PeerContext>>;
+pub type PeerMap = HashMap<PeerId, Peer<Context>>;
 
 #[derive(Debug)]
 pub struct Peer<Ctx = ()> {
@@ -125,8 +127,9 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// A context associated to a [`NetworkNamespace`], accessible when sending task requests.
 #[derive(Debug)]
-pub struct PeerContext {
+pub struct Context {
     handle: rtnetlink::Handle,
     _connection_task: tokio::task::JoinHandle<()>,
 
@@ -134,7 +137,7 @@ pub struct PeerContext {
     peer_id: usize,
 }
 
-/// The [`Network`] represents a global view of all linked devices running a network emulation.
+/// A [`Network`] represents a global view of all linked devices running a network emulation.
 ///
 /// A network is composed by peers, which are invidual nodes. Nodes can be connected to each other
 /// in order to commmunicate and send messages. This is done via Virtual Ethernet devices and L2
@@ -143,20 +146,20 @@ pub struct PeerContext {
 /// Each peer has a dedicated network namespace for complete isolation, allowing maximum
 /// customizability for each of them, without interfering with the host namespace.
 ///
-/// When a peer is added into the network, the following devices are created inside a namespace
-/// `ns0`:
+/// The network is created which a central "hub" namespace, which hosts a bridge device where peer
+/// links will attach to. When a peer is added into the network, a veth link `veth1 <-> veth1-br`
+/// is created. `veth1` lives in the peer's namespace, while `veth1-br` is attached to bridge
+/// device in main hub.
 ///
-/// 1. A bridge device, e.g. `br1`
-/// 2. A Veth link `veth1 <-> veth1-br`, where `veth1-br` is attached to `br1`.
-///
-/// When two peers are being connected, an additional link `veth1-2-br <-> veth2-1-br` in namespace
-/// `ns1`, `ns2` respectively, is created. Those devices are attached to the respective switches.
+/// Peers are able to communicate with each other thanks to the main bridge device, which acts as a
+/// switch essentially, and because they're on the same [`Subnet`].
 #[derive(Debug)]
 pub struct Network {
     peers: PeerMap,
     subnet: Subnet,
 
-    network_hub_namespace: NetworkNamespace<PeerContext>,
+    /// The namespace of the hub.
+    network_hub_namespace: NetworkNamespace<Context>,
 
     /// A [`rtnetlink::Handle`] bound to _host namespace_.
     rtnetlink_handle: rtnetlink::Handle,
@@ -175,7 +178,8 @@ impl Network {
                 .map(|(connection, handle, _)| (handle, tokio::task::spawn(connection)))
                 .unwrap();
 
-            PeerContext { handle, subnet, peer_id: 0, _connection_task }
+            // TODO: the hub should have a different context type.
+            Context { handle, subnet, peer_id: 0, _connection_task }
         };
 
         let namespace_hub = NetworkNamespace::new(Self::hub_namespace_name(), make_ctx).await?;
@@ -219,9 +223,9 @@ impl Network {
         let make_ctx = move || {
             let (handle, _connection_task) = rtnetlink::new_connection()
                 .map(|(connection, handle, _)| (handle, tokio::task::spawn(connection)))
-                .unwrap();
+                .expect("to create rtnetlink socket");
 
-            PeerContext { handle, peer_id, subnet, _connection_task }
+            Context { handle, peer_id, subnet, _connection_task }
         };
 
         let network_namespace = NetworkNamespace::new(namespace_name.clone(), make_ctx).await?;
@@ -312,6 +316,26 @@ impl Network {
         Ok(peer_id)
     }
 
+    /// Run a certain task in this network namespace.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let res = network
+    ///     .run_in_namespace(peer_id, move |_ctx| {
+    ///         Box::pin(async move {
+    ///             let mut rep_socket = RepSocket::new(Tcp::default());
+    ///             rep_socket.bind(SocketAddr::new(address, port)).await.unwrap();
+    ///
+    ///             if let Some(request) = rep_socket.next().await {
+    ///                 let msg = request.msg().clone();
+    ///                 request.respond(msg).unwrap();
+    ///             }
+    ///         })
+    ///     })
+    ///     .await
+    ///     .unwrap();
+    /// ```
     pub async fn run_in_namespace<T, F>(
         &self,
         peer_id: PeerId,
@@ -321,7 +345,7 @@ impl Network {
         T: Any + Send + 'static,
         // The caller provides a function that can borrow `ctx` for some `'a`,
         // and returns a future that may also live for `'a`.
-        F: for<'a> FnOnce(&'a mut PeerContext) -> DynFuture<'a, T> + Send + 'static,
+        F: for<'a> FnOnce(&'a mut Context) -> DynFuture<'a, T> + Send + 'static,
     {
         let Some(peer) = self.peers.get(&peer_id) else {
             return Err(Error::PeerNotFound(peer_id));
@@ -334,6 +358,11 @@ impl Network {
     /// Apply a [`LinkImpairment`] to the given [`Link`]. In particular, it generates the `tc`
     /// commands to be applied to the Virtual Ethernet device used by the first end of the link,
     /// which is [`Link::0`].
+    ///
+    /// Internally, impairments are applied using a combination of a prio(8) qdisc combined with
+    /// netem(8) and a flower(8) IP filter.
+    /// `prio` creates three classes, and netem is attached to the third one. Lastly, if traffic
+    /// is filtered, then packets to inside the third queue where netem takes effect.
     pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
         let (p1, p2) = match self.peers.get_disjoint_mut([&link.0, &link.1]) {
             [Some(p1), Some(p2)] => (p1, p2),
@@ -373,13 +402,12 @@ impl Network {
                                 QdiscRequestInner::new(index)
                                     .with_parent(TcHandle::from(0x0001_0003))
                                     .with_handle(TcHandle::from(0x0003_0000)),
-                                impairment,
+                                impairment.into(),
                             )
                             .build();
 
                             let mut res = ctx.handle.request(netem_request)?;
                             while let Some(res) = res.next().await {
-                                tracing::debug!(?res, "received res");
                                 if let NetlinkPayload::Error(e) = res.payload {
                                     tracing::debug!(?e, "failed to add netem");
                                     return Err(rtnetlink::Error::NetlinkError(e));
@@ -417,7 +445,10 @@ impl Network {
 
 #[cfg(test)]
 mod msg_sim_network {
-    use std::net::{Ipv4Addr, SocketAddr};
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
 
     use futures::StreamExt;
     use msg_socket::{RepSocket, ReqSocket};
@@ -506,12 +537,70 @@ mod msg_sim_network {
         let _peer_3 = network.add_peer().await.unwrap();
 
         let impairment = LinkImpairment {
-            loss: LinkImpairment::loss_probability(50.0),
+            loss: 50.0,
             jitter: 100_000,
             latency: 1_000_000,
-            duplicate: LinkImpairment::loss_probability(50.0),
+            duplicate: 50.0,
             ..Default::default()
         };
         network.apply_impairment(Link::new(peer_1, peer_2), impairment).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn simulate_reqrep_netem_delay_works() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let subnet = Subnet::new(Ipv4Addr::new(14, 0, 0, 0).into(), 16);
+        let mut network = Network::new(subnet).await.unwrap();
+
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+
+        // 1s latency.
+        let sec_in_us = 1_000_000;
+        let impairment = LinkImpairment { latency: sec_in_us, ..Default::default() };
+        network.apply_impairment(Link::new(peer_1, peer_2), impairment).await.unwrap();
+
+        let address_2 = peer_2.veth_address(subnet);
+        let port_2 = 12345;
+
+        let task1 = network
+            .run_in_namespace(peer_2, move |_ctx| {
+                Box::pin(async move {
+                    let mut rep_socket = RepSocket::new(Tcp::default());
+                    rep_socket.bind(SocketAddr::new(address_2, port_2)).await.unwrap();
+
+                    // Given the delay in peer1-peer2 link, this should hit timeout
+                    tokio::time::timeout(Duration::from_micros((sec_in_us / 2).into()), async {
+                        if let Some(request) = rep_socket.next().await {
+                            let msg = request.msg().clone();
+                            request.respond(msg).unwrap();
+                        }
+                    })
+                    .await
+                    .unwrap_err();
+
+                    if let Some(request) = rep_socket.next().await {
+                        let msg = request.msg().clone();
+                        request.respond(msg).unwrap();
+                    }
+                })
+            })
+            .await
+            .unwrap();
+
+        let task2 = network
+            .run_in_namespace(peer_1, move |_ctx| {
+                Box::pin(async move {
+                    let mut req_socket = ReqSocket::new(Tcp::default());
+
+                    req_socket.connect_sync(SocketAddr::new(address_2, port_2));
+                    req_socket.request("hello".into()).await.unwrap();
+                })
+            })
+            .await
+            .unwrap();
+
+        tokio::try_join!(task1, task2).unwrap();
     }
 }

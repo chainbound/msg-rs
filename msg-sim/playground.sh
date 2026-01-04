@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# A script that creates a central hub with three peers to play with network namespaces and traffic control.
+# This is useful to play around with some impairments and experiment with setups.
+
 set -e
 set -x
 trap 'echo "ERROR at line $LINENO: $BASH_COMMAND"' ERR

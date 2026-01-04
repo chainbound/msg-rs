@@ -1,27 +1,15 @@
-use std::{
-    fmt::{self, Display},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-};
+//! Utilities and extension traits for dealing with IP addresses.
 
-use derive_more::{Deref, DerefMut, From};
-
-use crate::network::PeerId;
-
-/// A prefix to use to name all network namespaces created by this crate.
-pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
-
-/// A prefix to use to name all links created by this crate.
-pub const MSG_SIM_LINK_PREFIX: &str = "msg-veth";
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub trait IpAddrExt {
     fn to_ipv6_mapped(&self) -> Ipv6Addr;
-
     fn to_bits(&self) -> u128;
-
     fn from_bits(bits: u128) -> Self;
 }
 
 impl IpAddrExt for IpAddr {
+    /// If it is a v4, it converts it to a v6, otherwise it is a no-op.
     fn to_ipv6_mapped(&self) -> Ipv6Addr {
         match self {
             IpAddr::V4(v4) => v4.to_ipv6_mapped(),
@@ -29,6 +17,7 @@ impl IpAddrExt for IpAddr {
         }
     }
 
+    /// Returns the bits of the IP address, padding with zeros in case of an IPv4 address.
     fn to_bits(&self) -> u128 {
         match self {
             Self::V4(v4) => v4.to_bits().into(),
@@ -36,6 +25,8 @@ impl IpAddrExt for IpAddr {
         }
     }
 
+    /// Create an IPv4 or IPv6 address depending on whether the value provided is greater than
+    /// [`u32::MAX`].
     fn from_bits(bits: u128) -> Self {
         if bits < u32::MAX as u128 {
             Ipv4Addr::from_bits(bits as u32).into()
@@ -57,140 +48,3 @@ impl Subnet {
         Self { network_address: address, netmask: mask }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NetworkDeviceInner {
-    address: IpAddr,
-}
-
-impl NetworkDeviceInner {
-    pub fn new(address: IpAddr) -> Self {
-        Self { address }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deref, DerefMut)]
-pub struct Loopback(NetworkDeviceInner);
-
-impl Default for Loopback {
-    fn default() -> Self {
-        Self(NetworkDeviceInner { address: IpAddr::V4(Ipv4Addr::LOCALHOST) })
-    }
-}
-
-impl Loopback {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl Display for Loopback {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "lo")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deref)]
-pub struct Veth {
-    #[deref]
-    inner: NetworkDeviceInner,
-    id: PeerId,
-}
-
-impl Veth {
-    pub fn new(address: IpAddr, id: PeerId) -> Self {
-        Self { inner: NetworkDeviceInner::new(address), id }
-    }
-
-    pub fn id(&self) -> PeerId {
-        self.id
-    }
-}
-
-impl Display for Veth {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "veth-{}", self.id)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, From)]
-pub enum NetworkDevice {
-    Loopback(Loopback),
-    Veth(Veth),
-}
-
-impl NetworkDevice {
-    pub fn new_loopback() -> Self {
-        Self::Loopback(Loopback(NetworkDeviceInner { address: IpAddr::V4(Ipv4Addr::LOCALHOST) }))
-    }
-
-    pub fn new_veth(address: IpAddr, peer_id: PeerId) -> Self {
-        Self::Veth(Veth::new(address, peer_id))
-    }
-}
-
-impl Display for NetworkDevice {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Loopback(_) => {
-                write!(f, "lo")
-            }
-            Self::Veth(Veth { id, .. }) => {
-                write!(f, "veth-{}", id)
-            }
-        }
-    }
-}
-
-// /// Create Virtual Ethernet (veth) devices and link them
-// ///
-// /// Note: device name length can be max 15 chars long
-// pub fn create_veth_pair(
-//     ns1: &mut NetworkNamespace,
-//     ns2: &mut NetworkNamespace,
-//     veth1: Veth,
-//     veth2: Veth,
-// ) -> command::Result<()> {
-//     // 1. Create veth devices in the appropriate namespaces.
-//     command::Runner::by_str(&format!(
-//         "sudo ip link add {} netns {} type veth peer name {} netns {}",
-//         &veth1, &ns1.name, &veth2, &ns2.name,
-//     ))?;
-//
-//     // 2. Add IP address and Point-to-Point mask to veth devices.
-//     command::Runner::by_str(&format!(
-//         "{} ip addr add {}/32 dev {}",
-//         ns1.prefix_command(),
-//         &veth1.address,
-//         &veth1
-//     ))?;
-//     command::Runner::by_str(&format!(
-//         "{} ip addr add {}/32 dev {}",
-//         ns2.prefix_command(),
-//         &veth2.address,
-//         &veth2
-//     ))?;
-//
-//     // 3. Turn on the devices.
-//     command::Runner::by_str(&format!("{} ip link set dev {} up", ns1.prefix_command(), &veth1))?;
-//     command::Runner::by_str(&format!("{} ip link set dev {} up", ns2.prefix_command(), &veth2))?;
-//
-//     // 4. Add explicit routing for the peers.
-//     command::Runner::by_str(&format!(
-//         "{} ip route add {} dev {}",
-//         ns1.prefix_command(),
-//         &veth2.address,
-//         &veth1
-//     ))?;
-//     command::Runner::by_str(&format!(
-//         "{} ip route add {} dev {}",
-//         ns2.prefix_command(),
-//         &veth1.address,
-//         &veth2
-//     ))?;
-//
-//     ns1.devices.push(veth1.into());
-//     ns2.devices.push(veth2.into());
-//
-//     Ok(())
-// }

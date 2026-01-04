@@ -1,15 +1,16 @@
+//! Utilies and abstractions for dealing with network namespaces.
+
 use std::io;
 use std::os::fd::{AsFd, AsRawFd};
 use std::path::{Path, PathBuf};
 
 use tokio::sync::oneshot;
 
+use crate::dynch;
 use crate::dynch::DynRequestSender;
-use crate::ip::NetworkDevice;
 use crate::namespace::helpers::current_netns;
-use crate::{TryClone, dynch};
 
-// TODO: add more docs.
+/// Helpers for managing namespaces.
 mod helpers {
     use std::{
         fs, io,
@@ -21,13 +22,13 @@ mod helpers {
     /// Kernel-stable network namespace identity
     #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
     pub struct NetnsId {
-        pub ino: u64,
+        pub inode: u64,
     }
 
     impl NetnsId {
         fn from_metadata(meta: &fs::Metadata) -> Self {
             use std::os::unix::fs::MetadataExt;
-            NetnsId { ino: meta.ino() }
+            NetnsId { inode: meta.ino() }
         }
     }
 
@@ -38,7 +39,7 @@ mod helpers {
         let meta = fs::metadata(&path)?;
         let ns = NetnsId::from_metadata(&meta);
 
-        tracing::debug!(ino = ns.ino, ?path, "current netns");
+        tracing::debug!(ino = ns.inode, ?path, "current netns");
 
         Ok(ns)
     }
@@ -50,7 +51,7 @@ mod helpers {
         let ns = NetnsId::from_metadata(&meta);
 
         tracing::debug!(
-            ino = ns.ino,
+            ino = ns.inode,
             fd = fd.as_raw_fd(),
             path = %path,
             "netns from fd"
@@ -65,12 +66,12 @@ mod helpers {
 
         let before = current_netns()?;
         let target = netns_from_fd(fd)?;
-        tracing::debug!(before_ino = before.ino, target_ino = target.ino, "setns target");
+        tracing::debug!(before_ino = before.inode, target_ino = target.inode, "setns target");
 
         nix::sched::setns(fd, CloneFlags::CLONE_NEWNET)?;
 
         let after = current_netns()?;
-        tracing::debug!(after_ino = after.ino, "after setns");
+        tracing::debug!(after_ino = after.inode, "after setns");
 
         if after != target {
             return Err(io::Error::other(format!(
@@ -87,6 +88,8 @@ mod helpers {
         Ok((before, after))
     }
 
+    /// A guard to check whether the thread remains on the same network namespace when this is
+    /// dropped.
     pub struct NetnsGuard {
         expected: NetnsId,
     }
@@ -142,10 +145,15 @@ pub enum TaskError<E> {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
-struct NetworkNamespaceInner {
-    name: String,
-    file: std::fs::File,
-    devices: Vec<NetworkDevice>,
+pub struct NetworkNamespaceInner {
+    pub name: String,
+    pub file: std::fs::File,
+}
+
+trait TryClone: Sized {
+    type Error;
+
+    fn try_clone(&self) -> std::result::Result<Self, Self::Error>;
 }
 
 impl TryClone for NetworkNamespaceInner {
@@ -154,11 +162,13 @@ impl TryClone for NetworkNamespaceInner {
     fn try_clone(&self) -> std::result::Result<Self, Self::Error> {
         let file = self.file.try_clone()?;
 
-        Ok(Self { name: self.name.clone(), file, devices: self.devices.clone() })
+        Ok(Self { name: self.name.clone(), file })
     }
 }
 
 impl NetworkNamespaceInner {
+    /// Spawn a network namespace actor able to ingest and process requests in the configured
+    /// namespace.
     ///
     /// It will create a dedicated OS thread set with this network namespace, by calling
     /// `setns(2)`, which is thread-local.
@@ -176,14 +186,14 @@ impl NetworkNamespaceInner {
             let (_before, after) = helpers::setns_verified(fd)?;
             let _guard = helpers::NetnsGuard::new(after)?;
 
-            let mut ctx = make_ctx();
-
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-            tracing::info!("starting runtime");
+
+            tracing::debug!("started runtime");
             drop(_span);
 
-            // TODO: tasks should have the [`rtnetlink::Handle`] as ctx.
             rt.block_on(async move {
+                let mut ctx = make_ctx();
+
                 while let Some(req) = rx.recv().await {
                     let (task, tx) = req.into_parts();
                     let _span = tracing::info_span!("namespace_job", ?fd, name).entered();
@@ -203,11 +213,14 @@ impl NetworkNamespaceInner {
     }
 }
 
+/// An anctor backed by a certain network namespace.
 #[derive(Debug)]
 pub struct NetworkNamespace<Ctx = ()> {
-    inner: NetworkNamespaceInner,
+    /// The inner network namespace data.
+    pub inner: NetworkNamespaceInner,
+    /// The channel to send requests.
     pub task_sender: DynRequestSender<Ctx>,
-
+    /// An handle to the underlying receiver task.
     pub _receiver_task: std::thread::JoinHandle<Result<()>>,
 }
 
@@ -223,7 +236,7 @@ impl NetworkNamespace {
         // NOTE: for internal handling, it is more useful to have a synchronous version of it.
         let file = tokio::fs::File::open(path).await?.into_std().await;
 
-        let inner = NetworkNamespaceInner { name, file, devices: Vec::new() };
+        let inner = NetworkNamespaceInner { name, file };
         let (_receiver_task, task_sender) = inner.try_clone()?.spawn(make_ctx);
 
         Ok(NetworkNamespace::<Ctx> { inner, task_sender, _receiver_task })
@@ -240,29 +253,29 @@ impl<Ctx> NetworkNamespace<Ctx> {
     }
 }
 
-// impl Drop for NetworkNamespace {
-//     fn drop(&mut self) {
-//         let namespace = self.inner.name.clone();
-//
-//         let task = async {
-//             if let Err(e) = rtnetlink::NetworkNamespace::del(namespace.clone()).await {
-//                 tracing::error!(?e, ?namespace, "failed to delete network namespace");
-//             }
-//         };
-//
-//         // If we are *inside* a Tokio runtime, we must use `block_in_place`
-//         if tokio::runtime::Handle::try_current().is_ok() {
-//             tokio::task::block_in_place(|| {
-//                 let handle = tokio::runtime::Handle::current();
-//
-//                 handle.block_on(task)
-//             });
-//             return;
-//         }
-//         // If we are NOT inside a runtime, we can safely create one
-//         let rt =
-//             tokio::runtime::Runtime::new().expect("failed to build temporary runtime for cleanup");
-//
-//         rt.block_on(task)
-//     }
-// }
+impl<Ctx> Drop for NetworkNamespace<Ctx> {
+    fn drop(&mut self) {
+        let namespace = self.inner.name.clone();
+
+        let task = async {
+            if let Err(e) = rtnetlink::NetworkNamespace::del(namespace.clone()).await {
+                tracing::error!(?e, ?namespace, "failed to delete network namespace");
+            }
+        };
+
+        // If we are *inside* a Tokio runtime, we must use `block_in_place`
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+
+                handle.block_on(task)
+            });
+            return;
+        }
+        // If we are NOT inside a runtime, we can safely create one
+        let rt =
+            tokio::runtime::Runtime::new().expect("failed to build temporary runtime for cleanup");
+
+        rt.block_on(task)
+    }
+}

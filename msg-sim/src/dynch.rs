@@ -1,5 +1,5 @@
 //! This module provides the building blocks for creating an actor able to process dynamically
-//! typed requests.
+//! typed requests, while maintaing type-safety and returning the appropriately typed responses.
 //!
 //! # Rationale
 //!
@@ -9,7 +9,7 @@
 //! where this is not applicable, and workarounds result in inconvenient solutions compared to
 //! paying a little cost of a virtual table lookup for dynamic dispatching.
 //!
-//! A class of such examples is one where an actor is tied to some non-clonable resources. In this
+//! A class of such examples is one where an actor is tied to some non-cheapy-clonable resources. In this
 //! case, it is not possible to provide multiple actors for each type of message we want to
 //! communicate in our application by assumption.
 //! A member of such class, that motivated this code from first principles, is an actor backed by a

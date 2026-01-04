@@ -1,3 +1,6 @@
+//! Utilities for creating traffic control and queue discipline requests, akin to how iproute2 does
+//! it.
+
 use std::io::{self, Read as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::LazyLock;
@@ -55,9 +58,28 @@ pub fn usec_to_ticks(delay_usec: u32, tick_in_usec: f64) -> u32 {
 
 /// The impairments that can be applied to a network link.
 ///
-/// Each field corresponds to a feature supported by Linux `netem`.
-///
 /// TODO: add support for bandwidth, burst and custom buffer sizes.
+#[derive(Debug, Clone, Copy)]
+pub struct LinkImpairment {
+    /// Latency to introduce, in microseconds. When processed, it is converted into appropriate
+    /// packet scheduler ticks.
+    pub latency: u32,
+    /// Limit of packets in the queue.
+    pub limit: u32,
+    /// Packet loss.
+    pub loss: f64,
+    /// Re-ordering gap.
+    pub gap: u32,
+    /// Random packet duplication.
+    pub duplicate: f64,
+    /// Random jitter, in microseconds. When processed, it is converted into appropriate
+    /// packet scheduler ticks.
+    pub jitter: u32,
+}
+
+/// The impairments that can be applied to a network link.
+///
+/// Each field corresponds to a feature supported by Linux `netem`.
 ///
 /// For netem compatibility, it is important the fields are in this exact order.
 ///
@@ -73,21 +95,18 @@ pub fn usec_to_ticks(delay_usec: u32, tick_in_usec: f64) -> u32 {
 ///     __u32 jitter; /* Expressed in packet scheduler ticks */
 /// };
 /// ```
-#[derive(Debug, Clone, Copy)]
-pub struct LinkImpairment {
-    /// Latency to introduce, in microseconds. When processed, it is converted into appropriate
-    /// packet scheduler ticks.
+pub struct NetemQopt {
+    /// Latency to introduce, in packet scheduler ticks.
     pub latency: u32,
-    /// fifo limit (packets).
+    /// Limit of packets in the queue.
     pub limit: u32,
-    /// Packet loss.
+    /// Packet loss, as a percentage projected in the u32 range.
     pub loss: u32,
-    /// Re-ordering gap.
+    /// Re-ordering gap
     pub gap: u32,
-    /// Random packet duplication.
+    /// Random packet duplication, as a percentage projected in the u32 range.
     pub duplicate: u32,
-    /// Random jitter, in microseconds. When processed, it is converted into appropriate
-    /// packet scheduler ticks.
+    /// Random jitter, in microseconds. in packet scheduler ticks.
     pub jitter: u32,
 }
 
@@ -95,17 +114,17 @@ impl Default for LinkImpairment {
     fn default() -> Self {
         Self {
             latency: 0,
-            limit: 1_000, // netem default limit
-            loss: 0,
+            limit: 1_000, // Netem default limit
+            loss: 0.0,
             gap: 0,
-            duplicate: 0,
+            duplicate: 0.0,
             jitter: 0,
         }
     }
 }
 
-impl LinkImpairment {
-    pub fn loss_probability(percent: f64) -> u32 {
+impl NetemQopt {
+    pub fn u32_probability(percent: f64) -> u32 {
         (percent / 100.0 * u32::MAX as f64) as u32
     }
 
@@ -121,6 +140,19 @@ impl LinkImpairment {
     }
 }
 
+impl From<LinkImpairment> for NetemQopt {
+    fn from(value: LinkImpairment) -> Self {
+        Self {
+            latency: (value.latency as f64 * *TICK_IN_USEC) as u32,
+            limit: value.limit,
+            loss: Self::u32_probability(value.loss),
+            gap: value.gap,
+            duplicate: Self::u32_probability(value.duplicate),
+            jitter: (value.jitter as f64 * *TICK_IN_USEC) as u32,
+        }
+    }
+}
+
 fn ipv4_mask(prefix_len: u8) -> Ipv4Addr {
     let mask_u32 = u32::MAX << (32 - prefix_len);
     Ipv4Addr::from(mask_u32)
@@ -131,6 +163,7 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
     Ipv6Addr::from(mask_u128)
 }
 
+/// The common fields of queue discipline requests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QdiscRequestInner {
     pub interface_index: i32,
@@ -153,6 +186,7 @@ impl QdiscRequestInner {
     }
 }
 
+/// A builder for prio(8) qdisc requests.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QdiscPrioRequest {
     pub inner: QdiscRequestInner,
@@ -194,23 +228,21 @@ impl QdiscPrioRequest {
     }
 }
 
+/// A builder for netem(8) qdisc requests.
 pub struct QDiscNetemRequest {
     pub inner: QdiscRequestInner,
-    pub impairment: LinkImpairment,
+    pub impairment: NetemQopt,
 }
 
 impl QDiscNetemRequest {
-    pub fn new(inner: QdiscRequestInner, impairment: LinkImpairment) -> Self {
+    pub fn new(inner: QdiscRequestInner, impairment: NetemQopt) -> Self {
         Self { inner, impairment }
     }
 
-    pub fn build(mut self) -> NetlinkMessage<RouteNetlinkMessage> {
+    pub fn build(self) -> NetlinkMessage<RouteNetlinkMessage> {
         let mut tc_message = TcMessage::with_index(self.inner.interface_index);
         tc_message.header.parent = self.inner.parent;
         tc_message.header.handle = self.inner.handle;
-
-        self.impairment.latency = (self.impairment.latency as f64 * *TICK_IN_USEC) as u32;
-        self.impairment.jitter = (self.impairment.jitter as f64 * *TICK_IN_USEC) as u32;
 
         tc_message.attributes.push(TcAttribute::Kind("netem".to_string()));
         tc_message
@@ -226,19 +258,14 @@ impl QDiscNetemRequest {
 
 /// Creates an RTM_NEWTFILTER request that classifies packets by destination IP
 /// (IPv4 or IPv6) into `classid` (e.g. 1:3 under a prio qdisc).
-///
-/// - `ifindex`: interface index of dev (ns1-hub)
-/// - `parent`: the qdisc handle you attach the filter to (e.g. 1:0 => 0x0001_0000)
-/// - `pref`: filter preference/priority (like `prio`/`pref` in tc); 0 is fine if you
-///   don't care about ordering.
-/// - `dst`: the destination IP to match
-/// - `prefix_len`: /32, /128, etc.
-/// - `classid`: the class you want to direct into (e.g. 1:3 => 0x0001_0003)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlowerFilterRequest {
     pub inner: QdiscRequestInner,
+    /// The destination IP to match.
     pub destination: IpAddr,
-    pub prefix: u8,
+    /// The mask, e.g. /16, /32, /128 etc.
+    pub mask: u8,
+    /// The class you want to direct into (e.g. 1:3 => 0x0001_0003).
     pub class_id: u32,
 }
 
@@ -248,13 +275,13 @@ impl FlowerFilterRequest {
             class_id: (inner.parent.major as u32) << 16 | 0x0003,
             inner,
             destination,
-            prefix: 32,
+            mask: 32,
             // Priority band 3.
         }
     }
 
     pub fn with_prefix(mut self, prefix: u8) -> Self {
-        self.prefix = prefix;
+        self.mask = prefix;
         self
     }
 
@@ -267,7 +294,7 @@ impl FlowerFilterRequest {
         // Pick protocol and build the family-specific flower keys.
         let (proto_ethertype, match_opts): (u16, Vec<TcOption>) = match self.destination {
             IpAddr::V4(v4) => {
-                let mask = ipv4_mask(self.prefix);
+                let mask = ipv4_mask(self.mask);
                 (
                     ETH_P_IP,
                     vec![
@@ -277,7 +304,7 @@ impl FlowerFilterRequest {
                 )
             }
             IpAddr::V6(v6) => {
-                let mask = ipv6_mask(self.prefix);
+                let mask = ipv6_mask(self.mask);
                 (
                     ETH_P_IPV6,
                     vec![

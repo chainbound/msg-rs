@@ -1,3 +1,5 @@
+//! Wrappers over [`nix::libc`] functions.
+
 use std::{ffi::c_str, num::NonZeroU32, str::FromStr};
 
 pub fn if_nametoindex(name: &str) -> Option<NonZeroU32> {
