@@ -66,26 +66,48 @@ impl SendCommand {
     }
 }
 
+/// Options for the connection manager.
+#[derive(Debug, Clone)]
+pub struct ConnOptions {
+    /// Optional authentication token.
+    pub auth_token: Option<Bytes>,
+    /// The backoff duration for the underlying transport on reconnections.
+    pub backoff_duration: Duration,
+    /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
+    pub retry_attempts: Option<usize>,
+}
+
+impl Default for ConnOptions {
+    fn default() -> Self {
+        Self {
+            auth_token: None,
+            // These values give a good default for most use cases.
+            //
+            // * formula: w_i = w_0 * 2^i
+            // * w_0 = 200ms, i = 0..9
+            // * worst-case total wait: sum(w_i) = 200ms * (2^9 - 1) = 102.2s
+            backoff_duration: Duration::from_millis(200),
+            retry_attempts: Some(9),
+        }
+    }
+}
+
 /// The request socket options.
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
-    /// Optional authentication token.
-    auth_token: Option<Bytes>,
+    /// Options for the connection manager.
+    pub conn: ConnOptions,
     /// Timeout duration for requests.
-    timeout: Duration,
+    pub timeout: Duration,
     /// Wether to block on initial connection to the target.
-    blocking_connect: bool,
-    /// The backoff duration for the underlying transport on reconnections.
-    backoff_duration: Duration,
-    /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
-    retry_attempts: Option<usize>,
-    /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
-    /// this threshold, it will not be compressed.
-    min_compress_size: usize,
+    pub blocking_connect: bool,
+    /// Minimum payload size in bytes for compression to be used.
+    /// If the payload is smaller than this threshold, it will not be compressed.
+    pub min_compress_size: usize,
     /// The size of the write buffer in bytes.
-    write_buffer_size: usize,
-    /// The linger duration for the write buffer (how long to wait before flushing the buffer).
-    write_buffer_linger: Option<Duration>,
+    pub write_buffer_size: usize,
+    /// The linger duration for the write buffer (how long to wait before flushing).
+    pub write_buffer_linger: Option<Duration>,
 }
 
 impl ReqOptions {
@@ -129,7 +151,7 @@ impl ReqOptions {
 impl ReqOptions {
     /// Sets the authentication token for the socket.
     pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
-        self.auth_token = Some(auth_token);
+        self.conn.auth_token = Some(auth_token);
         self
     }
 
@@ -147,26 +169,28 @@ impl ReqOptions {
 
     /// Sets the backoff duration for the socket.
     pub fn with_backoff_duration(mut self, backoff_duration: Duration) -> Self {
-        self.backoff_duration = backoff_duration;
+        self.conn.backoff_duration = backoff_duration;
         self
     }
 
-    /// Sets the maximum number of retry attempts. If `None`, all connections will be retried
-    /// indefinitely.
+    /// Sets the maximum number of retry attempts.
+    ///
+    /// If `None`, all connections will be retried indefinitely.
     pub fn with_retry_attempts(mut self, retry_attempts: usize) -> Self {
-        self.retry_attempts = Some(retry_attempts);
+        self.conn.retry_attempts = Some(retry_attempts);
         self
     }
 
-    /// Sets the minimum payload size in bytes for compression to be used. If the payload is smaller
-    /// than this threshold, it will not be compressed.
+    /// Sets the minimum payload size in bytes for compression to be used.
+    ///
+    /// If the payload is smaller than this threshold, it will not be compressed.
     pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
     }
 
-    /// Sets the size (max capacity) of the write buffer in bytes. When the buffer is full, it will
-    /// be flushed to the underlying transport.
+    /// Sets the size (max capacity) of the write buffer in bytes.
+    /// When the buffer is full, it will be flushed to the underlying transport.
     ///
     /// Default: 8KiB
     pub fn with_write_buffer_size(mut self, size: usize) -> Self {
@@ -187,11 +211,9 @@ impl ReqOptions {
 impl Default for ReqOptions {
     fn default() -> Self {
         Self {
-            auth_token: None,
-            timeout: std::time::Duration::from_secs(5),
+            conn: ConnOptions::default(),
+            timeout: Duration::from_secs(5),
             blocking_connect: false,
-            backoff_duration: Duration::from_millis(200),
-            retry_attempts: Some(24),
             min_compress_size: 8192,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),

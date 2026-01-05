@@ -6,6 +6,8 @@ use std::{
 };
 use tokio::time::sleep;
 
+use crate::ConnOptions;
+
 /// Helper trait alias for backoff streams.
 /// We define any stream that yields `Duration`s as a backoff
 pub trait Backoff: Stream<Item = Duration> + Unpin {}
@@ -36,6 +38,12 @@ impl ExponentialBackoff {
     /// (Re)-set the timeout to the current backoff duration.
     fn reset_timeout(&mut self) {
         self.timeout = Some(Box::pin(sleep(self.backoff)));
+    }
+}
+
+impl From<&ConnOptions> for ExponentialBackoff {
+    fn from(options: &ConnOptions) -> Self {
+        Self::new(options.backoff_duration, options.retry_attempts)
     }
 }
 

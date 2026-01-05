@@ -69,10 +69,7 @@ where
         // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
             addr,
-            backoff: ExponentialBackoff::new(
-                self.options.backoff_duration,
-                self.options.retry_attempts,
-            ),
+            backoff: ExponentialBackoff::from(&self.options.conn),
         };
 
         self.spawn_driver(addr, transport, conn_state)
@@ -161,10 +158,7 @@ where
             // by the backend task as soon as the driver is spawned.
             ConnectionState::Inactive {
                 addr: endpoint.clone(),
-                backoff: ExponentialBackoff::new(
-                    self.options.backoff_duration,
-                    self.options.retry_attempts,
-                ),
+                backoff: ExponentialBackoff::from(&self.options.conn),
             }
         };
 
@@ -195,7 +189,7 @@ where
 
         // Create connection manager
         let conn_manager = ConnManager::new(
-            Arc::clone(&self.options),
+            self.options.conn.clone(),
             transport,
             endpoint,
             conn_ctl,

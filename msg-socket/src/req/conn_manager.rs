@@ -11,7 +11,7 @@ use msg_common::span::{EnterSpan as _, WithSpan};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use crate::{ConnectionState, ExponentialBackoff, ReqOptions};
+use crate::{ConnOptions, ConnectionState, ExponentialBackoff};
 
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{auth, reqrep};
@@ -35,8 +35,8 @@ pub(crate) type ConnCtl<Io, S, A> = ConnectionState<Conn<Io, S, A>, ExponentialB
 
 /// Manages the connection lifecycle: connecting, reconnecting, and maintaining the connection.
 pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
-    /// Options inherited from the socket.
-    options: Arc<ReqOptions>,
+    /// Options for the connection manager.
+    options: ConnOptions,
     /// The connection task which handles the connection to the server.
     conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
@@ -89,7 +89,7 @@ where
     A: Address,
 {
     pub(crate) fn new(
-        options: Arc<ReqOptions>,
+        options: ConnOptions,
         transport: T,
         addr: A,
         conn_ctl: ConnCtl<T::Io, T::Stats, A>,
@@ -121,15 +121,13 @@ where
     }
 
     /// Reset the connection state to inactive, so that it will be re-tried.
+    ///
     /// This is done when the connection is closed or an error occurs.
     #[inline]
     pub(crate) fn reset_connection(&mut self) {
         self.conn_ctl = ConnectionState::Inactive {
             addr: self.addr.clone(),
-            backoff: ExponentialBackoff::new(
-                self.options.backoff_duration,
-                self.options.retry_attempts,
-            ),
+            backoff: ExponentialBackoff::from(&self.options),
         };
     }
 
