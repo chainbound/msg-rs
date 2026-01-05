@@ -12,6 +12,9 @@ repository.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+cfg-if.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 msg-socket.workspace = true
 msg-transport.workspace = true
 
@@ -23,7 +26,6 @@ derive_more.workspace = true
 tokio.workspace = true
 futures.workspace = true
 rtnetlink = { version = "0.19.0" }
-
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

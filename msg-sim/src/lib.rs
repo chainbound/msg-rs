@@ -3,9 +3,13 @@
 
 //! In-process network emulation for Linux, powered by `rtnetlink`.
 
-pub mod dynch;
-pub mod ip;
-pub mod namespace;
-pub mod network;
-pub mod tc;
-pub mod wrappers;
+cfg_if::cfg_if!(
+    if #[cfg(target_os = "linux")] {
+        pub mod dynch;
+        pub mod ip;
+        pub mod namespace;
+        pub mod network;
+        pub mod tc;
+        pub mod wrappers;
+    }
+);
