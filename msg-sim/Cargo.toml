@@ -18,11 +18,9 @@ cfg-if.workspace = true
 msg-socket.workspace = true
 msg-transport.workspace = true
 
-pnet.workspace = true
 nix.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-derive_more.workspace = true
 tokio.workspace = true
 futures.workspace = true
 rtnetlink = { version = "0.20.0" }

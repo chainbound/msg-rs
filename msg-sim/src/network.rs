@@ -72,7 +72,7 @@ impl PeerIdExt for PeerId {
 
 /// A ordered pair of peers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Link(PeerId, PeerId);
+pub struct Link(pub PeerId, pub PeerId);
 
 impl Link {
     #[inline]
