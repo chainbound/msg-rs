@@ -1,20 +1,20 @@
-use arc_swap::Guard;
-use bytes::Bytes;
-use msg_common::span::WithSpan;
-use rustc_hash::FxHashMap;
 use std::{
     marker::PhantomData,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, atomic::Ordering},
-    time::Duration,
 };
+
+use arc_swap::Guard;
+use bytes::Bytes;
+use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::Framed;
 
+use msg_common::span::WithSpan;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
@@ -23,7 +23,8 @@ use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
-        driver::{ConnectionCtl, ReqDriver},
+        conn_manager::{ConnCtl, ConnManager},
+        driver::ReqDriver,
         stats::ReqStats,
     },
     stats::SocketStats,
@@ -68,7 +69,7 @@ where
         // by the backend task as soon as the driver is spawned.
         let conn_state = ConnectionState::Inactive {
             addr,
-            backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+            backoff: ExponentialBackoff::from(&self.options.conn),
         };
 
         self.spawn_driver(addr, transport, conn_state)
@@ -157,7 +158,7 @@ where
             // by the backend task as soon as the driver is spawned.
             ConnectionState::Inactive {
                 addr: endpoint.clone(),
-                backoff: ExponentialBackoff::new(Duration::from_millis(20), 16),
+                backoff: ExponentialBackoff::from(&self.options.conn),
             }
         };
 
@@ -167,12 +168,7 @@ where
     }
 
     /// Internal method to initialize and spawn the driver.
-    fn spawn_driver(
-        &mut self,
-        endpoint: A,
-        transport: T,
-        conn_state: ConnectionCtl<T::Io, T::Stats, A>,
-    ) {
+    fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -191,19 +187,26 @@ where
             timer
         });
 
+        // Create connection manager
+        let conn_manager = ConnManager::new(
+            self.options.conn.clone(),
+            transport,
+            endpoint,
+            conn_ctl,
+            Arc::clone(&self.state.transport_stats),
+            span.clone(),
+        );
+
         // Create the socket backend
         let driver: ReqDriver<T, A> = ReqDriver {
-            addr: endpoint,
             options: Arc::clone(&self.options),
             socket_state: self.state.clone(),
             id_counter: 0,
             from_socket,
-            transport,
-            conn_state,
+            conn_manager,
             linger_timer,
             pending_requests,
             timeout_check_interval,
-            conn_task: None,
             egress_queue: Default::default(),
             compressor: self.compressor.clone(),
             id,

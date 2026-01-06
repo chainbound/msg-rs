@@ -6,6 +6,8 @@ use std::{
 };
 use tokio::time::sleep;
 
+use crate::ConnOptions;
+
 /// Helper trait alias for backoff streams.
 /// We define any stream that yields `Duration`s as a backoff
 pub trait Backoff: Stream<Item = Duration> + Unpin {}
@@ -18,7 +20,8 @@ pub struct ExponentialBackoff {
     /// Current number of retries.
     retry_count: usize,
     /// Maximum number of retries before closing the stream.
-    max_retries: usize,
+    /// If `None`, the stream will retry indefinitely.
+    max_retries: Option<usize>,
     /// The current backoff duration.
     backoff: Duration,
     /// The current backoff timeout, if any.
@@ -28,13 +31,19 @@ pub struct ExponentialBackoff {
 
 impl ExponentialBackoff {
     /// Creates a new exponential backoff stream with the given initial duration and max retries.
-    pub fn new(initial: Duration, max_retries: usize) -> Self {
+    pub fn new(initial: Duration, max_retries: Option<usize>) -> Self {
         Self { retry_count: 0, max_retries, backoff: initial, timeout: None }
     }
 
     /// (Re)-set the timeout to the current backoff duration.
     fn reset_timeout(&mut self) {
         self.timeout = Some(Box::pin(sleep(self.backoff)));
+    }
+}
+
+impl From<&ConnOptions> for ExponentialBackoff {
+    fn from(options: &ConnOptions) -> Self {
+        Self::new(options.backoff_duration, options.retry_attempts)
     }
 }
 
@@ -59,8 +68,10 @@ impl Stream for ExponentialBackoff {
                 this.retry_count += 1;
 
                 // Close the stream
-                if this.retry_count >= this.max_retries {
-                    return Poll::Ready(None);
+                if let Some(max_retries) = this.max_retries {
+                    if this.retry_count >= max_retries {
+                        return Poll::Ready(None);
+                    }
                 }
 
                 this.reset_timeout();
