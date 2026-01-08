@@ -107,30 +107,32 @@ impl<Ctx> DynRequestSender<Ctx> {
     ///     counter: usize,
     /// }
     ///
-    /// let (tx, mut rx) = dynch::channel::<Ctx>(8);
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let (tx, mut rx) = dynch::channel::<Ctx>(8);
     ///
-    /// tokio::spawn(async move {
-    ///     let mut ctx = Ctx::default();
+    ///     tokio::spawn(async move {
+    ///         let mut ctx = Ctx::default();
     ///
-    ///     while let Some(req) = rx.recv().await {
-    ///         let (task, tx) = req.into_parts();
-    ///         // Execute with access to actor-owned context:
-    ///         let value = task(&mut ctx).await; // type-erased
-    ///         let _ = tx.send(value);
-    ///     }
-    /// });
+    ///         while let Some(req) = rx.recv().await {
+    ///             let (task, tx) = req.into_parts();
+    ///             // Execute with access to actor-owned context:
+    ///             let value = task(&mut ctx).await; // type-erased
+    ///             let _ = tx.send(value);
+    ///         }
+    ///     });
     ///
-    /// let res = tx
-    ///     .submit(|ctx| Box::pin(async move {
-    ///         ctx.counter += 1;
-    ///         ctx.counter
-    ///     }))
-    ///     .await?
-    ///     .receive()
-    ///     .await?;
+    ///     let res = tx
+    ///         .submit(|ctx| Box::pin(async move {
+    ///             ctx.counter += 1;
+    ///             ctx.counter
+    ///         }))
+    ///         .await.unwrap()
+    ///         .receive()
+    ///         .await.unwrap();
     ///
-    /// assert_eq!(res, 1);
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    ///     assert_eq!(res, 1);
+    /// }
     /// ```
     pub async fn submit<T, F>(
         &self,
