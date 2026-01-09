@@ -20,7 +20,7 @@ use msg_wire::compression::Compressor;
 /// Publisher sockets are used to publish messages under certain topics to multiple subscribers.
 ///
 /// ## Session
-/// Per subscriber, the socket maintains a [session](super::session::SubscriberSession). The session
+/// Per subscriber, the socket maintains a session. The session
 /// manages the underlying connection and all of its state, such as the topic subscriptions. It also
 /// manages a queue of messages to be transmitted on the connection.
 #[derive(Clone)]

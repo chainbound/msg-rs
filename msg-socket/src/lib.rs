@@ -2,8 +2,8 @@
 //!
 //! This crate exposes a set of socket types that can be used to facilitate multiple communication
 //! patterns, such as:
-//! - [Request](req)-[Reply](rep)
-//! - [Publish](pub)-[Subscribe](sub)
+//! - Request-Reply
+//! - Publish-Subscribe
 //!
 //! Sockets are the main entrypoint in this library and facilitate all connectivity, like binding or
 //! connecting, and sending and receiving messages over connections.
