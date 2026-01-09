@@ -46,7 +46,6 @@ use std::{any::Any, future::Future, marker::PhantomData, pin::Pin};
 /// # Example
 ///
 /// See [`AnyCast`].
-/// ```
 pub trait Cast: Send + 'static {
     /// The type-erased representation used for transport.
     type Erased: Send + 'static;
