@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll, ready},
@@ -8,40 +7,25 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+use futures::{Future, SinkExt, StreamExt};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Interval,
 };
-use tokio_util::codec::Framed;
-use tracing::Instrument;
 
 use super::{ReqError, ReqOptions};
-use crate::{ConnectionState, ExponentialBackoff, SendCommand, req::SocketState};
+use crate::{
+    SendCommand,
+    req::{SocketState, conn_manager::ConnManager},
+};
 
-use msg_transport::{Address, MeteredIo, Transport};
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+use msg_transport::{Address, Transport};
 use msg_wire::{
-    auth::{self},
     compression::{Compressor, try_decompress_payload},
     reqrep,
 };
-
-/// A connection task that connects to a server and returns the underlying IO object.
-type ConnectionTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
-
-/// A connection controller that manages the connection to a server with an exponential backoff.
-///
-/// # Usage of Framed
-/// [`Framed`] is used for encoding and decoding messages ("frames").
-/// Usually, [`Framed`] has its own internal buffering mechanism, that's respected
-/// when calling `poll_ready` and configured by [`Framed::set_backpressure_boundary`].
-///
-/// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
-/// the framed buffer.
-pub(crate) type ConnectionCtl<Io, S, A> =
-    ConnectionState<Framed<MeteredIo<Io, S, A>, reqrep::Codec>, ExponentialBackoff, A>;
 
 /// The request socket driver. Endless future that drives
 /// the socket forward.
@@ -54,15 +38,8 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) id_counter: u32,
     /// Commands from the socket.
     pub(crate) from_socket: mpsc::Receiver<SendCommand>,
-    /// The transport for this socket.
-    pub(crate) transport: T,
-    /// The address of the server.
-    pub(crate) addr: A,
-    /// The connection task which handles the connection to the server.
-    pub(crate) conn_task: Option<WithSpan<ConnectionTask<T::Io, T::Error>>>,
-    /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
-    /// The [`Framed`] object can send and receive messages from the socket.
-    pub(crate) conn_state: ConnectionCtl<T::Io, T::Stats, A>,
+    /// Connection manager that handles connection lifecycle.
+    pub(crate) conn_manager: ConnManager<T, A>,
     /// The timer for the write buffer linger.
     pub(crate) linger_timer: Option<Interval>,
     /// The outgoing message queue.
@@ -89,62 +66,11 @@ pub(crate) struct PendingRequest {
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
-/// Perform the authentication handshake with the server.
-#[tracing::instrument(skip_all, "auth", fields(token = ?token))]
-async fn authentication_handshake<T, A>(mut io: T::Io, token: Bytes) -> Result<T::Io, T::Error>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    let mut conn = Framed::new(&mut io, auth::Codec::new_client());
-
-    conn.send(auth::Message::Auth(token)).await?;
-    tracing::debug!("sent auth, waiting ack from server");
-
-    // Wait for the response
-    let Some(res) = conn.next().await else {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed").into());
-    };
-
-    match res {
-        Ok(auth::Message::Ack) => {
-            tracing::debug!("received ack");
-            Ok(io)
-        }
-        Ok(msg) => {
-            tracing::error!(?msg, "unexpected ack result");
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
-        }
-        Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-    }
-}
-
 impl<T, A> ReqDriver<T, A>
 where
     T: Transport<A>,
     A: Address,
 {
-    /// Start the connection task to the server, handling authentication if necessary.
-    /// The result will be polled by the driver and re-tried according to the backoff policy.
-    fn try_connect(&mut self, addr: A) {
-        let connect = self.transport.connect(addr.clone());
-        let token = self.options.auth_token.clone();
-
-        let task = async move {
-            let io = connect.await?;
-
-            let Some(token) = token else {
-                return Ok(io);
-            };
-
-            authentication_handshake::<T, A>(io, token).await
-        }
-        .in_current_span();
-
-        // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
-        self.conn_task = Some(WithSpan::current(Box::pin(task)));
-    }
-
     /// Handle an incoming message from the connection.
     fn on_message(&mut self, msg: reqrep::Message) {
         let Some(pending) = self.pending_requests.remove(&msg.id()).enter() else {
@@ -182,7 +108,7 @@ where
     /// Handle an incoming command from the socket frontend.
     fn on_send(&mut self, cmd: SendCommand) {
         let SendCommand { mut message, response } = cmd;
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         // We want ot inherit the span from the socket frontend
         let span =
@@ -237,16 +163,6 @@ where
             }
         }
     }
-
-    /// Reset the connection state to inactive, so that it will be re-tried.
-    /// This is done when the connection is closed or an error occurs.
-    #[inline]
-    fn reset_connection(&mut self) {
-        self.conn_state = ConnectionState::Inactive {
-            addr: self.addr.clone(),
-            backoff: ExponentialBackoff::new(self.options.backoff_duration, 16),
-        };
-    }
 }
 
 impl<T, A> Future for ReqDriver<T, A>
@@ -261,58 +177,11 @@ where
         let span = this.span.clone();
 
         loop {
-            // TODO: Group connection management together in a function or at a different level of
-            // abstraction.
-
-            // Poll the active connection task, if any
-            if let Some(ref mut conn_task) = this.conn_task {
-                if let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
-                    // As soon as the connection task finishes, set it to `None`.
-                    // - If it was successful, set the connection to active
-                    // - If it failed, it will be re-tried until the backoff limit is reached.
-                    this.conn_task = None;
-
-                    match result.inner {
-                        Ok(io) => {
-                            tracing::info!("connected");
-
-                            let metered =
-                                MeteredIo::new(io, Arc::clone(&this.socket_state.transport_stats));
-
-                            let framed = Framed::new(metered, reqrep::Codec::new());
-                            this.conn_state = ConnectionState::Active { channel: framed };
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "failed to connect");
-                        }
-                    }
-                }
-            }
-
-            // If the connection is inactive, try to connect to the server or poll the backoff
-            // timer if we're already trying to connect.
-            if let ConnectionState::Inactive { ref mut backoff, ref addr } = this.conn_state {
-                let Poll::Ready(item) = backoff.poll_next_unpin(cx) else { return Poll::Pending };
-
-                let _span = tracing::info_span!(parent: &this.span, "connect").entered();
-
-                if let Some(duration) = item {
-                    if this.conn_task.is_none() {
-                        tracing::debug!(backoff = ?duration, "trying connection");
-                        this.try_connect(addr.clone());
-                    } else {
-                        tracing::debug!(backoff = ?duration, "not retrying as there is already a connection task");
-                    }
-                } else {
-                    tracing::error!("exceeded maximum number of retries, terminating connection");
-
-                    return Poll::Ready(());
-                }
-            }
-
-            // If there is no active connection, continue polling the backoff
-            let ConnectionState::Active { ref mut channel } = this.conn_state else {
-                continue;
+            // Handle connection management: connection task, backoff, and retry logic
+            let channel = match this.conn_manager.poll(cx) {
+                Poll::Ready(Some(channel)) => channel,
+                Poll::Ready(None) => return Poll::Ready(()),
+                Poll::Pending => return Poll::Pending,
             };
 
             // Check for incoming messages from the socket
@@ -330,7 +199,7 @@ where
                     );
 
                     // set the connection to inactive, so that it will be re-tried
-                    this.reset_connection();
+                    this.conn_manager.reset_connection();
 
                     continue;
                 }
@@ -339,7 +208,7 @@ where
                     tracing::warn!("connection closed, resetting connection state");
 
                     // set the connection to inactive, so that it will be re-tried
-                    this.reset_connection();
+                    this.conn_manager.reset_connection();
 
                     continue;
                 }
@@ -363,7 +232,7 @@ where
                         tracing::error!(err = ?e, "Failed to send message to socket");
 
                         // set the connection to inactive, so that it will be re-tried
-                        this.reset_connection();
+                        this.conn_manager.reset_connection();
                     }
                 }
 
@@ -374,7 +243,7 @@ where
             if channel.write_buffer().len() >= this.options.write_buffer_size {
                 if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                     tracing::error!(err = ?e, "Failed to flush connection");
-                    this.reset_connection();
+                    this.conn_manager.reset_connection();
                     continue;
                 }
 
@@ -388,7 +257,7 @@ where
                 if !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
                     if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                         tracing::error!(err = ?e, "Failed to flush connection");
-                        this.reset_connection();
+                        this.conn_manager.reset_connection();
                     }
                 }
             }
@@ -410,9 +279,9 @@ where
                         "socket dropped, shutting down backend and flushing connection"
                     );
 
-                    if let ConnectionState::Active { ref mut channel } = this.conn_state {
+                    if let Some(channel) = this.conn_manager.active_connection() {
                         let _ = ready!(channel.poll_close_unpin(cx));
-                    };
+                    }
 
                     return Poll::Ready(());
                 }
