@@ -32,10 +32,10 @@ pub(super) struct SubscriberSession<Io> {
     pub(super) conn: Framed<Io, pubsub::Codec>,
     /// The topic filter (a prefix trie that works with strings)
     pub(super) topic_filter: PrefixTrie,
-    /// Whether or not the connection should be flushed (i.e. data was written).
-    pub(super) should_flush: bool,
-    /// Interval for flushing the connection. This is secondary to `should_flush`.
-    pub(super) flush_interval: Option<tokio::time::Interval>,
+    /// The timer for the write buffer linger.
+    pub(super) linger_timer: Option<tokio::time::Interval>,
+    /// The size of the write buffer.
+    pub(super) write_buffer_size: usize,
 }
 
 impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
@@ -70,26 +70,6 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
             ControlMsg::Close => {
                 debug!("Closing session after receiving close message {}", self.session_id);
             }
-        }
-    }
-
-    /// Checks if the connection should be flushed.
-    #[inline]
-    fn should_flush(&mut self, cx: &mut Context<'_>) -> bool {
-        if self.should_flush {
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.poll_tick(cx).is_ready()
-            } else {
-                true
-            }
-        } else {
-            // If we shouldn't flush, reset the interval so we don't get woken up
-            // every time the interval expires
-            if let Some(interval) = self.flush_interval.as_mut() {
-                interval.reset()
-            }
-
-            false
         }
     }
 }
@@ -140,39 +120,25 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
         let this = self.get_mut();
 
         loop {
-            // First check if we should flush the connection. We only do this if we have written
-            // some data and the flush interval has elapsed. Only when we have succesfully flushed
-            // the data will we reset the `should_flush` flag.
-            if this.should_flush(cx) {
-                if let Poll::Ready(Ok(_)) = this.conn.poll_flush_unpin(cx) {
-                    this.should_flush = false;
-                }
-            }
+            // NOTE: We try to drain the queue first, writing everything to
+            // the `Framed` internal buffer. When all messages are written, we move on to flushing
+            // the connection in the block below. We DO NOT rely on the `Framed` internal
+            // backpressure boundary, because we do not call `poll_ready`.
+            if let Some(msg) = this.pending_egress.take() {
+                debug!(?msg, "Sending message");
+                let msg_len = msg.size();
 
-            // Then, try to drain the egress queue.
-            if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.pending_egress.take() {
-                    debug!(?msg, "Sending message");
-                    let msg_len = msg.size();
-
-                    match this.conn.start_send_unpin(msg) {
-                        Ok(_) => {
-                            this.state.stats.specific.increment_tx(msg_len);
-
-                            this.should_flush = true;
-                            // We might be able to send more queued messages
-                            continue;
-                        }
-                        Err(e) => {
-                            error!(err = ?e, "Failed to send message to socket");
-                            let _ = this.conn.poll_close_unpin(cx);
-                            // End this stream as we can't send any more messages
-                            return Poll::Ready(());
-                        }
+                match this.conn.start_send_unpin(msg) {
+                    Ok(_) => {
+                        this.state.stats.specific.increment_tx(msg_len);
+                    }
+                    Err(e) => {
+                        error!(err = ?e, "Failed to send message to socket");
+                        let _ = this.conn.poll_close_unpin(cx);
+                        // End this stream as we can't send any more messages
+                        return Poll::Ready(());
                     }
                 }
-            } else {
-                return Poll::Pending;
             }
 
             // Poll outgoing messages
@@ -189,6 +155,32 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                     None => {
                         debug!("Socket closed, shutting down session {}", this.session_id);
                         let _ = this.conn.poll_close_unpin(cx);
+                        return Poll::Ready(());
+                    }
+                }
+            }
+
+            // Check flushing conditions
+            if this.conn.write_buffer().len() >= this.write_buffer_size {
+                if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                    tracing::error!(err = ?e, session_id = this.seq, "Failed to flush connection, shutting down session");
+                    let _ = this.conn.poll_close_unpin(cx);
+                    // End this stream as we can't send any more messages
+                    return Poll::Ready(());
+                }
+
+                if let Some(ref mut linger_timer) = this.linger_timer {
+                    // Reset the linger timer.
+                    linger_timer.reset();
+                }
+            }
+
+            if let Some(ref mut linger_timer) = this.linger_timer {
+                if !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
+                    if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+                        tracing::error!(err = ?e, "Failed to flush connection");
+                        let _ = this.conn.poll_close_unpin(cx);
+                        // End this stream as we can't send any more messages
                         return Poll::Ready(());
                     }
                 }

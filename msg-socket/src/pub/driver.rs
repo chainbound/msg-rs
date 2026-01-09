@@ -58,8 +58,7 @@ where
                         // Run custom authenticator
                         debug!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
 
-                        let mut framed = Framed::new(auth.stream, pubsub::Codec::new());
-                        framed.set_backpressure_boundary(this.options.backpressure_boundary);
+                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
 
                         let session = SubscriberSession {
                             seq: 0,
@@ -69,8 +68,11 @@ where
                             pending_egress: None,
                             conn: framed,
                             topic_filter: PrefixTrie::new(),
-                            should_flush: false,
-                            flush_interval: this.options.flush_interval.map(tokio::time::interval),
+                            linger_timer: this
+                                .options
+                                .write_buffer_linger
+                                .map(tokio::time::interval),
+                            write_buffer_size: this.options.write_buffer_size,
                         };
 
                         tokio::spawn(session);
@@ -183,8 +185,7 @@ where
                 Ok(AuthResult { id, addr, stream: conn.into_inner() })
             });
         } else {
-            let mut framed = Framed::new(io, pubsub::Codec::new());
-            framed.set_backpressure_boundary(self.options.backpressure_boundary);
+            let framed = Framed::new(io, pubsub::Codec::new());
 
             let session = SubscriberSession {
                 seq: 0,
@@ -194,8 +195,8 @@ where
                 pending_egress: None,
                 conn: framed,
                 topic_filter: PrefixTrie::new(),
-                should_flush: false,
-                flush_interval: self.options.flush_interval.map(tokio::time::interval),
+                linger_timer: self.options.write_buffer_linger.map(tokio::time::interval),
+                write_buffer_size: self.options.write_buffer_size,
             };
 
             tokio::spawn(session);
