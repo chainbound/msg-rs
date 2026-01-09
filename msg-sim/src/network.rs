@@ -48,7 +48,7 @@
 //! - 10ms latency + 100 Mbit/s to peer 2
 //! - 200ms latency + 5% loss to peer 3
 //!
-//! This is achieved using an HTB (Hierarchical Token Bucket) qdisc with per-destination
+//! This is achieved using a DRR (Deficit Round Robin) qdisc with per-destination
 //! classes. See the [`crate::tc`] module for details on the qdisc hierarchy.
 
 use std::{
@@ -63,8 +63,7 @@ use std::{
     },
 };
 
-use futures::StreamExt as _;
-use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth, packet_route::tc::TcHandle};
+use rtnetlink::{LinkBridge, LinkUnspec, LinkVeth};
 use tokio::{
     sync::{
         mpsc,
@@ -74,18 +73,16 @@ use tokio::{
 };
 use tracing::Instrument as _;
 
+use crate::tc::requests::configure_drr_class;
+use crate::tc::requests::configure_tbf;
+use crate::tc::requests::{configure_flower_filter, configure_netem, install_drr_root};
 use crate::{
     dynch::DynFuture,
     ip::{IpAddrExt as _, Subnet},
     namespace::{self, NetworkNamespace},
-    tc::{
-        FlowerFilterRequest, HtbClassRequest, LinkImpairment, QdiscHtbRequest, QdiscNetemRequest,
-        QdiscRequestInner, QdiscTbfRequest, htb_class_handle, netem_handle, tbf_handle,
-    },
+    tc::impairment::LinkImpairment,
     wrappers,
 };
-
-use rtnetlink::packet_core::NetlinkPayload;
 
 /// Global counter for generating unique peer IDs.
 ///
@@ -169,15 +166,15 @@ impl Display for Link {
 /// outgoing interface, enabling us to add/remove per-destination impairments.
 #[derive(Debug, Default)]
 struct PeerTcState {
-    /// Whether the htb root qdisc has been installed on this peer's veth.
+    /// Whether the drr root qdisc has been installed on this peer's veth.
     ///
-    /// The htb qdisc is installed lazily on first `apply_impairment()` call.
-    htb_installed: bool,
+    /// The drr qdisc is installed lazily on first `apply_impairment()` call.
+    drr_installed: bool,
 
     /// Set of destination peer IDs that have impairments configured.
     ///
     /// For each destination in this set, we have created:
-    /// - An htb class (for traffic classification)
+    /// - An drr class (for traffic classification)
     /// - Optionally a TBF qdisc (for bandwidth limiting)
     /// - A netem qdisc (for delay, loss, etc.)
     /// - A flower filter (to match destination IP)
@@ -291,44 +288,49 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// # Example
 ///
-/// ```ignore
-/// use msg_sim::{Network, Link, LinkImpairment, Subnet};
+/// ```no_run
+/// use msg_sim::network::{Network, Link};
+/// use msg_sim::tc::impairment::LinkImpairment;
+/// use msg_sim::ip::Subnet;
 /// use std::net::Ipv4Addr;
 ///
-/// // Create a network with a /16 subnet
-/// let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
-/// let mut network = Network::new(subnet).await?;
+/// #[tokio::main]
+/// async fn main() {
+///     // Create a network with a /16 subnet
+///     let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
+///     let mut network = Network::new(subnet).await.unwrap();
 ///
-/// // Add some peers
-/// let peer_1 = network.add_peer().await?;
-/// let peer_2 = network.add_peer().await?;
-/// let peer_3 = network.add_peer().await?;
+///     // Add some peers
+///     let peer_1 = network.add_peer().await.unwrap();
+///     let peer_2 = network.add_peer().await.unwrap();
+///     let peer_3 = network.add_peer().await.unwrap();
 ///
-/// // Configure different impairments for different paths
-/// network.apply_impairment(
-///     Link::new(peer_1, peer_2),
-///     LinkImpairment {
-///         latency: 10_000,           // 10ms to peer 2
-///         bandwidth_mbit: Some(100.0), // 100 Mbit/s
-///         ..Default::default()
-///     },
-/// ).await?;
+///     // Configure different impairments for different paths
+///     network.apply_impairment(
+///         Link::new(peer_1, peer_2),
+///         LinkImpairment {
+///             latency: 10_000,           // 10ms to peer 2
+///             bandwidth_mbit_s: Some(100.0), // 100 Mbit/s
+///             ..Default::default()
+///         },
+///     ).await.unwrap();
 ///
-/// network.apply_impairment(
-///     Link::new(peer_1, peer_3),
-///     LinkImpairment {
-///         latency: 200_000,          // 200ms to peer 3
-///         loss: 5.0,                 // 5% packet loss
-///         ..Default::default()
-///     },
-/// ).await?;
+///     network.apply_impairment(
+///         Link::new(peer_1, peer_3),
+///         LinkImpairment {
+///             latency: 200_000,          // 200ms to peer 3
+///             loss: 5.0,                 // 5% packet loss
+///             ..Default::default()
+///         },
+///     ).await.unwrap();
 ///
-/// // Run tasks in peer namespaces
-/// network.run_in_namespace(peer_1, |ctx| {
-///     Box::pin(async move {
-///         // Network code here sees the configured impairments
-///     })
-/// }).await?;
+///     // Run tasks in peer namespaces
+///     network.run_in_namespace(peer_1, |ctx| {
+///         Box::pin(async move {
+///             // Network code here sees the configured impairments
+///         })
+///     }).await.unwrap();
+/// }
 /// ```
 #[derive(Debug)]
 pub struct Network {
@@ -556,18 +558,30 @@ impl Network {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let result = network
-    ///     .run_in_namespace(peer_id, |ctx| {
-    ///         Box::pin(async move {
-    ///             // This code runs in peer's network namespace
-    ///             let socket = TcpListener::bind("0.0.0.0:8080").await?;
-    ///             // ... handle connections
-    ///             Ok(())
+    /// ```no_run
+    /// use msg_sim::ip::Subnet;
+    /// use msg_sim::network::Network;
+    /// use std::net::Ipv4Addr;
+    /// use tokio::net::TcpListener;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
+    ///     let mut network = Network::new(subnet).await.unwrap();
+    ///
+    ///     let peer_id = network.add_peer().await.unwrap();
+    ///     network
+    ///         .run_in_namespace(peer_id, |_ctx| {
+    ///             Box::pin(async move {
+    ///                 // This code runs in peer's network namespace
+    ///                 let socket = TcpListener::bind("0.0.0.0:8080").await?;
+    ///                 // ... handle connections
+    ///                 Ok::<_, std::io::Error>(())
+    ///             })
     ///         })
-    ///     })
-    ///     .await?
-    ///     .await?;
+    ///         .await.unwrap()
+    ///         .await.unwrap();
+    /// }
     /// ```
     pub async fn run_in_namespace<T, F>(
         &self,
@@ -594,12 +608,12 @@ impl Network {
     ///
     /// # Traffic Control Hierarchy
     ///
-    /// On first call for a peer, this installs an htb root qdisc. Then for each
+    /// On first call for a peer, this installs an drr root qdisc. Then for each
     /// destination, it creates:
     ///
     /// ```text
-    /// htb root (1:0)
-    ///   └── htb class (1:10+X) for destination peer X
+    /// drr root (1:0)
+    ///   └── drr class (1:10+X) for destination peer X
     ///         └── TBF (10+X:1) [if bandwidth limiting enabled]
     ///               └── netem (10+X:0) [delay, loss, jitter]
     ///
@@ -613,18 +627,35 @@ impl Network {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// // Simulate a slow, lossy link from peer 1 to peer 2
-    /// network.apply_impairment(
-    ///     Link::new(peer_1, peer_2),
-    ///     LinkImpairment {
-    ///         latency: 100_000,            // 100ms delay
-    ///         jitter: 20_000,              // ±20ms variation
-    ///         loss: 2.0,                   // 2% packet loss
-    ///         bandwidth_mbit: Some(10.0),  // 10 Mbit/s cap
-    ///         ..Default::default()
-    ///     },
-    /// ).await?;
+    /// ```no_run
+    /// use msg_sim::{
+    ///     ip::Subnet,
+    ///     network::{Link, Network},
+    ///     tc::impairment::LinkImpairment
+    /// };
+    ///
+    /// use std::net::Ipv4Addr;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
+    ///     let mut network = Network::new(subnet).await.unwrap();
+    ///
+    ///     let peer_1 = network.add_peer().await.unwrap();
+    ///     let peer_2 = network.add_peer().await.unwrap();
+    ///
+    ///     // Simulate a slow, lossy link from peer 1 to peer 2
+    ///     network.apply_impairment(
+    ///         Link::new(peer_1, peer_2),
+    ///         LinkImpairment {
+    ///             latency: 100_000,            // 100ms delay
+    ///             jitter: 20_000,              // ±20ms variation
+    ///             loss: 2.0,                   // 2% packet loss
+    ///             bandwidth_mbit_s: Some(10.0),  // 10 Mbit/s cap
+    ///             ..Default::default()
+    ///         },
+    ///     ).await.unwrap();
+    /// }
     /// ```
     pub async fn apply_impairment(&mut self, link: Link, impairment: LinkImpairment) -> Result<()> {
         // Get references to both peers, ensuring they exist.
@@ -643,7 +674,7 @@ impl Network {
         let is_replacement = tc_state.has_impairment_to(link.destination());
 
         let dst_peer_id = dst_peer.id;
-        let htb_already_installed = tc_state.htb_installed;
+        let drr_already_installed = tc_state.drr_installed;
         let subnet = self.subnet;
 
         // Execute the TC configuration in the source peer's namespace.
@@ -665,201 +696,45 @@ impl Network {
                             .expect("to find dev")
                             .get() as i32;
 
-                        // Step 1: Install htb root qdisc (if not already present)
-                        //
-                        // The htb qdisc is our root scheduler. It allows us to create
-                        // an arbitrary number of classes, one per destination peer.
-                        // Traffic that doesn't match any filter goes to the default
-                        // class (1:1), which has no impairments.
-                        if !htb_already_installed {
-                            tracing::debug!("installing htb root qdisc");
-
-                            let htb_request =
-                                QdiscHtbRequest::new(QdiscRequestInner::new(if_index))
-                                    .with_default_class(1) // Unclassified traffic → class 1:1
-                                    .build();
-
-                            let mut res = ctx.handle.request(htb_request)?;
-                            while let Some(res) = res.next().await {
-                                if let NetlinkPayload::Error(e) = res.payload {
-                                    tracing::debug!(?e, "failed to create htb root qdisc");
-                                    return Err(rtnetlink::Error::NetlinkError(e));
-                                }
-                            }
-
-                            // Create the default class (1:1) for unimpaired traffic.
-                            // This class is required by htb but we don't attach any
-                            // qdiscs to it - traffic just passes through normally.
-                            let default_class_request = HtbClassRequest::new(
-                                QdiscRequestInner::new(if_index)
-                                    .with_parent(TcHandle::from(0x0001_0000)) // Parent: htb root
-                                    .with_handle(TcHandle::from(0x0001_0001)), // Handle: 1:1
-                            )
-                            .build();
-
-                            let mut res = ctx.handle.request(default_class_request)?;
-                            while let Some(res) = res.next().await {
-                                if let NetlinkPayload::Error(e) = res.payload {
-                                    tracing::debug!(?e, "failed to create default htb class");
-                                    return Err(rtnetlink::Error::NetlinkError(e));
-                                }
-                            }
-
-                            tracing::debug!("htb root qdisc and default class installed");
+                        // Step 1: Install DRR root qdisc if not already present.
+                        if !drr_already_installed {
+                            install_drr_root(&mut ctx.handle, if_index).await?;
                         }
 
-                        // Step 2: Create or replace htb class for this destination
-                        //
-                        // Each destination peer gets its own class. The class handle
-                        // is computed from the destination peer ID: 1:(10 + peer_id).
-                        //
-                        // For example, traffic to peer 2 goes to class 1:12.
-                        //
-                        // If this is a replacement, we use NLM_F_REPLACE to update
-                        // the existing class instead of failing.
-                        //
-                        let class_handle = htb_class_handle(dst_peer_id);
-                        tracing::debug!(
+                        // Step 2: Create or replace DRR class for this destination.
+                        configure_drr_class(&mut ctx.handle, if_index, dst_peer_id, is_replacement)
+                            .await?;
+
+                        // Step 3: Create or replace TBF qdisc if bandwidth limiting is enabled.
+                        let netem_parent = configure_tbf(
+                            &mut ctx.handle,
+                            if_index,
                             dst_peer_id,
-                            class_handle = format!("{:x}", class_handle),
-                            is_replacement,
-                            "creating htb class for destination"
-                        );
-
-                        let class_request = HtbClassRequest::new(
-                            QdiscRequestInner::new(if_index)
-                                .with_parent(TcHandle::from(0x0001_0000)) // Parent: htb root (1:0)
-                                .with_handle(TcHandle::from(class_handle)),
-                        )
-                        .with_replace(is_replacement)
-                        .build();
-
-                        let mut res = ctx.handle.request(class_request)?;
-                        while let Some(res) = res.next().await {
-                            if let NetlinkPayload::Error(e) = res.payload {
-                                tracing::debug!(?e, "failed to create htb class");
-                                return Err(rtnetlink::Error::NetlinkError(e));
-                            }
-                        }
-
-                        // Step 3: Create or replace TBF qdisc (if bandwidth limiting enabled)
-                        //
-                        // TBF (Token Bucket Filter) provides rate limiting. It's only
-                        // created if the user specified a bandwidth limit.
-                        //
-                        // The TBF handle is (10 + peer_id):1, for example 12:1.
-                        // Its parent is the htb class we just created.
-                        let netem_parent = if impairment.has_bandwidth_limit() {
-                            let tbf_h = tbf_handle(dst_peer_id);
-                            tracing::debug!(
-                                bandwidth_mbit = ?impairment.bandwidth_mbit,
-                                burst_kib = ?impairment.burst_kib,
-                                tbf_handle = format!("{}:{}", tbf_h >> 16, tbf_h & 0xFFFF),
-                                is_replacement,
-                                "creating tbf qdisc for bandwidth limiting"
-                            );
-
-                            let tbf_request = QdiscTbfRequest::new(
-                                QdiscRequestInner::new(if_index)
-                                    .with_parent(TcHandle::from(class_handle))
-                                    .with_handle(TcHandle::from(tbf_h)),
-                                &impairment,
-                            )
-                            .with_replace(is_replacement)
-                            .build();
-
-                            let mut res = ctx.handle.request(tbf_request)?;
-                            while let Some(res) = res.next().await {
-                                if let NetlinkPayload::Error(e) = res.payload {
-                                    tracing::debug!(?e, "failed to create TBF qdisc");
-                                    return Err(rtnetlink::Error::NetlinkError(e));
-                                }
-                            }
-
-                            // Netem's parent is the TBF qdisc
-                            TcHandle::from(tbf_h)
-                        } else {
-                            // No bandwidth limiting, netem attaches directly to htb class
-                            TcHandle::from(class_handle)
-                        };
-
-                        // Step 4: Create or replace netem qdisc
-                        //
-                        // Netem (Network Emulator) is the workhorse that actually
-                        // applies latency, jitter, packet loss, and duplication.
-                        //
-                        // The netem handle is (20 + peer_id):0, for example 22:0.
-                        // Its parent is either TBF (if bandwidth limited) or the
-                        // htb class directly.
-                        //
-                        let netem_h = netem_handle(dst_peer_id);
-                        tracing::debug!(
-                            latency_us = impairment.latency,
-                            jitter_us = impairment.jitter,
-                            loss_pct = impairment.loss,
-                            duplicate_pct = impairment.duplicate,
-                            netem_handle = format!("{}:{}", netem_h >> 16, netem_h & 0xFFFF),
-                            is_replacement,
-                            "creating netem qdisc"
-                        );
-
-                        let netem_request = QdiscNetemRequest::from_impairment(
-                            QdiscRequestInner::new(if_index)
-                                .with_parent(netem_parent)
-                                .with_handle(TcHandle::from(netem_h)),
                             &impairment,
+                            is_replacement,
                         )
-                        .with_replace(is_replacement)
-                        .build();
+                        .await?;
 
-                        let mut res = ctx.handle.request(netem_request)?;
-                        while let Some(res) = res.next().await {
-                            if let NetlinkPayload::Error(e) = res.payload {
-                                tracing::debug!(?e, "failed to create netem qdisc");
-                                return Err(rtnetlink::Error::NetlinkError(e));
-                            }
-                        }
+                        // Step 4: Create or replace netem qdisc.
+                        configure_netem(
+                            &mut ctx.handle,
+                            if_index,
+                            dst_peer_id,
+                            netem_parent,
+                            &impairment,
+                            is_replacement,
+                        )
+                        .await?;
 
-                        // Step 5: Create flower filter to classify traffic
-                        //
-                        // The flower filter matches packets by destination IP address
-                        // and routes them to the appropriate htb class.
-                        //
-                        // Packets to the destination peer's IP → class 1:(10 + peer_id)
-                        // All other packets → default class 1:1 (no impairment)
-                        //
-                        // Note: We skip filter creation on replacement since the filter
-                        // already exists and points to the same class.
-                        //
-                        // Only create the filter on first configuration.
-                        // On replacement, the filter already exists and points to the same class.
+                        // Step 5: Create flower filter (only on first configuration).
                         if !is_replacement {
                             let dst_ip = dst_peer_id.veth_address(subnet);
-                            tracing::debug!(
-                                dst_ip = %dst_ip,
-                                class_id = format!("1:{}", class_handle & 0xFFFF),
-                                "creating flower filter"
-                            );
-
-                            let filter_request = FlowerFilterRequest::new(
-                                QdiscRequestInner::new(if_index)
-                                    .with_parent(TcHandle::from(0x0001_0000)), // Attach to htb root
-                                dst_ip,
-                            )
-                            .with_class_id(class_handle) // Route to destination's class
-                            .build();
-
-                            let mut res = ctx.handle.request(filter_request)?;
-                            while let Some(msg) = res.next().await {
-                                if let NetlinkPayload::Error(e) = msg.payload {
-                                    tracing::debug!(?e, "failed to create flower filter");
-                                    return Err(rtnetlink::Error::NetlinkError(e));
-                                }
-                            }
+                            configure_flower_filter(&mut ctx.handle, if_index, dst_peer_id, dst_ip)
+                                .await?;
                         }
 
                         tracing::debug!(is_replacement, "impairment configuration complete");
-                        Ok(())
+                        Ok::<_, rtnetlink::Error>(())
                     }
                     .instrument(span.clone()),
                 )
@@ -870,7 +745,7 @@ impl Network {
 
         // Update state tracking after successful configuration.
         let tc_state = self.tc_state.get_mut(&link.source()).unwrap();
-        tc_state.htb_installed = true;
+        tc_state.drr_installed = true;
         tc_state.mark_configured(link.destination());
 
         Ok(())
@@ -891,7 +766,7 @@ mod msg_sim_network {
     use crate::{
         ip::Subnet,
         network::{Link, Network, PeerIdExt},
-        tc::LinkImpairment,
+        tc::impairment::LinkImpairment,
     };
 
     /// Test that network creation works and creates the hub namespace.
@@ -1166,7 +1041,7 @@ mod msg_sim_network {
         network
             .apply_impairment(
                 Link::new(peer_1, peer_2),
-                LinkImpairment { bandwidth_mbit: Some(bandwidth_mbit), ..Default::default() },
+                LinkImpairment { bandwidth_mbit_s: Some(bandwidth_mbit), ..Default::default() },
             )
             .await
             .unwrap();
@@ -1243,7 +1118,7 @@ mod msg_sim_network {
                 Link::new(peer_1, peer_2),
                 LinkImpairment {
                     latency: latency_us,
-                    bandwidth_mbit: Some(bandwidth_mbit),
+                    bandwidth_mbit_s: Some(bandwidth_mbit),
                     ..Default::default()
                 },
             )
@@ -1319,7 +1194,7 @@ mod msg_sim_network {
 
         // Third application: replace with bandwidth limiting added
         let impairment_3 =
-            LinkImpairment { latency: 50_000, bandwidth_mbit: Some(10.0), ..Default::default() };
+            LinkImpairment { latency: 50_000, bandwidth_mbit_s: Some(10.0), ..Default::default() };
         network
             .apply_impairment(Link::new(peer_1, peer_2), impairment_3)
             .await
@@ -1367,9 +1242,8 @@ mod msg_sim_network {
             .apply_impairment(
                 Link::new(peer_1, peer_2),
                 LinkImpairment {
-                    bandwidth_mbit: Some(10.0),
-                    burst_kib: Some(64),            // 64 KiB burst
-                    tbf_limit_bytes: Some(128_000), // 128 KB queue
+                    bandwidth_mbit_s: Some(10.0),
+                    burst_kib: Some(64), // 64 KiB burst
                     ..Default::default()
                 },
             )
