@@ -1,7 +1,6 @@
-use std::{collections::HashSet, net::IpAddr, time::Duration};
+use std::{collections::HashSet, time::Duration};
 
 use bytes::Bytes;
-use msg_sim::{Protocol, SimulationConfig, Simulator};
 use rand::Rng;
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_stream::StreamExt;
@@ -12,30 +11,10 @@ use msg_transport::{Address, Transport, quic::Quic, tcp::Tcp};
 
 const TOPIC: &str = "test";
 
-fn init_simulation(addr: IpAddr, config: SimulationConfig) -> Simulator {
-    let mut simulator = Simulator::new();
-    simulator.start(addr, config).unwrap();
-
-    simulator
-}
-
 /// Single publisher, single subscriber
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
 async fn pubsub_channel() {
     let _ = tracing_subscriber::fmt::try_init();
-
-    let addr = "127.0.0.1".parse().unwrap();
-
-    let mut simulator = init_simulation(
-        addr,
-        SimulationConfig {
-            latency: Some(Duration::from_millis(50)),
-            bw: None,
-            plr: None,
-            protocols: vec![Protocol::UDP, Protocol::TCP],
-        },
-    );
 
     let result = pubsub_channel_transport(build_tcp, "127.0.0.1:9879".parse().unwrap()).await;
 
@@ -44,8 +23,6 @@ async fn pubsub_channel() {
     let result = pubsub_channel_transport(build_quic, "127.0.0.1:9879".parse().unwrap()).await;
 
     assert!(result.is_ok());
-
-    simulator.stop(addr);
 }
 
 async fn pubsub_channel_transport<F, T, A>(
@@ -86,21 +63,8 @@ where
 
 /// Single publisher, multiple subscribers
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
 async fn pubsub_fan_out() {
     let _ = tracing_subscriber::fmt::try_init();
-
-    let addr = "127.0.0.1".parse().unwrap();
-
-    let mut simulator = init_simulation(
-        addr,
-        SimulationConfig {
-            latency: Some(Duration::from_millis(150)),
-            bw: None,
-            plr: None,
-            protocols: vec![Protocol::UDP, Protocol::TCP],
-        },
-    );
 
     let result = pubsub_fan_out_transport(build_tcp, 10, "127.0.0.1:9880".parse().unwrap()).await;
 
@@ -109,8 +73,6 @@ async fn pubsub_fan_out() {
     let result = pubsub_fan_out_transport(build_quic, 10, "127.0.0.1:9880".parse().unwrap()).await;
 
     assert!(result.is_ok());
-
-    simulator.stop(addr);
 }
 
 async fn pubsub_fan_out_transport<
@@ -169,18 +131,6 @@ async fn pubsub_fan_out_transport<
 async fn pubsub_fan_in() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let addr = "127.0.0.1".parse().unwrap();
-
-    let mut simulator = init_simulation(
-        addr,
-        SimulationConfig {
-            latency: Some(Duration::from_millis(150)),
-            bw: None,
-            plr: None,
-            protocols: vec![Protocol::UDP, Protocol::TCP],
-        },
-    );
-
     let result = pubsub_fan_in_transport(build_tcp, 20, "127.0.0.1:9881".parse().unwrap()).await;
 
     assert!(result.is_ok());
@@ -188,8 +138,6 @@ async fn pubsub_fan_in() {
     let result = pubsub_fan_in_transport(build_quic, 20, "127.0.0.1:9881".parse().unwrap()).await;
 
     assert!(result.is_ok());
-
-    simulator.stop(addr);
 }
 
 async fn pubsub_fan_in_transport<

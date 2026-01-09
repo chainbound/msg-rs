@@ -34,6 +34,4 @@ rand.workspace = true
 msg-transport = { workspace = true, features = ["quic", "tcp-tls"] }
 openssl.workspace = true
 
-msg-sim.workspace = true
-
 tracing-subscriber = "0.3"
