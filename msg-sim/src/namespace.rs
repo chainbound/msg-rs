@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::sync::oneshot;
 
-use crate::dynch;
-use crate::dynch::DynRequestSender;
+use crate::dynch::{DynCh, DynRequestSender};
 use crate::namespace::helpers::current_netns;
 
 /// Base directory for named network namespaces.
@@ -204,7 +203,7 @@ impl NetworkNamespaceInner {
         self,
         make_ctx: impl FnOnce() -> Ctx + Send + 'static,
     ) -> (std::thread::JoinHandle<Result<()>>, DynRequestSender<Ctx>) {
-        let (tx, mut rx) = dynch::channel(8);
+        let (tx, mut rx) = DynCh::<Ctx>::channel(8);
 
         let handle = std::thread::spawn(move || {
             let fd = self.file.as_fd();

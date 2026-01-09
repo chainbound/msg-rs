@@ -18,79 +18,159 @@
 //! Trying to clone this actor for each message type means spwaning another OS thread and, in case
 //! there is necessity of asynchronous code within the actor logic, an additional asynchronous
 //! runtime.
+//!
+//! # Cast Abstraction
+//!
+//! The channel is generic over a [`Cast`] strategy that determines how values are type-erased
+//! and recovered. This abstraction enables different communication scenarios:
+//!
+//! - [`AnyCast`]: In-process communication using `dyn Any` (default, zero serialization overhead)
+//! - Future implementations could support cross-process communication via serialization
 
 use tokio::sync::{mpsc, oneshot};
 
 use std::{any::Any, future::Future, marker::PhantomData, pin::Pin};
 
-/// A syntax-sugar alias for a trait object which is `Any + Send + 'static`.
-type AnySendStatic = dyn Any + Send + 'static;
+/// Trait for type erasure and reconstruction strategies.
+///
+/// This trait abstracts the mechanism used to erase and recover types when sending
+/// messages through the dynamic channel. Different implementations enable different
+/// communication scenarios.
+///
+/// # Safety Contract
+///
+/// Implementations must guarantee that `recover::<T>` correctly reconstructs a value
+/// that was erased with `erase::<T>`. Calling `recover` with a different type than
+/// was used for `erase` may panic or return incorrect data.
+///
+/// # Example
+///
+/// See [`AnyCast`].
+/// ```
+pub trait Cast: Send + 'static {
+    /// The type-erased representation used for transport.
+    type Erased: Send + 'static;
+
+    /// Erase the type of a value into the transport representation.
+    fn erase<T: Send + 'static>(value: T) -> Self::Erased;
+
+    /// Recover the original type from the erased representation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the type `T` doesn't match the type that was originally erased.
+    fn recover<T: Send + 'static>(erased: Self::Erased) -> T;
+}
+
+/// In-process type erasure using `dyn Any`.
+///
+/// This is the default and most efficient strategy for same-process communication.
+/// It uses Rust's [`Any`] trait for dynamic typing with zero serialization overhead.
+///
+/// # Example
+///
+/// ```
+/// use msg_sim::dynch::{Cast, AnyCast};
+///
+/// let original: i32 = 42;
+/// let erased = AnyCast::erase(original);
+/// let recovered: i32 = AnyCast::recover(erased);
+/// assert_eq!(recovered, 42);
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AnyCast;
+
+impl Cast for AnyCast {
+    type Erased = Box<dyn Any + Send + 'static>;
+
+    fn erase<T: Send + 'static>(value: T) -> Self::Erased {
+        Box::new(value)
+    }
+
+    fn recover<T: Send + 'static>(erased: Self::Erased) -> T {
+        *erased.downcast::<T>().expect("type mismatch in AnyCast::recover")
+    }
+}
 
 /// Alias for a [`Future`] trait object that can be [`Send`].
 ///
 /// Note: it is lifetime-parameterized so it can borrow from the provided context.
-pub type DynFuture<'a, T = Box<AnySendStatic>> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type DynFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A boxed function that, given a mutable reference to `Ctx`, produces a future.
 ///
 /// The `for<'a>` makes this callable with *any* borrow lifetime of `&'a mut Ctx`,
 /// and the returned future is allowed to live for that same `'a`.
-pub type DynTask<Ctx, T = Box<AnySendStatic>> =
+pub type DynTask<Ctx, T> =
     Box<dyn for<'a> FnOnce(&'a mut Ctx) -> DynFuture<'a, T> + Send + 'static>;
 
 /// A dynamically typed request that can be created and sent when calling
 /// [`DynRequestSender::submit`]. This is intended to ensure the correct type downcasting of the
 /// result.
-pub struct DynRequest<Ctx> {
+///
+/// The `C` type parameter determines the type erasure strategy (defaults to [`AnyCast`]).
+pub struct DynRequest<Ctx, C: Cast = AnyCast> {
     /// The function that will be invoked by the receiver with access to `Ctx`,
     /// producing the future to execute.
-    task: DynTask<Ctx>,
+    task: DynTask<Ctx, C::Erased>,
     /// The channel to send back the result of running `task(ctx).await`.
-    tx: oneshot::Sender<Box<AnySendStatic>>,
+    tx: oneshot::Sender<C::Erased>,
 }
 
-impl<Ctx> From<DynRequest<Ctx>> for (DynTask<Ctx>, oneshot::Sender<Box<AnySendStatic>>) {
-    fn from(value: DynRequest<Ctx>) -> Self {
+impl<Ctx, C: Cast> From<DynRequest<Ctx, C>>
+    for (DynTask<Ctx, C::Erased>, oneshot::Sender<C::Erased>)
+{
+    fn from(value: DynRequest<Ctx, C>) -> Self {
         (value.task, value.tx)
     }
 }
 
-impl<Ctx> DynRequest<Ctx> {
+impl<Ctx, C: Cast> DynRequest<Ctx, C> {
     /// Break the request into its task and the response channel.
-    pub fn into_parts(self) -> (DynTask<Ctx>, oneshot::Sender<Box<AnySendStatic>>) {
+    pub fn into_parts(self) -> (DynTask<Ctx, C::Erased>, oneshot::Sender<C::Erased>) {
         self.into()
     }
 }
 
 /// The response received after awaiting a [`DynRequestSender::submit`] request.
 /// Internally, it holds a marker to the type needed for safe type downcasting.
-pub struct DynRequestResponse<T: 'static> {
+///
+/// The `C` type parameter determines the type erasure strategy (defaults to [`AnyCast`]).
+pub struct DynRequestResponse<T: 'static, C: Cast = AnyCast> {
     /// The channel to receive the response once it has been processed.
-    rx: oneshot::Receiver<Box<AnySendStatic>>,
+    rx: oneshot::Receiver<C::Erased>,
     /// The marker of the type to downcast the response to.
-    _marker: PhantomData<T>,
+    _marker: PhantomData<(T, C)>,
 }
 
-impl<T> DynRequestResponse<T> {
+impl<T: Send + 'static, C: Cast> DynRequestResponse<T, C> {
     /// Await to receive a response after having [`DynRequestSender::submit`]ted a request.
     ///
-    /// Internally, it automatically downcasts the response to the type inferred when creating the
-    /// request task.
+    /// Internally, it automatically recovers the response to the type inferred when creating the
+    /// request task using the [`Cast`] strategy.
     pub async fn receive(self) -> Result<T, oneshot::error::RecvError> {
-        let to_cast = self.rx.await?;
-        let value = *to_cast.downcast::<T>().expect("same type");
+        let erased = self.rx.await?;
+        let value = C::recover::<T>(erased);
         Ok(value)
     }
 }
 
 /// The sender of [`DynRequest`].
-#[derive(Debug, Clone)]
-pub struct DynRequestSender<Ctx> {
-    tx: mpsc::Sender<DynRequest<Ctx>>,
+///
+/// The `C` type parameter determines the type erasure strategy (defaults to [`AnyCast`]).
+#[derive(Debug)]
+pub struct DynRequestSender<Ctx, C: Cast = AnyCast> {
+    tx: mpsc::Sender<DynRequest<Ctx, C>>,
 }
 
-impl<Ctx> DynRequestSender<Ctx> {
-    fn new(tx: mpsc::Sender<DynRequest<Ctx>>) -> Self {
+impl<Ctx, C: Cast> Clone for DynRequestSender<Ctx, C> {
+    fn clone(&self) -> Self {
+        Self { tx: self.tx.clone() }
+    }
+}
+
+impl<Ctx, C: Cast> DynRequestSender<Ctx, C> {
+    fn new(tx: mpsc::Sender<DynRequest<Ctx, C>>) -> Self {
         Self { tx }
     }
 
@@ -100,7 +180,7 @@ impl<Ctx> DynRequestSender<Ctx> {
     /// # Example
     ///
     /// ```
-    /// use msg_sim::dynch;
+    /// use msg_sim::dynch::DynCh;
     ///
     /// #[derive(Default)]
     /// struct Ctx {
@@ -109,7 +189,7 @@ impl<Ctx> DynRequestSender<Ctx> {
     ///
     /// #[tokio::main]
     /// async fn main() {
-    ///     let (tx, mut rx) = dynch::channel::<Ctx>(8);
+    ///     let (tx, mut rx) = DynCh::<Ctx>::channel(8);
     ///
     ///     tokio::spawn(async move {
     ///         let mut ctx = Ctx::default();
@@ -137,17 +217,17 @@ impl<Ctx> DynRequestSender<Ctx> {
     pub async fn submit<T, F>(
         &self,
         f: F,
-    ) -> std::result::Result<DynRequestResponse<T>, mpsc::error::SendError<()>>
+    ) -> std::result::Result<DynRequestResponse<T, C>, mpsc::error::SendError<()>>
     where
-        T: Any + Send + 'static,
+        T: Send + 'static,
         // The caller provides a function that can borrow `ctx` for some `'a`,
         // and returns a future that may also live for `'a`.
         F: for<'a> FnOnce(&'a mut Ctx) -> DynFuture<'a, T> + Send + 'static,
     {
-        // Type-erase the result into Box<dyn Any + Send>.
-        let task: DynTask<Ctx> = Box::new(move |ctx: &mut Ctx| {
+        // Type-erase the result using the Cast strategy.
+        let task: DynTask<Ctx, C::Erased> = Box::new(move |ctx: &mut Ctx| {
             let fut = f(ctx);
-            Box::pin(async move { Box::new(fut.await) as Box<AnySendStatic> })
+            Box::pin(async move { C::erase(fut.await) })
         });
 
         let (tx, rx) = oneshot::channel();
@@ -158,7 +238,83 @@ impl<Ctx> DynRequestSender<Ctx> {
     }
 }
 
-pub fn channel<Ctx>(buffer: usize) -> (DynRequestSender<Ctx>, mpsc::Receiver<DynRequest<Ctx>>) {
-    let (tx, rx) = mpsc::channel(buffer);
-    (DynRequestSender::new(tx), rx)
+/// A factory type for creating dynamic channels with specific type parameters.
+///
+/// # Type Parameters
+///
+/// - `Ctx`: The context type that will be available to tasks executed in the channel.
+/// - `C`: The [`Cast`] strategy for type erasure (defaults to [`AnyCast`]).
+///
+/// # Examples
+///
+/// Using the default [`AnyCast`] strategy (most common):
+///
+/// ```
+/// use msg_sim::dynch::DynCh;
+///
+/// struct MyContext {
+///     data: Vec<u8>,
+/// }
+///
+/// // Create a channel with MyContext, using default AnyCast
+/// let (tx, rx) = DynCh::<MyContext>::channel(8);
+/// ```
+pub struct DynCh<Ctx = (), C: Cast = AnyCast> {
+    _marker_ctx: PhantomData<Ctx>,
+    _marker_cast: PhantomData<C>,
+}
+
+impl<Ctx, C: Cast> DynCh<Ctx, C> {
+    /// Create a new dynamic channel with the specified buffer size.
+    ///
+    /// Returns a sender/receiver pair where:
+    /// - [`DynRequestSender`]: Used to submit tasks that will execute with access to `Ctx`
+    /// - [`mpsc::Receiver`]: Used by the actor to receive and execute tasks
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - The capacity of the channel's internal buffer
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use msg_sim::dynch::DynCh;
+    ///
+    /// #[derive(Default)]
+    /// struct Ctx {
+    ///     counter: usize,
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let (tx, mut rx) = DynCh::<Ctx>::channel(8);
+    ///
+    ///     tokio::spawn(async move {
+    ///         let mut ctx = Ctx::default();
+    ///
+    ///         while let Some(req) = rx.recv().await {
+    ///             let (task, tx) = req.into_parts();
+    ///             let value = task(&mut ctx).await;
+    ///             let _ = tx.send(value);
+    ///         }
+    ///     });
+    ///
+    ///     let res = tx
+    ///         .submit(|ctx| Box::pin(async move {
+    ///             ctx.counter += 1;
+    ///             ctx.counter
+    ///         }))
+    ///         .await.unwrap()
+    ///         .receive()
+    ///         .await.unwrap();
+    ///
+    ///     assert_eq!(res, 1);
+    /// }
+    /// ```
+    pub fn channel(
+        buffer: usize,
+    ) -> (DynRequestSender<Ctx, C>, mpsc::Receiver<DynRequest<Ctx, C>>) {
+        let (tx, rx) = mpsc::channel(buffer);
+        (DynRequestSender::new(tx), rx)
+    }
 }
