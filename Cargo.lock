@@ -928,7 +928,6 @@ dependencies = [
 name = "msg-sim"
 version = "0.1.5"
 dependencies = [
- "cfg-if",
  "futures",
  "msg-socket",
  "msg-transport",
@@ -949,7 +948,6 @@ dependencies = [
  "derive_more",
  "futures",
  "msg-common",
- "msg-sim",
  "msg-transport",
  "msg-wire",
  "openssl",

@@ -12,7 +12,6 @@ repository.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-cfg-if.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 msg-socket.workspace = true

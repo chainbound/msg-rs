@@ -39,7 +39,7 @@ msg-wire = { path = "./msg-wire" }
 msg-socket = { path = "./msg-socket" }
 msg-transport = { path = "./msg-transport" }
 msg-common = { path = "./msg-common" }
-msg-sim = { path = "./msg-sim" }
+# msg-sim = { path = "./msg-sim" }
 
 # async
 async-trait = "0.1"
@@ -72,7 +72,6 @@ derive_more = { version = "2.1.1", features = [
 ] }
 arc-swap = "1.8.0"
 nix = { version = "0.30.1" }
-cfg-if = { version = "1.0.4" }
 
 # networking
 quinn = "0.11.9"
@@ -82,9 +81,6 @@ openssl = { version = "0.10" }
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }
 pprof = { version = "0.15", features = ["flamegraph", "criterion"] }
-
-# simulation
-pnet = "0.35"
 
 [profile.dev]
 opt-level = 1
