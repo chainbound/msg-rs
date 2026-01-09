@@ -16,6 +16,13 @@ use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
 
 /// A publisher socket. This is thread-safe and can be cloned.
+///
+/// Publisher sockets are used to publish messages under certain topics to multiple subscribers.
+///
+/// ## Session
+/// Per subscriber, the socket maintains a [session](super::session::SubscriberSession). The session
+/// manages the underlying connection and all of its state, such as the topic subscriptions. It also
+/// manages a queue of messages to be transmitted on the connection.
 #[derive(Clone)]
 pub struct PubSocket<T: Transport<A>, A: Address> {
     /// The reply socket options, shared with the driver.
@@ -42,7 +49,7 @@ impl<T> PubSocket<T, SocketAddr>
 where
     T: Transport<SocketAddr>,
 {
-    /// Binds the socket to the given socket addres
+    /// Binds the socket to the given socket address.
     ///
     /// This method is only available for transports that support [`SocketAddr`] as address type,
     /// like [`Tcp`](msg_transport::tcp::Tcp) and [`Quic`](msg_transport::quic::Quic).
@@ -105,7 +112,7 @@ where
     /// This also spawns the socket driver task.
     pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), PubError> {
         let (to_sessions_bcast, from_socket_bcast) =
-            broadcast::channel(self.options.session_buffer_size);
+            broadcast::channel(self.options.high_water_mark);
 
         let mut transport = self.transport.take().expect("Transport has been moved already");
 
