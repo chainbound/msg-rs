@@ -92,7 +92,7 @@ pub struct TbfQopt {
 /// - If `rate > 100 Mbit/s` or `rtab[0] == 0` → Ethernet (no table inspection)
 /// - Otherwise, checks for ATM-specific patterns (equal times for different cell-boundary sizes)
 ///
-/// We use [`DEFAULT_RATE_TABLE`] (all zeros) which guarantees Ethernet detection via the
+/// We use a zeroed rate table which guarantees Ethernet detection via the
 /// `rtab[0] == 0` fast path.
 ///
 /// # Linklayer Modes

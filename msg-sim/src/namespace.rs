@@ -10,6 +10,34 @@ use crate::dynch;
 use crate::dynch::DynRequestSender;
 use crate::namespace::helpers::current_netns;
 
+/// Base directory for named network namespaces.
+///
+/// On Linux, `ip netns add <name>` creates a bind mount at `/run/netns/<name>` pointing to
+/// a network namespace. This allows the namespace to persist even when no processes are
+/// using it. The `iproute2` tools and `rtnetlink` use this convention.
+///
+/// See: `man ip-netns(8)`
+const NETNS_RUN_DIR: &str = "/run/netns";
+
+/// Procfs base path for accessing file descriptors.
+///
+/// `/proc/self/fd/<n>` is a symlink to the file that file descriptor `n` points to.
+/// For namespace file descriptors, following this symlink (via `stat()`) gives us the
+/// inode number which uniquely identifies the namespace within the kernel.
+///
+/// See: `man proc(5)`, section `/proc/[pid]/fd/`
+const PROC_SELF_FD: &str = "/proc/self/fd";
+
+/// Procfs base path for accessing per-thread information.
+///
+/// `/proc/self/task/<tid>/ns/net` points to the network namespace of thread `tid`.
+/// Each thread can be in a different network namespace (set via `setns(2)`), so we
+/// must use the thread-specific path rather than `/proc/self/ns/net` which only
+/// reflects the main thread's namespace.
+///
+/// See: `man proc(5)`, section `/proc/[pid]/task/[tid]/ns/`
+const PROC_SELF_TASK: &str = "/proc/self/task";
+
 /// Helpers for managing namespaces.
 mod helpers {
     use std::{
@@ -35,7 +63,7 @@ mod helpers {
     /// Get current thread network namespace identity
     pub fn current_netns() -> io::Result<NetnsId> {
         let thread_id = unsafe { nix::libc::gettid() };
-        let path = format!("/proc/self/task/{thread_id}/ns/net");
+        let path = format!("{}/{thread_id}/ns/net", super::PROC_SELF_TASK);
         let meta = fs::metadata(&path)?;
         let ns = NetnsId::from_metadata(&meta);
 
@@ -46,7 +74,7 @@ mod helpers {
 
     /// Get network namespace identity from an FD
     pub fn netns_from_fd(fd: BorrowedFd<'_>) -> io::Result<NetnsId> {
-        let path = format!("/proc/self/fd/{}", fd.as_raw_fd());
+        let path = format!("{}/{}", super::PROC_SELF_FD, fd.as_raw_fd());
         let meta = fs::metadata(&path)?;
         let ns = NetnsId::from_metadata(&meta);
 
@@ -244,8 +272,11 @@ impl NetworkNamespace {
 }
 
 impl<Ctx> NetworkNamespace<Ctx> {
+    /// Returns the filesystem path for a named network namespace.
+    ///
+    /// Named network namespaces are stored in `/run/netns/`.
     pub fn path(name: &str) -> PathBuf {
-        Path::new("/run").join("netns").join(name)
+        Path::new(NETNS_RUN_DIR).join(name)
     }
 
     pub fn fd(&self) -> i32 {
