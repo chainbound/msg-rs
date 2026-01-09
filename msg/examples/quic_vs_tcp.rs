@@ -19,7 +19,7 @@ async fn run_tcp() {
     let mut pub_socket = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .with_backpressure_boundary(8192)
+            .with_write_buffer_size(8192)
             .with_high_water_mark(1024)
             .with_flush_interval(Duration::from_micros(100)),
     );
@@ -51,7 +51,7 @@ async fn run_quic() {
     let mut pub_socket = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .with_backpressure_boundary(8192)
+            .with_write_buffer_size(8192)
             .with_high_water_mark(1024)
             .with_flush_interval(Duration::from_micros(100)),
     );
