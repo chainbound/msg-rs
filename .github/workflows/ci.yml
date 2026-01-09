@@ -32,11 +32,29 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run tests (all features)
-        run: cargo nextest run --all --all-features --no-fail-fast
+      - name: Run tests (all features, excluding msg-sim)
+        run: cargo nextest run --all --all-features --no-fail-fast --exclude msg-sim
 
-      - name: Run doc tests
+      - name: Run doc tests (excluding msg-sim)
         run: cargo test --doc --all --all-features
+
+  # msg-sim tests require root privileges to create network namespaces
+  cargo-tests-msg-sim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Run msg-sim tests (requires root for network namespaces)
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test run -p msg-sim --all-features --no-fail-fast -- --test-threads=1
 
   cargo-lint:
     runs-on: ubuntu-latest
