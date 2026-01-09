@@ -21,7 +21,7 @@ async fn run_tcp() {
         PubOptions::default()
             .with_write_buffer_size(8192)
             .with_high_water_mark(1024)
-            .with_flush_interval(Duration::from_micros(100)),
+            .with_write_buffer_linger(Some(Duration::from_micros(100))),
     );
 
     // Configure the subscribers with options
@@ -53,7 +53,7 @@ async fn run_quic() {
         PubOptions::default()
             .with_write_buffer_size(8192)
             .with_high_water_mark(1024)
-            .with_flush_interval(Duration::from_micros(100)),
+            .with_write_buffer_linger(Some(Duration::from_micros(100))),
     );
 
     // Configure the subscribers with options
