@@ -1,7 +1,15 @@
+//! # MSG Sockets
+//!
+//! This crate exposes a set of socket types that can be used to facilitate multiple communication
+//! patterns, such as:
+//! - Request-Reply
+//! - Publish-Subscribe
+//!
+//! Sockets are the main entrypoint in this library and facilitate all connectivity, like binding or
+//! connecting, and sending and receiving messages over connections.
 #![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 

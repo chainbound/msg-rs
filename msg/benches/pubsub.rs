@@ -150,9 +150,9 @@ fn pubsub_single_thread_tcp(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
@@ -192,9 +192,9 @@ fn pubsub_multi_thread_tcp(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Tcp::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
@@ -233,9 +233,9 @@ fn pubsub_single_thread_quic(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
@@ -275,9 +275,9 @@ fn pubsub_multi_thread_quic(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Quic::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
@@ -316,9 +316,9 @@ fn pubsub_single_thread_ipc(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Ipc::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
@@ -358,9 +358,9 @@ fn pubsub_multi_thread_ipc(c: &mut Criterion) {
     let publisher = PubSocket::with_options(
         Ipc::default(),
         PubOptions::default()
-            .with_flush_interval(Duration::from_micros(100))
-            .with_backpressure_boundary(buffer_size)
-            .with_session_buffer_size(N_REQS * 2),
+            .with_write_buffer_linger(Some(Duration::from_micros(100)))
+            .with_write_buffer_size(buffer_size)
+            .with_high_water_mark(N_REQS * 2),
     );
 
     let subscriber = SubSocket::with_options(
