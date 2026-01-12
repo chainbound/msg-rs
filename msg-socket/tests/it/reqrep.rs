@@ -247,9 +247,8 @@ async fn reqrep_hwm_reached() {
 
     let mut rep = RepSocket::new(Tcp::default());
     // Set HWM for pending requests, with a longer timeout so tests don't fail due to timeout
-    let options = ReqOptions::default()
-        .with_pending_requests_hwm(HWM)
-        .with_timeout(Duration::from_secs(30));
+    let options =
+        ReqOptions::default().with_pending_requests_hwm(HWM).with_timeout(Duration::from_secs(30));
     let mut req = ReqSocket::with_options(Tcp::default(), options);
 
     rep.bind("0.0.0.0:0").await.unwrap();
