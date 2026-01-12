@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll, ready},
@@ -14,11 +13,8 @@ use tokio::{
     time::Interval,
 };
 
-use super::{ReqError, ReqOptions};
-use crate::{
-    SendCommand,
-    req::{SocketState, conn_manager::ConnManager},
-};
+use super::{ReqError, ReqOptions, SendCommand};
+use crate::req::{SocketState, conn_manager::ConnManager};
 
 use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use msg_transport::{Address, Transport};
@@ -42,8 +38,8 @@ pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     pub(crate) conn_manager: ConnManager<T, A>,
     /// The timer for the write buffer linger.
     pub(crate) linger_timer: Option<Interval>,
-    /// The outgoing message queue.
-    pub(crate) egress_queue: VecDeque<WithSpan<reqrep::Message>>,
+    /// The single pending outgoing message waiting to be sent.
+    pub(crate) pending_egress: Option<WithSpan<reqrep::Message>>,
     /// The currently pending requests waiting for a response.
     pub(crate) pending_requests: FxHashMap<u32, WithSpan<PendingRequest>>,
     /// Interval for checking for request timeouts.
@@ -106,8 +102,23 @@ where
     }
 
     /// Handle an incoming command from the socket frontend.
-    fn on_send(&mut self, cmd: SendCommand) {
+    /// Returns `true` if the command was accepted, `false` if HWM was reached.
+    fn on_send(&mut self, cmd: SendCommand) -> bool {
         let SendCommand { mut message, response } = cmd;
+
+        // Check high-water mark before accepting the request
+        if let Some(hwm) = self.options.pending_requests_hwm {
+            if self.pending_requests.len() >= hwm {
+                tracing::warn!(
+                    hwm,
+                    pending = self.pending_requests.len(),
+                    "high-water mark reached, rejecting request"
+                );
+                let _ = response.send(Err(ReqError::HighWaterMarkReached(hwm)));
+                return false;
+            }
+        }
+
         let start = Instant::now();
 
         // We want ot inherit the span from the socket frontend
@@ -135,9 +146,11 @@ where
         let msg = message.inner.into_wire(self.id_counter);
         let msg_id = msg.id();
         self.id_counter = self.id_counter.wrapping_add(1);
-        self.egress_queue.push_back(msg.with_span(span.clone()));
+        self.pending_egress = Some(msg.with_span(span.clone()));
         self.pending_requests
             .insert(msg_id, PendingRequest { start, sender: response }.with_span(span));
+
+        true
     }
 
     /// Check for request timeouts and notify the sender if any requests have timed out.
@@ -215,12 +228,10 @@ where
                 Poll::Pending => {}
             }
 
-            // NOTE: We try to drain the egress queue first (the `continue`), writing everything to
-            // the `Framed` internal buffer. When all messages are written, we move on to flushing
-            // the connection in the block below. We DO NOT rely on the `Framed` internal
-            // backpressure boundary, because we do not call `poll_ready`.
-            if let Some(msg) = this.egress_queue.pop_front().enter() {
-                // Generate the new message
+            // Try to send the pending egress message if we have one.
+            // We only hold a single pending message here; the channel serves as the actual queue.
+            // This pattern ensures we respect backpressure and don't accumulate unbounded messages.
+            if let Some(msg) = this.pending_egress.take().enter() {
                 let size = msg.size();
                 tracing::debug!("Sending msg {}", msg.id());
                 // Write the message to the buffer.
@@ -236,7 +247,7 @@ where
                     }
                 }
 
-                // We might be able to write more queued messages to the buffer.
+                // Continue to potentially send more or flush
                 continue;
             }
 
@@ -267,25 +278,28 @@ where
                 this.check_timeouts();
             }
 
-            // Check for outgoing messages from the socket handle
-            match this.from_socket.poll_recv(cx) {
-                Poll::Ready(Some(cmd)) => {
-                    this.on_send(cmd);
+            // Check for outgoing messages from the socket handle.
+            // Only poll when pending_egress is empty to maintain backpressure.
+            if this.pending_egress.is_none() {
+                match this.from_socket.poll_recv(cx) {
+                    Poll::Ready(Some(cmd)) => {
+                        this.on_send(cmd);
 
-                    continue;
-                }
-                Poll::Ready(None) => {
-                    tracing::debug!(
-                        "socket dropped, shutting down backend and flushing connection"
-                    );
-
-                    if let Some(channel) = this.conn_manager.active_connection() {
-                        let _ = ready!(channel.poll_close_unpin(cx));
+                        continue;
                     }
+                    Poll::Ready(None) => {
+                        tracing::debug!(
+                            "socket dropped, shutting down backend and flushing connection"
+                        );
 
-                    return Poll::Ready(());
+                        if let Some(channel) = this.conn_manager.active_connection() {
+                            let _ = ready!(channel.poll_close_unpin(cx));
+                        }
+
+                        return Poll::Ready(());
+                    }
+                    Poll::Pending => {}
                 }
-                Poll::Pending => {}
             }
 
             return Poll::Pending;

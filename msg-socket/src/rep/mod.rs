@@ -44,10 +44,13 @@ impl RepError {
 /// The reply socket options.
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
-    max_clients: Option<usize>,
-    min_compress_size: usize,
-    write_buffer_size: usize,
-    write_buffer_linger: Option<Duration>,
+    pub(crate) max_clients: Option<usize>,
+    pub(crate) min_compress_size: usize,
+    pub(crate) write_buffer_size: usize,
+    pub(crate) write_buffer_linger: Option<Duration>,
+    /// High-water mark for pending responses per peer. When this limit is reached,
+    /// new responses will be dropped. If `None`, there is no limit (unbounded).
+    pub(crate) pending_responses_hwm: Option<usize>,
 }
 
 impl Default for RepOptions {
@@ -57,6 +60,7 @@ impl Default for RepOptions {
             min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
+            pending_responses_hwm: None,
         }
     }
 }
@@ -128,6 +132,15 @@ impl RepOptions {
     /// Default: 100µs
     pub fn with_write_buffer_linger(mut self, duration: Option<Duration>) -> Self {
         self.write_buffer_linger = duration;
+        self
+    }
+
+    /// Sets the high-water mark for pending responses per peer. When this limit is reached,
+    /// new responses will be dropped. If `None`, there is no limit (unbounded).
+    ///
+    /// Default: `None`
+    pub fn with_pending_responses_hwm(mut self, hwm: usize) -> Self {
+        self.pending_responses_hwm = Some(hwm);
         self
     }
 }

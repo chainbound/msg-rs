@@ -207,7 +207,7 @@ where
             linger_timer,
             pending_requests,
             timeout_check_interval,
-            egress_queue: Default::default(),
+            pending_egress: None,
             compressor: self.compressor.clone(),
             id,
             span,

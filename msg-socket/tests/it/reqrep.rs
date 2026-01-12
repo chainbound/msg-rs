@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use msg_socket::{RepSocket, ReqSocket};
+use msg_socket::{RepSocket, ReqError, ReqOptions, ReqSocket};
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
@@ -235,4 +235,99 @@ async fn reqrep_late_bind_works() {
     let response = reply.await.unwrap();
     let hello = Bytes::from_static(b"hello");
     assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
+}
+
+/// Tests that the high-water mark for pending requests is enforced.
+/// When HWM is reached, new requests should fail with `HighWaterMarkReached` error.
+#[tokio::test]
+async fn reqrep_hwm_reached() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    const HWM: usize = 2;
+
+    let mut rep = RepSocket::new(Tcp::default());
+    // Set HWM for pending requests, with a longer timeout so tests don't fail due to timeout
+    let options = ReqOptions::default()
+        .with_pending_requests_hwm(HWM)
+        .with_timeout(Duration::from_secs(30));
+    let mut req = ReqSocket::with_options(Tcp::default(), options);
+
+    rep.bind("0.0.0.0:0").await.unwrap();
+    req.connect(rep.local_addr().unwrap()).await.unwrap();
+
+    // Give time for connection to establish
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Use a channel to coordinate: we'll send requests but NOT respond until we verify HWM
+    let (respond_tx, mut respond_rx) = tokio::sync::oneshot::channel::<()>();
+
+    // Spawn the rep handler that waits for signal before responding
+    let rep_handle = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        // Collect requests until we get the signal
+        loop {
+            tokio::select! {
+                Some(request) = rep.next() => {
+                    requests.push(request);
+                }
+                _ = &mut respond_rx => {
+                    // Respond to all collected requests
+                    for request in requests {
+                        request.respond(Bytes::from("response")).unwrap();
+                    }
+                    break;
+                }
+            }
+        }
+    });
+
+    // Share req via Arc for concurrent access
+    let req = std::sync::Arc::new(req);
+
+    // Spawn HWM requests that should succeed, plus one that should fail
+    let mut success_receivers = Vec::new();
+    for i in 0..HWM {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        success_receivers.push(rx);
+        let req = std::sync::Arc::clone(&req);
+        tokio::spawn(async move {
+            let result = req.request(Bytes::from(format!("request{}", i))).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    // Give time for requests to be queued
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Spawn one more request - this should hit HWM
+    let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
+    tokio::spawn({
+        let req = std::sync::Arc::clone(&req);
+        async move {
+            let result = req.request(Bytes::from("request_over_hwm")).await;
+            let _ = fail_tx.send(result);
+        }
+    });
+
+    // Wait a bit for the request to be processed
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // The request over HWM should have failed
+    let result = fail_rx.await.unwrap();
+    assert!(
+        matches!(result, Err(ReqError::HighWaterMarkReached(h)) if h == HWM),
+        "Expected HWM error, got: {:?}",
+        result
+    );
+
+    // Now signal rep to respond
+    respond_tx.send(()).unwrap();
+
+    // All requests within HWM should succeed
+    for (i, rx) in success_receivers.into_iter().enumerate() {
+        let result = rx.await.unwrap();
+        assert!(result.is_ok(), "Request {} failed: {:?}", i, result);
+    }
+
+    rep_handle.await.unwrap();
 }

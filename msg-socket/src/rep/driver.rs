@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     io,
     pin::Pin,
     sync::Arc,
@@ -56,7 +55,10 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     write_buffer_size: usize,
     /// The address of the peer.
     addr: A,
-    egress_queue: VecDeque<WithSpan<reqrep::Message>>,
+    /// Single pending outgoing message waiting to be sent.
+    pending_egress: Option<WithSpan<reqrep::Message>>,
+    /// High-water mark for pending responses. When reached, new responses are dropped.
+    pending_responses_hwm: Option<usize>,
     state: Arc<SocketState>,
     /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
@@ -166,7 +168,8 @@ where
                                 linger_timer,
                                 write_buffer_size: this.options.write_buffer_size,
                                 addr: auth.addr,
-                                egress_queue: VecDeque::with_capacity(128),
+                                pending_egress: None,
+                                pending_responses_hwm: this.options.pending_responses_hwm,
                                 state: Arc::clone(&this.state),
                                 compressor: this.compressor.clone(),
                             }),
@@ -262,7 +265,8 @@ where
                     linger_timer,
                     write_buffer_size: self.options.write_buffer_size,
                     addr,
-                    egress_queue: VecDeque::with_capacity(128),
+                    pending_egress: None,
+                    pending_responses_hwm: self.options.pending_responses_hwm,
                     state: Arc::clone(&self.state),
                     compressor: self.compressor.clone(),
                 }),
@@ -313,24 +317,24 @@ where
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address> PeerState<T, A> {
-    /// Prepares for shutting down by sending and flushing all messages in [`Self::egress_queue`].
+    /// Prepares for shutting down by sending and flushing all pending messages.
     /// When [`Poll::Ready`] is returned, the connection with this peer can be shutdown.
     ///
     /// TODO: there might be some [`Self::pending_requests`] yet to processed. TBD how to handle
     /// them, for now they're dropped.
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        let messages = std::mem::take(&mut self.egress_queue);
+        let pending_msg = self.pending_egress.take();
         let buffer_size = self.conn.write_buffer().len();
-        if messages.is_empty() && buffer_size == 0 {
+        if pending_msg.is_none() && buffer_size == 0 {
             debug!("flushed everything, closing connection");
             return Poll::Ready(());
         }
 
-        debug!(messages = ?messages.len(), write_buffer_size = ?buffer_size, "found data to send");
+        debug!(has_pending = ?pending_msg.is_some(), write_buffer_size = ?buffer_size, "found data to send");
 
-        for msg in messages {
+        if let Some(msg) = pending_msg {
             if let Err(e) = self.conn.start_send_unpin(msg.inner) {
-                error!(?e, "failed to send final messages to socket, closing");
+                error!(?e, "failed to send final message to socket, closing");
                 return Poll::Ready(());
             }
         }
@@ -351,15 +355,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
         let this = self.get_mut();
 
         loop {
-            let mut progress = false;
-            if let Some(msg) = this.egress_queue.pop_front().enter() {
+            // First, try to send the pending egress message if we have one.
+            if let Some(msg) = this.pending_egress.take().enter() {
                 let msg_len = msg.size();
+                debug!(msg_id = msg.id(), "sending response");
                 match this.conn.start_send_unpin(msg.inner) {
                     Ok(_) => {
                         this.state.stats.specific.increment_tx(msg_len);
-
-                        // We might be able to send more queued messages
-                        progress = true;
+                        // Continue to potentially send more or flush
+                        continue;
                     }
                     Err(e) => {
                         this.state.stats.specific.increment_failed_requests();
@@ -392,68 +396,54 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            // Then, try to drain the egress queue.
-            if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.egress_queue.pop_front().enter() {
-                    let msg_len = msg.size();
-
-                    debug!(msg_id = msg.id(), "sending response");
-                    match this.conn.start_send_unpin(msg.inner) {
-                        Ok(_) => {
-                            this.state.stats.specific.increment_tx(msg_len);
-
-                            // We might be able to send more queued messages
-                            continue;
-                        }
-                        Err(e) => {
-                            this.state.stats.specific.increment_failed_requests();
-                            error!(?e, "failed to send message to socket");
-                            // End this stream as we can't send any more messages
-                            return Poll::Ready(None);
-                        }
-                    }
-                }
-            }
-
-            // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter() {
-                match result.inner {
-                    Err(_) => tracing::error!("response channel closed unexpectedly"),
-                    Ok(Response { msg_id, mut response }) => {
-                        let mut compression_type = 0;
-                        let len_before = response.len();
-                        if let Some(ref compressor) = this.compressor {
-                            match compressor.compress(&response) {
-                                Ok(compressed) => {
-                                    response = compressed;
-                                    compression_type = compressor.compression_type() as u8;
+            // Check for completed requests, and set pending_egress (only if empty).
+            if this.pending_egress.is_none() {
+                if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
+                {
+                    match result.inner {
+                        Err(_) => tracing::error!("response channel closed unexpectedly"),
+                        Ok(Response { msg_id, mut response }) => {
+                            let mut compression_type = 0;
+                            let len_before = response.len();
+                            if let Some(ref compressor) = this.compressor {
+                                match compressor.compress(&response) {
+                                    Ok(compressed) => {
+                                        response = compressed;
+                                        compression_type = compressor.compression_type() as u8;
+                                    }
+                                    Err(e) => {
+                                        error!(?e, "failed to compress message");
+                                        continue;
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(?e, "failed to compress message");
-                                    continue;
-                                }
+
+                                debug!(
+                                    msg_id,
+                                    len_before,
+                                    len_after = response.len(),
+                                    "compressed message"
+                                )
                             }
 
-                            debug!(
-                                msg_id,
-                                len_before,
-                                len_after = response.len(),
-                                "compressed message"
-                            )
+                            debug!(msg_id, "received response to send");
+
+                            let msg = reqrep::Message::new(msg_id, compression_type, response);
+                            this.pending_egress = Some(msg.with_span(result.span));
+
+                            continue;
                         }
-
-                        debug!(msg_id, "received response to send");
-
-                        let msg = reqrep::Message::new(msg_id, compression_type, response);
-                        this.egress_queue.push_back(msg.with_span(result.span));
-
-                        continue;
                     }
                 }
             }
 
-            // Finally we accept incoming requests from the peer.
-            {
+            // Accept incoming requests from the peer.
+            // Only accept new requests if we're under the HWM for pending responses.
+            let under_hwm = this
+                .pending_responses_hwm
+                .map(|hwm| this.pending_requests.len() < hwm)
+                .unwrap_or(true);
+
+            if under_hwm {
                 let _g = this.span.clone().entered();
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(result)) => {
@@ -504,10 +494,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     }
                     Poll::Pending => {}
                 }
-            }
-
-            if progress {
-                continue;
+            } else {
+                // At HWM - log warning and don't accept new requests until responses drain
+                trace!(
+                    hwm = ?this.pending_responses_hwm,
+                    pending = this.pending_requests.len(),
+                    "at high-water mark, not accepting new requests"
+                );
             }
 
             return Poll::Pending;

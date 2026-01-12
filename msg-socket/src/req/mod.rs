@@ -45,6 +45,8 @@ pub enum ReqError {
     NoValidEndpoints,
     #[error("Failed to connect to the target endpoint: {0:?}")]
     Connect(Box<dyn std::error::Error + Send + Sync>),
+    #[error("High-water mark reached: {0} pending requests")]
+    HighWaterMarkReached(usize),
 }
 
 /// A command to send a request message and wait for a response.
@@ -108,6 +110,9 @@ pub struct ReqOptions {
     pub write_buffer_size: usize,
     /// The linger duration for the write buffer (how long to wait before flushing).
     pub write_buffer_linger: Option<Duration>,
+    /// High-water mark for pending requests. When this limit is reached, new requests
+    /// will return an error immediately. If `None`, there is no limit (unbounded).
+    pub pending_requests_hwm: Option<usize>,
 }
 
 impl ReqOptions {
@@ -206,6 +211,17 @@ impl ReqOptions {
         self.write_buffer_linger = duration;
         self
     }
+
+    /// Sets the high-water mark for pending requests. When this limit is reached, new requests
+    /// will return [`ReqError::HighWaterMarkReached`] immediately.
+    ///
+    /// If `None`, there is no limit (unbounded).
+    ///
+    /// Default: `None`
+    pub fn with_pending_requests_hwm(mut self, hwm: usize) -> Self {
+        self.pending_requests_hwm = Some(hwm);
+        self
+    }
 }
 
 impl Default for ReqOptions {
@@ -217,6 +233,7 @@ impl Default for ReqOptions {
             min_compress_size: 8192,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
+            pending_requests_hwm: None,
         }
     }
 }
