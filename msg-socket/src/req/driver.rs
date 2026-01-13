@@ -264,11 +264,7 @@ where
             // Check for outgoing messages from the socket handle.
             // Only poll for new requests when pending_egress is empty AND we're under HWM to
             // maintain backpressure.
-            let under_hwm = this
-                .options
-                .pending_requests_hwm
-                .map(|hwm| this.pending_requests.len() < hwm)
-                .unwrap_or(true);
+            let under_hwm = this.pending_requests.len() < this.options.pending_requests_hwm;
 
             if this.pending_egress.is_none() && under_hwm {
                 match this.from_socket.poll_recv(cx) {

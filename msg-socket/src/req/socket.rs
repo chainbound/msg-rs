@@ -18,7 +18,7 @@ use msg_common::span::WithSpan;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
-use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
+use super::{ReqError, ReqOptions};
 use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
@@ -171,9 +171,7 @@ where
 
     /// Internal method to initialize and spawn the driver.
     fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
-        // TODO: should we have a small channel size and keep all pending messages in
-        // `pending_requests`?
-        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let (to_driver, from_socket) = mpsc::channel(self.options.channel_size);
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 

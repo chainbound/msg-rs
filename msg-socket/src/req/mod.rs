@@ -109,10 +109,15 @@ pub struct ReqOptions {
     pub write_buffer_size: usize,
     /// The linger duration for the write buffer (how long to wait before flushing).
     pub write_buffer_linger: Option<Duration>,
+    /// The size of the channel buffer between the socket and the driver.
+    /// This controls how many requests can be queued, on top of the current pending requests,
+    /// before the socket returns [`ReqError::HighWaterMarkReached`].
+    pub channel_size: usize,
     /// High-water mark for pending requests. When this limit is reached, new requests
-    /// will return [`ReqError::HighWaterMarkReached`].
-    /// If `None`, there is no limit (unbounded).
-    pub pending_requests_hwm: Option<usize>,
+    /// will not be processed and will be queued up to [`channel_size`](Self::channel_size)
+    /// elements. Once both limits are reached, new requests will return
+    /// [`ReqError::HighWaterMarkReached`].
+    pub pending_requests_hwm: usize,
 }
 
 impl ReqOptions {
@@ -212,14 +217,23 @@ impl ReqOptions {
         self
     }
 
+    /// Sets the size of the channel buffer between the socket and the driver.
+    /// This controls how many requests can be queued, on top of the current pending requests,
+    /// before the socket returns [`ReqError::HighWaterMarkReached`].
+    ///
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
+    pub fn with_max_queue_size(mut self, size: usize) -> Self {
+        self.channel_size = size;
+        self
+    }
+
     /// Sets the high-water mark for pending requests. When this limit is reached, new requests
-    /// will return [`ReqError::HighWaterMarkReached`].
+    /// will not be processed and will be queued up to [`Self::with_max_queue_size`] elements.
+    /// Once both limits are reached, new requests will return [`ReqError::HighWaterMarkReached`].
     ///
-    /// If `None`, there is no limit (unbounded).
-    ///
-    /// Default: `None`
-    pub fn with_pending_requests_hwm(mut self, hwm: usize) -> Self {
-        self.pending_requests_hwm = Some(hwm);
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
+    pub fn with_max_pending_requests(mut self, hwm: usize) -> Self {
+        self.pending_requests_hwm = hwm;
         self
     }
 }
@@ -233,7 +247,8 @@ impl Default for ReqOptions {
             min_compress_size: 8192,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
-            pending_requests_hwm: None,
+            channel_size: DEFAULT_BUFFER_SIZE,
+            pending_requests_hwm: DEFAULT_BUFFER_SIZE,
         }
     }
 }
