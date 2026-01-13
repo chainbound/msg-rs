@@ -6,6 +6,8 @@ use msg_transport::Address;
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+use crate::DEFAULT_BUFFER_SIZE;
+
 mod driver;
 mod socket;
 mod stats;
@@ -50,8 +52,8 @@ pub struct RepOptions {
     pub(crate) write_buffer_linger: Option<Duration>,
     /// High-water mark for pending responses per peer. When this limit is reached,
     /// new requests will not be read from the underlying connection until pending
-    /// responses are fulfilled. If `None`, there is no limit (unbounded).
-    pub(crate) pending_responses_hwm: Option<usize>,
+    /// responses are fulfilled.
+    pub(crate) pending_responses_hwm: usize,
 }
 
 impl Default for RepOptions {
@@ -61,7 +63,7 @@ impl Default for RepOptions {
             min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
-            pending_responses_hwm: None,
+            pending_responses_hwm: DEFAULT_BUFFER_SIZE,
         }
     }
 }
@@ -138,11 +140,11 @@ impl RepOptions {
 
     /// Sets the high-water mark for pending responses per peer. When this limit is reached,
     /// new requests will not be read from the underlying connection until pending
-    /// responses are fulfilled. If `None`, there is no limit (unbounded).
+    /// responses are fulfilled.
     ///
-    /// Default: `None`
-    pub fn with_pending_responses_hwm(mut self, hwm: usize) -> Self {
-        self.pending_responses_hwm = Some(hwm);
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
+    pub fn with_max_pending_requests(mut self, hwm: usize) -> Self {
+        self.pending_responses_hwm = hwm;
         self
     }
 }
