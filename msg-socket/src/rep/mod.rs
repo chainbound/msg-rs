@@ -49,7 +49,8 @@ pub struct RepOptions {
     pub(crate) write_buffer_size: usize,
     pub(crate) write_buffer_linger: Option<Duration>,
     /// High-water mark for pending responses per peer. When this limit is reached,
-    /// new responses will be dropped. If `None`, there is no limit (unbounded).
+    /// new requests will not be read from the underlying connection until pending
+    /// responses are fulfilled. If `None`, there is no limit (unbounded).
     pub(crate) pending_responses_hwm: Option<usize>,
 }
 
@@ -136,7 +137,8 @@ impl RepOptions {
     }
 
     /// Sets the high-water mark for pending responses per peer. When this limit is reached,
-    /// new responses will be dropped. If `None`, there is no limit (unbounded).
+    /// new requests will not be read from the underlying connection until pending
+    /// responses are fulfilled. If `None`, there is no limit (unbounded).
     ///
     /// Default: `None`
     pub fn with_pending_responses_hwm(mut self, hwm: usize) -> Self {

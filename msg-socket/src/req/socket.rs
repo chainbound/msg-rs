@@ -10,7 +10,7 @@ use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
-    sync::{mpsc, oneshot},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot},
 };
 use tokio_util::codec::Framed;
 
@@ -130,9 +130,16 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(SendCommand::new(WithSpan::current(msg), response_tx))
-            .await
-            .map_err(|_| ReqError::SocketClosed)?;
+            .try_send(SendCommand::new(WithSpan::current(msg), response_tx))
+            .map_err(|err| match err {
+                TrySendError::Full(_) => {
+                    // TODO: is 0 a valid value here? technically we shouldn't ever reach here
+                    // if we don't have a HWM set since we grow the pending requests unbounded
+                    // in that case
+                    ReqError::HighWaterMarkReached(self.options.pending_requests_hwm.unwrap_or(0))
+                }
+                TrySendError::Closed(_) => ReqError::SocketClosed,
+            })?;
 
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
@@ -169,7 +176,7 @@ where
 
     /// Internal method to initialize and spawn the driver.
     fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
-        // Initialize communication channels
+        // TODO: should we have a small channel size and keep all pending messages in `pending_requests`?
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);

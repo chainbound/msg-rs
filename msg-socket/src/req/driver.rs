@@ -102,23 +102,8 @@ where
     }
 
     /// Handle an incoming command from the socket frontend.
-    /// Returns `true` if the command was accepted, `false` if HWM was reached.
-    fn on_send(&mut self, cmd: SendCommand) -> bool {
+    fn on_send(&mut self, cmd: SendCommand) {
         let SendCommand { mut message, response } = cmd;
-
-        // Check high-water mark before accepting the request
-        if let Some(hwm) = self.options.pending_requests_hwm {
-            if self.pending_requests.len() >= hwm {
-                tracing::warn!(
-                    hwm,
-                    pending = self.pending_requests.len(),
-                    "high-water mark reached, rejecting request"
-                );
-                let _ = response.send(Err(ReqError::HighWaterMarkReached(hwm)));
-                return false;
-            }
-        }
-
         let start = Instant::now();
 
         // We want ot inherit the span from the socket frontend
@@ -149,8 +134,6 @@ where
         self.pending_egress = Some(msg.with_span(span.clone()));
         self.pending_requests
             .insert(msg_id, PendingRequest { start, sender: response }.with_span(span));
-
-        true
     }
 
     /// Check for request timeouts and notify the sender if any requests have timed out.
@@ -279,8 +262,14 @@ where
             }
 
             // Check for outgoing messages from the socket handle.
-            // Only poll when pending_egress is empty to maintain backpressure.
-            if this.pending_egress.is_none() {
+            // Only poll for new requests when pending_egress is empty AND we're under HWM to maintain backpressure.
+            let under_hwm = this
+                .options
+                .pending_requests_hwm
+                .map(|hwm| this.pending_requests.len() < hwm)
+                .unwrap_or(true);
+
+            if this.pending_egress.is_none() && under_hwm {
                 match this.from_socket.poll_recv(cx) {
                     Poll::Ready(Some(cmd)) => {
                         this.on_send(cmd);

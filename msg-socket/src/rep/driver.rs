@@ -57,7 +57,8 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     addr: A,
     /// Single pending outgoing message waiting to be sent.
     pending_egress: Option<WithSpan<reqrep::Message>>,
-    /// High-water mark for pending responses. When reached, new responses are dropped.
+    /// High-water mark for pending responses. When reached, new requests are blocked
+    /// (backpressure is applied) until responses drain below the limit.
     pending_responses_hwm: Option<usize>,
     state: Arc<SocketState>,
     /// The optional message compressor.
@@ -495,11 +496,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     Poll::Pending => {}
                 }
             } else {
-                // At HWM - log warning and don't accept new requests until responses drain
+                // At HWM - not polling from underlying connection until responses drain.
+                // The waker is registered on pending_requests, so we'll wake when responses complete.
                 trace!(
                     hwm = ?this.pending_responses_hwm,
                     pending = this.pending_requests.len(),
-                    "at high-water mark, not accepting new requests"
+                    "at high-water mark, not polling from underlying connection until responses drain"
                 );
             }
 

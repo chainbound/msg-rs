@@ -23,8 +23,7 @@ pub use socket::*;
 use crate::{Profile, stats::SocketStats};
 use stats::ReqStats;
 
-/// The default buffer size for the socket.
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+use crate::DEFAULT_BUFFER_SIZE;
 
 pub(crate) static DRIVER_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -111,7 +110,8 @@ pub struct ReqOptions {
     /// The linger duration for the write buffer (how long to wait before flushing).
     pub write_buffer_linger: Option<Duration>,
     /// High-water mark for pending requests. When this limit is reached, new requests
-    /// will return an error immediately. If `None`, there is no limit (unbounded).
+    /// will return [`ReqError::HighWaterMarkReached`].
+    /// If `None`, there is no limit (unbounded).
     pub pending_requests_hwm: Option<usize>,
 }
 
@@ -213,7 +213,7 @@ impl ReqOptions {
     }
 
     /// Sets the high-water mark for pending requests. When this limit is reached, new requests
-    /// will return [`ReqError::HighWaterMarkReached`] immediately.
+    /// will return [`ReqError::HighWaterMarkReached`].
     ///
     /// If `None`, there is no limit (unbounded).
     ///
