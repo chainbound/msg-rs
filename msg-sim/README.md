@@ -71,6 +71,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Known Limitations
+
+### Packet Duplication Restriction
+
+The Linux kernel prevents creating additional netem qdiscs on a network interface
+once one with `duplicate > 0` exists. This means **packet duplication can only be
+used on at most one outgoing link per peer**.
+
+For example, if peer A has links to peers B, C, and D:
+- You CAN set `duplicate > 0` on the A→B link
+- You CANNOT then set any impairments on A→C or A→D (even without duplication)
+
+**Workaround**: If you need multiple outgoing links from a peer, either use
+`duplicate` on only one of them, or don't use `duplicate` at all from that peer.
+
+This is enforced by the [`check_netem_in_tree()`][kernel-netem] function in the
+Linux kernel, which returns:
+> "netem: cannot mix duplicating netems with other netems in tree"
+
+See [`LinkImpairment::duplicate`](src/tc/impairment.rs) for details.
+
+[kernel-netem]: https://github.com/torvalds/linux/blob/master/net/sched/sch_netem.c
+
 ## Running Tests
 
 Tests require root privileges to create network namespaces:

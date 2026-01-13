@@ -25,4 +25,14 @@ futures.workspace = true
 rtnetlink = { version = "0.20.0" }
 
 [dev-dependencies]
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "time",
+  "net",
+] }
+
+[[example]]
+name = "sim_multi_region"
+path = "examples/sim_multi_region.rs"

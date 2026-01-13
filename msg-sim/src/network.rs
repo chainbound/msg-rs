@@ -1252,4 +1252,123 @@ mod msg_sim_network {
 
         // If we got here without error, the custom burst was accepted
     }
+
+    /// Documents Linux kernel limitation: once a netem qdisc with `duplicate > 0` exists
+    /// on an interface, no additional netem qdiscs can be created on that interface.
+    ///
+    /// This test verifies the limitation exists (it expects the second netem to fail).
+    /// The kernel logs "netem: change failed" when this happens.
+    ///
+    /// Workaround: Only use `duplicate` on at most one outgoing link per peer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn netem_duplicate_prevents_additional_netem_qdiscs() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let subnet = Subnet::new(Ipv4Addr::new(24, 0, 0, 0).into(), 16);
+        let mut network = Network::new(subnet).await.unwrap();
+
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+        let peer_3 = network.add_peer().await.unwrap();
+
+        // First netem WITH duplicate - works
+        let with_dup = LinkImpairment { latency: 20_000, duplicate: 0.02, ..Default::default() };
+        network.apply_impairment(Link::new(peer_1, peer_2), with_dup).await.unwrap();
+
+        // Second netem (even WITHOUT duplicate) - fails due to kernel limitation
+        let no_dup = LinkImpairment {
+            latency: 10_000,
+            // NO duplicate
+            ..Default::default()
+        };
+        let result = network.apply_impairment(Link::new(peer_1, peer_3), no_dup).await;
+
+        // This fails because the first netem has duplicate > 0
+        assert!(
+            result.is_err(),
+            "Expected failure: kernel prevents additional netem qdiscs when one has duplicate > 0"
+        );
+    }
+
+    /// Test that 100% packet duplication causes messages to be received twice.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn packet_duplication_works() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let subnet = Subnet::new(Ipv4Addr::new(21, 0, 0, 0).into(), 16);
+        let mut network = Network::new(subnet).await.unwrap();
+
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+
+        // Apply 100% packet duplication from peer 1 to peer 2
+        // This should cause every packet to be sent twice
+        let impairment = LinkImpairment { duplicate: 100.0, ..Default::default() };
+        network.apply_impairment(Link::new(peer_1, peer_2), impairment).await.unwrap();
+
+        let address_2 = peer_2.veth_address(subnet);
+        let port = 9999;
+
+        // Receiver: count how many times we receive the message
+        let receiver = network
+            .run_in_namespace(peer_2, move |_| {
+                Box::pin(async move {
+                    let sock = tokio::net::UdpSocket::bind(SocketAddr::new(address_2, port))
+                        .await
+                        .unwrap();
+
+                    let mut received_count = 0;
+                    let mut buf = [0u8; 64];
+
+                    // Try to receive multiple times with a timeout
+                    // With 100% duplication, we expect to receive the same packet twice
+                    loop {
+                        match tokio::time::timeout(Duration::from_millis(500), sock.recv(&mut buf))
+                            .await
+                        {
+                            Ok(Ok(n)) => {
+                                let msg = &buf[..n];
+                                tracing::info!(?msg, received_count, "received packet");
+                                assert_eq!(msg, b"ping", "unexpected message content");
+                                received_count += 1;
+                            }
+                            Ok(Err(e)) => panic!("recv error: {}", e),
+                            Err(_) => break, // Timeout, no more packets
+                        }
+                    }
+
+                    received_count
+                })
+            })
+            .await
+            .unwrap();
+
+        // Give the receiver time to bind
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Sender: send a single UDP packet
+        let sender = network
+            .run_in_namespace(peer_1, move |_| {
+                Box::pin(async move {
+                    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.unwrap();
+                    sock.send_to(b"ping", SocketAddr::new(address_2, port)).await.unwrap();
+                    tracing::info!("sent single packet");
+                })
+            })
+            .await
+            .unwrap();
+
+        // Wait for sender to complete
+        sender.await.unwrap();
+
+        // Wait for receiver to finish (after timeout)
+        let received_count = receiver.await.unwrap();
+
+        // With 100% duplication, we should receive exactly 2 copies of the packet
+        assert_eq!(
+            received_count, 2,
+            "Expected 2 packets (original + duplicate) but received {}",
+            received_count
+        );
+    }
 }

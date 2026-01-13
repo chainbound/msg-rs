@@ -79,6 +79,27 @@ pub struct LinkImpairment {
     ///
     /// Packets are randomly duplicated with this probability. A value of 1.0 means
     /// approximately 1% of packets will be sent twice.
+    ///
+    /// # Linux Kernel Limitation
+    ///
+    /// **Important:** Once a netem qdisc with `duplicate > 0` exists on a network
+    /// interface, the Linux kernel prevents creating additional netem qdiscs on
+    /// that same interface. This means you can only use packet duplication on
+    /// **at most one outgoing link per peer**.
+    ///
+    /// For example, if peer A has links to peers B, C, and D:
+    /// - You CAN set `duplicate > 0` on the A→B link
+    /// - You CANNOT also set impairments on A→C or A→D (even without duplicate)
+    ///
+    /// If you need multiple outgoing links from the same peer, either:
+    /// - Use `duplicate` on only one of them, OR
+    /// - Don't use `duplicate` at all on links from that peer
+    ///
+    /// This is enforced by the [`check_netem_in_tree()`][kernel] function in the
+    /// Linux kernel (`net/sched/sch_netem.c`), which returns:
+    /// > "netem: cannot mix duplicating netems with other netems in tree"
+    ///
+    /// [kernel]: https://github.com/torvalds/linux/blob/master/net/sched/sch_netem.c
     pub duplicate: f64,
 
     /// Random jitter added to latency, in microseconds.
