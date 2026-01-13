@@ -15,16 +15,14 @@ use super::core::MTU_ETHERNET;
 /// ```
 /// use msg_sim::tc::impairment::LinkImpairment;
 ///
-/// // Simulate a lossy, high-latency satellite link with limited bandwidth
-/// let satellite_link = LinkImpairment {
-///     latency: 300_000,           // 300ms one-way delay
-///     jitter: 50_000,             // ±50ms variation
-///     loss: 1.0,                  // 1% packet loss
-///     bandwidth_mbit_s: Some(10.0), // 10 Mbit/s bandwidth cap
-///     ..Default::default()
-/// };
+/// // Using method chaining (recommended)
+/// let satellite_link = LinkImpairment::default()
+///     .with_latency_ms(300)       // 300ms one-way delay
+///     .with_jitter_ms(50)         // ±50ms variation
+///     .with_loss(1.0)             // 1% packet loss
+///     .with_bandwidth_mbit_s(10.0); // 10 Mbit/s bandwidth cap
 ///
-/// // Simulate a local network with occasional issues
+/// // Using struct literal syntax
 /// let flaky_lan = LinkImpairment {
 ///     latency: 1_000,             // 1ms base latency
 ///     duplicate: 0.1,             // 0.1% duplicate packets
@@ -170,6 +168,74 @@ impl Default for LinkImpairment {
 }
 
 impl LinkImpairment {
+    /// Sets the base latency in microseconds.
+    pub fn with_latency(mut self, microseconds: u32) -> Self {
+        self.latency = microseconds;
+        self
+    }
+
+    /// Sets the base latency in milliseconds.
+    pub fn with_latency_ms(mut self, milliseconds: u32) -> Self {
+        self.latency = milliseconds * 1_000;
+        self
+    }
+
+    /// Sets the jitter (latency variation) in microseconds.
+    pub fn with_jitter(mut self, microseconds: u32) -> Self {
+        self.jitter = microseconds;
+        self
+    }
+
+    /// Sets the jitter (latency variation) in milliseconds.
+    pub fn with_jitter_ms(mut self, milliseconds: u32) -> Self {
+        self.jitter = milliseconds * 1_000;
+        self
+    }
+
+    /// Sets the packet loss percentage (0.0 to 100.0).
+    pub fn with_loss(mut self, percent: f64) -> Self {
+        self.loss = percent;
+        self
+    }
+
+    /// Sets the packet duplication percentage (0.0 to 100.0).
+    ///
+    /// See [`LinkImpairment::duplicate`] for important kernel limitations.
+    pub fn with_duplicate(mut self, percent: f64) -> Self {
+        self.duplicate = percent;
+        self
+    }
+
+    /// Sets the packet reordering gap.
+    pub fn with_gap(mut self, gap: u32) -> Self {
+        self.gap = gap;
+        self
+    }
+
+    /// Sets the maximum packets in the netem queue.
+    pub fn with_netem_limit(mut self, limit: u32) -> Self {
+        self.netem_limit = limit;
+        self
+    }
+
+    /// Sets the bandwidth limit in megabits per second.
+    pub fn with_bandwidth_mbit_s(mut self, mbit_s: f64) -> Self {
+        self.bandwidth_mbit_s = Some(mbit_s);
+        self
+    }
+
+    /// Sets the TBF burst size in kibibytes.
+    pub fn with_burst_kib(mut self, kib: u32) -> Self {
+        self.burst_kib = Some(kib);
+        self
+    }
+
+    /// Sets the TBF queue latency in milliseconds.
+    pub fn with_tbf_queue_latency_ms(mut self, ms: u32) -> Self {
+        self.tbf_queue_latency_ms = Some(ms);
+        self
+    }
+
     /// Returns `true` if bandwidth limiting is configured.
     ///
     /// When this returns `true`, a TBF qdisc will be created in the qdisc chain.
