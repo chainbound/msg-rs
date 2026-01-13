@@ -44,8 +44,8 @@ pub enum ReqError {
     NoValidEndpoints,
     #[error("Failed to connect to the target endpoint: {0:?}")]
     Connect(Box<dyn std::error::Error + Send + Sync>),
-    #[error("High-water mark reached: {0} pending requests")]
-    HighWaterMarkReached(usize),
+    #[error("High-water mark reached")]
+    HighWaterMarkReached,
 }
 
 /// A command to send a request message and wait for a response.

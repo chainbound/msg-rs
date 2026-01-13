@@ -262,7 +262,8 @@ where
             }
 
             // Check for outgoing messages from the socket handle.
-            // Only poll for new requests when pending_egress is empty AND we're under HWM to maintain backpressure.
+            // Only poll for new requests when pending_egress is empty AND we're under HWM to
+            // maintain backpressure.
             let under_hwm = this
                 .options
                 .pending_requests_hwm

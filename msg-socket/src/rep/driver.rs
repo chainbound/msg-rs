@@ -497,7 +497,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             } else {
                 // At HWM - not polling from underlying connection until responses drain.
-                // The waker is registered on pending_requests, so we'll wake when responses complete.
+                // The waker is registered on pending_requests, so we'll wake when responses
+                // complete.
                 trace!(
                     hwm = ?this.pending_responses_hwm,
                     pending = this.pending_requests.len(),
