@@ -66,6 +66,22 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     span: tracing::Span,
 }
 
+/// The driver behind a `Rep` socket.
+///
+/// # Driver Event Loop
+/// The event loop of the driver will try to do as much work as possible in a given call, also
+/// accounting for work that might become available as a result of the driver running.
+///
+/// There's an implicit priority based on the order in which the tasks are polled,
+/// this is because after an inner task has completed some work it will restart the loop, thus
+/// allowing earlier tasks to work again.
+///
+/// Currently, this driver will use the following sources of work:
+/// 1. Connected peers (scheduled in task 2 and 3)
+/// 2. Authentication tasks for connecting peers (scheduled in task 3)
+/// 3. Incoming new connections for connecting peers (scheduled in task 5)
+/// 4. Process control signals for the underlying transport (doesn't restart the loop)
+/// 5. Incoming connections from the underlying transport
 #[allow(clippy::type_complexity)]
 pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// The server transport used to accept incoming connections.
@@ -106,6 +122,7 @@ where
         let this = self.get_mut();
 
         loop {
+            // Check connected peers, handle disconnections and incoming request
             if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
                 let Some(result) = maybe_result.enter() else {
                     debug!(?peer, "peer disconnected");
@@ -144,6 +161,8 @@ where
                 continue;
             }
 
+            // Drive authentication tasks, when authentication succeeds we register the peer as
+            // connected
             if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx).enter() {
                 match auth.inner {
                     Ok(auth) => {
@@ -185,6 +204,7 @@ where
                 continue;
             }
 
+            // Drive accepting incoming connections
             if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).enter() {
                 match conn.inner {
                     Ok(io) => {
@@ -196,8 +216,8 @@ where
                     Err(e) => {
                         debug!(?e, "failed to accept incoming connection");
 
-                        // Active clients have already been incremented in the initial call to
-                        // `poll_accept`, so we need to decrement them here.
+                        // Active clients have already been incremented when accepting them from the
+                        // underlying transport, so we need to decrement them here.
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -205,6 +225,7 @@ where
                 continue;
             }
 
+            // Drive control signals for the underlying transport
             if let Poll::Ready(Some(cmd)) = this.control_rx.poll_recv(cx) {
                 this.transport.on_control(cmd);
             }
@@ -214,6 +235,7 @@ where
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 let span = this.span.clone().entered();
 
+                // Reject incoming connections if we have `max_clients` active clients already
                 if let Some(max) = this.options.max_clients {
                     if this.state.stats.specific.active_clients() >= max {
                         warn!(
@@ -225,8 +247,8 @@ where
                     }
                 }
 
-                // Increment the active clients counter. If the authentication fails, this counter
-                // will be decremented.
+                // Increment the active clients counter.
+                // IMPORTANT: decrement the active clients counter when the connection fails or is closed.
                 this.state.stats.specific.increment_active_clients();
 
                 this.conn_tasks.push(accept.with_span(span));
@@ -244,8 +266,12 @@ where
     T: Transport<A>,
     A: Address,
 {
-    /// Handles an accepted connection. If this returns an error, the active connections counter
+    /// Handles an accepted connection.
+    ///
+    /// If this returns an error, the active connections counter
     /// should be decremented.
+    ///
+    /// Will schedule an authentication task if `self.auth` is set
     fn on_accepted_connection(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
         info!(?addr, "new connection");
@@ -257,6 +283,7 @@ where
         });
 
         let Some(ref auth) = self.auth else {
+            // Create peer without authenticating
             self.peer_states.insert(
                 addr.clone(),
                 StreamNotifyClose::new(PeerState {
