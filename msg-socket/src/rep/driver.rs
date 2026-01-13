@@ -248,7 +248,8 @@ where
                 }
 
                 // Increment the active clients counter.
-                // IMPORTANT: decrement the active clients counter when the connection fails or is closed.
+                // IMPORTANT: decrement the active clients counter when the connection fails or is
+                // closed.
                 this.state.stats.specific.increment_active_clients();
 
                 this.conn_tasks.push(accept.with_span(span));
