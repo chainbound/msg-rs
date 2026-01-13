@@ -218,6 +218,7 @@ where
                 let size = msg.size();
                 tracing::debug!("Sending msg {}", msg.id());
                 // Write the message to the buffer.
+                // FIXME: handle restoring message in pending_egress if send/flush fails
                 match channel.start_send_unpin(msg.inner) {
                     Ok(_) => {
                         this.socket_state.stats.specific.increment_tx(size);
@@ -227,13 +228,12 @@ where
 
                         // set the connection to inactive, so that it will be re-tried
                         this.conn_manager.reset_connection();
+                        continue;
                     }
                 }
-
-                // Continue to potentially send more or flush
-                continue;
             }
 
+            // Flush if write buffer is full according to configured `write_buffer_size`
             if channel.write_buffer().len() >= this.options.write_buffer_size {
                 if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                     tracing::error!(err = ?e, "Failed to flush connection");
@@ -247,6 +247,7 @@ where
                 }
             }
 
+            // Flush if we have some data and `linger_timer` is ready
             if let Some(ref mut linger_timer) = this.linger_timer {
                 if !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
                     if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
