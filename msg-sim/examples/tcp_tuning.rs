@@ -58,30 +58,6 @@
 //! - `tcp_mem` (system-wide memory pressure thresholds)
 //! - `tcp_max_orphans` (system-wide orphan limit)
 //!
-//! # Using the sysctl Module
-//!
-//! The `msg_sim::sysctl` module provides type-safe access to common parameters:
-//!
-//! ```no_run
-//! use msg_sim::sysctl::{self, Tcp};
-//!
-//! // Read a parameter
-//! let value = sysctl::read(Tcp::SlowStartAfterIdle)?;
-//!
-//! // Write a parameter
-//! sysctl::write(Tcp::CongestionControl, "cubic")?;
-//! # Ok::<(), std::io::Error>(())
-//! ```
-//!
-//! For parameters not covered by the module, you can always use direct filesystem access:
-//!
-//! ```no_run
-//! // Direct access for less common parameters
-//! std::fs::write("/proc/sys/net/ipv4/tcp_plb_enabled", "1")?;
-//! std::fs::write("/proc/sys/net/ipv4/tcp_comp_sack_nr", "0")?;
-//! # Ok::<(), std::io::Error>(())
-//! ```
-//!
 //! # Running
 //!
 //! ```bash
@@ -90,28 +66,30 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use msg_sim::{
-    ip::Subnet,
-    network::Network,
-    sysctl::{self, Protocol, Tcp},
-};
+use msg_sim::{ip::Subnet, network::Network};
+
+// Sysctl paths - use std::fs::read_to_string / std::fs::write directly
+const TCP_CONGESTION_CONTROL: &str = "/proc/sys/net/ipv4/tcp_congestion_control";
+const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
+const TCP_SLOW_START_AFTER_IDLE: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
+
+fn read_sysctl(path: &str) -> std::io::Result<String> {
+    std::fs::read_to_string(path).map(|s| s.trim().to_string())
+}
+
+fn write_sysctl(path: &str, value: &str) -> std::io::Result<()> {
+    std::fs::write(path, value)
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== TCP Parameter Namespace Isolation Demo ===\n");
 
     // Show host namespace configuration first
-    // Note: TCP parameters are shared between IPv4/IPv6, so Protocol::V4 is used by convention
     println!("Host namespace TCP settings:");
-    println!(
-        "  tcp_congestion_control: {}",
-        sysctl::read(Tcp::CongestionControl, Protocol::V4)?
-    );
-    println!("  tcp_rmem: {}", sysctl::read(Tcp::Rmem, Protocol::V4)?);
-    println!(
-        "  tcp_slow_start_after_idle: {}",
-        sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)?
-    );
+    println!("  tcp_congestion_control: {}", read_sysctl(TCP_CONGESTION_CONTROL)?);
+    println!("  tcp_rmem: {}", read_sysctl(TCP_RMEM)?);
+    println!("  tcp_slow_start_after_idle: {}", read_sysctl(TCP_SLOW_START_AFTER_IDLE)?);
     println!();
 
     // Create network with two peers
@@ -129,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     network
         .run_in_namespace(peer1, |_| {
             Box::pin(async {
-                sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "0")?;
+                write_sysctl(TCP_SLOW_START_AFTER_IDLE, "0")?;
                 println!("  Set tcp_slow_start_after_idle = 0");
                 Ok::<_, std::io::Error>(())
             })
@@ -142,12 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     network
         .run_in_namespace(peer2, |_| {
             Box::pin(async {
-                sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "1")?;
+                write_sysctl(TCP_SLOW_START_AFTER_IDLE, "1")?;
                 println!("  Set tcp_slow_start_after_idle = 1");
-
-                // Example: For parameters not in the sysctl module, use direct fs access:
-                // std::fs::write("/proc/sys/net/ipv4/tcp_plb_enabled", "1")?;
-
                 Ok::<_, std::io::Error>(())
             })
         })
@@ -161,19 +135,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let peer1_value = network
         .run_in_namespace(peer1, |_| {
-            Box::pin(async { sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4) })
+            Box::pin(async { read_sysctl(TCP_SLOW_START_AFTER_IDLE) })
         })
         .await?
         .await??;
 
     let peer2_value = network
         .run_in_namespace(peer2, |_| {
-            Box::pin(async { sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4) })
+            Box::pin(async { read_sysctl(TCP_SLOW_START_AFTER_IDLE) })
         })
         .await?
         .await??;
 
-    let host_value = sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)?;
+    let host_value = read_sysctl(TCP_SLOW_START_AFTER_IDLE)?;
 
     println!("  Peer {} namespace: {}", peer1, peer1_value);
     println!("  Peer {} namespace: {}", peer2, peer2_value);

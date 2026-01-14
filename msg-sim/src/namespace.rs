@@ -346,7 +346,8 @@ impl<Ctx> Drop for NetworkNamespace<Ctx> {
 mod tests {
     use super::*;
     use crate::dynch::DynFuture;
-    use crate::sysctl::{self, Protocol, Tcp};
+
+    const TCP_SLOW_START_AFTER_IDLE: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
 
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_namespace_isolates_proc() {
@@ -387,11 +388,11 @@ mod tests {
         let ns1 = NetworkNamespace::new("test-ns-sysctl-1", || ()).await.unwrap();
         let ns2 = NetworkNamespace::new("test-ns-sysctl-2", || ()).await.unwrap();
 
-        // Set different values in each namespace using the sysctl module
+        // Set different values in each namespace
         let write_result_ns1: std::io::Result<()> = ns1
             .task_sender
             .submit(|_: &mut ()| -> DynFuture<'_, std::io::Result<()>> {
-                Box::pin(async { sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "0") })
+                Box::pin(async { std::fs::write(TCP_SLOW_START_AFTER_IDLE, "0") })
             })
             .await
             .unwrap()
@@ -403,7 +404,7 @@ mod tests {
         let write_result_ns2: std::io::Result<()> = ns2
             .task_sender
             .submit(|_: &mut ()| -> DynFuture<'_, std::io::Result<()>> {
-                Box::pin(async { sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "1") })
+                Box::pin(async { std::fs::write(TCP_SLOW_START_AFTER_IDLE, "1") })
             })
             .await
             .unwrap()
@@ -417,7 +418,8 @@ mod tests {
             .task_sender
             .submit(|_: &mut ()| -> DynFuture<'_, String> {
                 Box::pin(async {
-                    sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)
+                    std::fs::read_to_string(TCP_SLOW_START_AFTER_IDLE)
+                        .map(|s| s.trim().to_string())
                         .unwrap_or_else(|_| "error".to_string())
                 })
             })
@@ -431,7 +433,8 @@ mod tests {
             .task_sender
             .submit(|_: &mut ()| -> DynFuture<'_, String> {
                 Box::pin(async {
-                    sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)
+                    std::fs::read_to_string(TCP_SLOW_START_AFTER_IDLE)
+                        .map(|s| s.trim().to_string())
                         .unwrap_or_else(|_| "error".to_string())
                 })
             })
