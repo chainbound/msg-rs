@@ -11,4 +11,4 @@ macro_rules! cfg_linux_modules {
         )*
     };
 }
-cfg_linux_modules!(dynch, ip, namespace, network, tc, wrappers);
+cfg_linux_modules!(dynch, ip, namespace, network, sysctl, tc, wrappers);

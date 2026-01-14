@@ -341,3 +341,141 @@ impl<Ctx> Drop for NetworkNamespace<Ctx> {
         rt.block_on(task)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynch::DynFuture;
+    use crate::sysctl::{self, Protocol, Tcp};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_namespace_isolates_proc() {
+        // Create two namespaces
+        let ns1 = NetworkNamespace::new("test-ns-mount-1", || ()).await.unwrap();
+        let ns2 = NetworkNamespace::new("test-ns-mount-2", || ()).await.unwrap();
+
+        // Verify /proc is mounted in ns1 by checking /proc/self/ns/net exists
+        let proc_mounted_ns1: bool = ns1
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, bool> {
+                Box::pin(async { std::path::Path::new("/proc/self/ns/net").exists() })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+        assert!(proc_mounted_ns1, "/proc should be mounted in namespace 1");
+
+        // Verify /proc is mounted in ns2
+        let proc_mounted_ns2: bool = ns2
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, bool> {
+                Box::pin(async { std::path::Path::new("/proc/self/ns/net").exists() })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+        assert!(proc_mounted_ns2, "/proc should be mounted in namespace 2");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sysctl_values_are_namespace_specific() {
+        // Create two namespaces
+        let ns1 = NetworkNamespace::new("test-ns-sysctl-1", || ()).await.unwrap();
+        let ns2 = NetworkNamespace::new("test-ns-sysctl-2", || ()).await.unwrap();
+
+        // Set different values in each namespace using the sysctl module
+        let write_result_ns1: std::io::Result<()> = ns1
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, std::io::Result<()>> {
+                Box::pin(async { sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "0") })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+        write_result_ns1.expect("should write sysctl in ns1");
+
+        let write_result_ns2: std::io::Result<()> = ns2
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, std::io::Result<()>> {
+                Box::pin(async { sysctl::write(Tcp::SlowStartAfterIdle, Protocol::V4, "1") })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+        write_result_ns2.expect("should write sysctl in ns2");
+
+        // Read back values and verify they're different
+        let value_ns1: String = ns1
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, String> {
+                Box::pin(async {
+                    sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)
+                        .unwrap_or_else(|_| "error".to_string())
+                })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+
+        let value_ns2: String = ns2
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, String> {
+                Box::pin(async {
+                    sysctl::read(Tcp::SlowStartAfterIdle, Protocol::V4)
+                        .unwrap_or_else(|_| "error".to_string())
+                })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+
+        assert_eq!(value_ns1, "0", "ns1 should have tcp_slow_start_after_idle=0");
+        assert_eq!(value_ns2, "1", "ns2 should have tcp_slow_start_after_idle=1");
+        assert_ne!(
+            value_ns1, value_ns2,
+            "sysctls should be isolated between namespaces"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn namespace_has_isolated_network_identity() {
+        // Create a namespace
+        let ns = NetworkNamespace::new("test-ns-identity", || ()).await.unwrap();
+
+        // Get the network namespace inode from inside the namespace
+        let ns_inode_inside: u64 = ns
+            .task_sender
+            .submit(|_: &mut ()| -> DynFuture<'_, u64> {
+                Box::pin(async {
+                    helpers::current_netns().map(|id| id.inode).unwrap_or(0)
+                })
+            })
+            .await
+            .unwrap()
+            .receive()
+            .await
+            .unwrap();
+
+        // Get the host namespace inode (from outside)
+        let host_inode = helpers::current_netns().map(|id| id.inode).unwrap_or(0);
+
+        assert_ne!(ns_inode_inside, 0, "should get valid inode inside namespace");
+        assert_ne!(host_inode, 0, "should get valid host inode");
+        assert_ne!(
+            ns_inode_inside, host_inode,
+            "namespace inode should differ from host"
+        );
+    }
+}
