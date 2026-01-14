@@ -112,12 +112,12 @@ pub struct ReqOptions {
     /// The size of the channel buffer between the socket and the driver.
     /// This controls how many requests can be queued, on top of the current pending requests,
     /// before the socket returns [`ReqError::HighWaterMarkReached`].
-    pub channel_size: usize,
+    pub max_queue_size: usize,
     /// High-water mark for pending requests. When this limit is reached, new requests
     /// will not be processed and will be queued up to [`channel_size`](Self::channel_size)
     /// elements. Once both limits are reached, new requests will return
     /// [`ReqError::HighWaterMarkReached`].
-    pub pending_requests_hwm: usize,
+    pub max_pending_requests: usize,
 }
 
 impl ReqOptions {
@@ -223,7 +223,7 @@ impl ReqOptions {
     ///
     /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_max_queue_size(mut self, size: usize) -> Self {
-        self.channel_size = size;
+        self.max_queue_size = size;
         self
     }
 
@@ -233,7 +233,7 @@ impl ReqOptions {
     ///
     /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_max_pending_requests(mut self, hwm: usize) -> Self {
-        self.pending_requests_hwm = hwm;
+        self.max_pending_requests = hwm;
         self
     }
 }
@@ -247,8 +247,8 @@ impl Default for ReqOptions {
             min_compress_size: 8192,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
-            channel_size: DEFAULT_BUFFER_SIZE,
-            pending_requests_hwm: DEFAULT_BUFFER_SIZE,
+            max_queue_size: DEFAULT_BUFFER_SIZE,
+            max_pending_requests: DEFAULT_BUFFER_SIZE,
         }
     }
 }

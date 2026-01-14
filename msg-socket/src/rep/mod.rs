@@ -53,7 +53,7 @@ pub struct RepOptions {
     /// High-water mark for pending responses per peer. When this limit is reached,
     /// new requests will not be read from the underlying connection until pending
     /// responses are fulfilled.
-    pub(crate) pending_responses_hwm: usize,
+    pub(crate) max_pending_responses: usize,
 }
 
 impl Default for RepOptions {
@@ -63,7 +63,7 @@ impl Default for RepOptions {
             min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
             write_buffer_size: 8192,
             write_buffer_linger: Some(Duration::from_micros(100)),
-            pending_responses_hwm: DEFAULT_BUFFER_SIZE,
+            max_pending_responses: DEFAULT_BUFFER_SIZE,
         }
     }
 }
@@ -143,8 +143,8 @@ impl RepOptions {
     /// responses are fulfilled.
     ///
     /// Default: [`DEFAULT_BUFFER_SIZE`]
-    pub fn with_max_pending_requests(mut self, hwm: usize) -> Self {
-        self.pending_responses_hwm = hwm;
+    pub fn with_max_pending_responses(mut self, hwm: usize) -> Self {
+        self.max_pending_responses = hwm;
         self
     }
 }

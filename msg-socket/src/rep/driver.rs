@@ -59,7 +59,7 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     pending_egress: Option<WithSpan<reqrep::Message>>,
     /// High-water mark for pending responses. When reached, new requests are blocked
     /// (backpressure is applied) until responses drain below the limit.
-    pending_responses_hwm: usize,
+    max_pending_responses: usize,
     state: Arc<SocketState>,
     /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
@@ -189,7 +189,7 @@ where
                                 write_buffer_size: this.options.write_buffer_size,
                                 addr: auth.addr,
                                 pending_egress: None,
-                                pending_responses_hwm: this.options.pending_responses_hwm,
+                                max_pending_responses: this.options.max_pending_responses,
                                 state: Arc::clone(&this.state),
                                 compressor: this.compressor.clone(),
                             }),
@@ -295,7 +295,7 @@ where
                     write_buffer_size: self.options.write_buffer_size,
                     addr,
                     pending_egress: None,
-                    pending_responses_hwm: self.options.pending_responses_hwm,
+                    max_pending_responses: self.options.max_pending_responses,
                     state: Arc::clone(&self.state),
                     compressor: self.compressor.clone(),
                 }),
@@ -467,7 +467,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
 
             // Accept incoming requests from the peer.
             // Only accept new requests if we're under the HWM for pending responses.
-            let under_hwm = this.pending_requests.len() < this.pending_responses_hwm;
+            let under_hwm = this.pending_requests.len() < this.max_pending_responses;
 
             if under_hwm {
                 let _g = this.span.clone().entered();
@@ -525,7 +525,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 // The waker is registered on pending_requests, so we'll wake when responses
                 // complete.
                 trace!(
-                    hwm = this.pending_responses_hwm,
+                    hwm = this.max_pending_responses,
                     pending = this.pending_requests.len(),
                     "at high-water mark, not polling from underlying connection until responses drain"
                 );

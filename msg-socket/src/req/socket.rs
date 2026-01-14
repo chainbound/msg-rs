@@ -171,7 +171,7 @@ where
 
     /// Internal method to initialize and spawn the driver.
     fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
-        let (to_driver, from_socket) = mpsc::channel(self.options.channel_size);
+        let (to_driver, from_socket) = mpsc::channel(self.options.max_queue_size);
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 
