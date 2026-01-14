@@ -1,65 +1,105 @@
 # `msg-sim`
 
-## Overview
-This crate provides functionality to simulate real-world network conditions
-locally to and from a specific endpoint for testing and benchmarking purposes.
-It only works on MacOS and Linux.
+In-process network emulation for Linux, powered by `rtnetlink`.
 
-## Implementation
+This crate enables testing distributed systems under various network conditions
+(latency, packet loss, bandwidth limits) using Linux network namespaces and
+traffic control.
 
-### MacOS
-On MacOS, we use a combination of the `pfctl` and `dnctl` tools.
-[`pfctl`](https://man.freebsd.org/cgi/man.cgi?query=pfctl&apropos=0&sektion=8&manpath=FreeBSD+14.0-RELEASE+and+Ports&arch=default&format=html) is a tool to manage the packet filter device. [`dnctl`](https://man.freebsd.org/cgi/man.cgi?query=dnctl&sektion=8&format=html) can manage
-the [dummynet](http://info.iet.unipi.it/~luigi/papers/20100304-ccr.pdf) traffic shaper.
+## Architecture
 
-The general flow is as follows:
+Each peer runs in an isolated network namespace, connected through a central hub:
 
-* Create a dummynet pipe with `dnctl` and configure it with `bw`, `delay`, `plr`
-
-Example:
-```bash
-sudo dnctl pipe 1 config bw 10Kbit/s delay 50 plr 0.1
+```text
+                      Hub Namespace (msg-sim-hub)
+┌─────────────────────────────────────────────────────────────┐
+│                    Bridge (msg-sim-br0)                     │
+└─────────┬───────────────────┬───────────────────┬───────────┘
+          │                   │                   │
+     veth pair           veth pair           veth pair
+          │                   │                   │
+┌─────────┴─────────┐ ┌───────┴──────────┐ ┌──────┴───────────┐
+│  Peer 1 Namespace │ │ Peer 2 Namespace │ │ Peer 3 Namespace │
+│  IP: 10.0.0.1     │ │ IP: 10.0.0.2     │ │ IP: 10.0.0.3     │
+│  TC: per-dest     │ │ TC: per-dest     │ │ TC: per-dest     │
+└───────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
-* Create a loopback alias with `ifconfig` to simulate a different endpoint and
-set the MTU to the usual value (1500)
+See [`src/network.rs`](src/network.rs) for detailed architecture documentation.
 
-Example:
-```bash
-sudo ifconfig lo0 alias 127.0.0.3 up
-sudo ifconfig lo0 mtu 1500
+## Features
+
+- **Per-destination impairments**: Different network conditions for each peer-to-peer link
+- **Latency & jitter**: Configurable delay with random variation (netem)
+- **Packet loss & duplication**: Percentage-based random effects
+- **Bandwidth limiting**: Token bucket filter (TBF) rate limiting
+- **Dynamic updates**: Change impairments at runtime without recreating the network
+
+## Quick Example
+
+```rust
+use msg_sim::{network::{Network, Link}, tc::impairment::LinkImpairment, ip::Subnet};
+use std::net::Ipv4Addr;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 24);
+    let mut network = Network::new(subnet).await?;
+
+    let peer_1 = network.add_peer().await?;
+    let peer_2 = network.add_peer().await?;
+
+    // Simulate a slow, lossy link
+    network.apply_impairment(
+        Link::new(peer_1, peer_2),
+        LinkImpairment {
+            latency: 100_000,              // 100ms
+            loss: 1.0,                     // 1% packet loss
+            bandwidth_mbit_s: Some(10.0),  // 10 Mbit/s
+            ..Default::default()
+        },
+    ).await?;
+
+    // Run code in peer's network namespace
+    network.run_in_namespace(peer_1, |_ctx| {
+        Box::pin(async move {
+            // Network operations here see the configured impairments
+        })
+    }).await?;
+
+    Ok(())
+}
 ```
 
-* Use `pfctl` to create a rule to match traffic and send it through the pipe
+## Known Limitations
 
-Example:
+### Packet Duplication Restriction
+
+The Linux kernel prevents creating additional netem qdiscs on a network interface
+once one with `duplicate > 0` exists. This means **packet duplication can only be
+used on at most one outgoing link per peer**.
+
+For example, if peer A has links to peers B, C, and D:
+- You CAN set `duplicate > 0` on the A→B link
+- You CANNOT then set any impairments on A→C or A→D (even without duplication)
+
+**Workaround**: If you need multiple outgoing links from a peer, either use
+`duplicate` on only one of them, or don't use `duplicate` at all from that peer.
+
+This is enforced by the [`check_netem_in_tree()`][kernel-netem] function in the
+Linux kernel, which returns:
+> "netem: cannot mix duplicating netems with other netems in tree"
+
+See [`LinkImpairment::duplicate`](src/tc/impairment.rs) for details.
+
+[kernel-netem]: https://github.com/torvalds/linux/blob/master/net/sched/sch_netem.c
+
+## Running Tests
+
+Tests require root privileges to create network namespaces:
+
 ```bash
-# Create an anchor (a named container for rules, close to a namespace)
-(cat /etc/pf.conf && echo "dummynet-anchor \"msg-sim\"" && \
-echo "anchor \"msg-sim\"") | sudo pfctl -f -
-
-# Create a rule to match traffic from any to the alias and send it through the pipe
-echo 'dummynet in from any to 127.0.0.3 pipe 1' | sudo pfctl -a msg-sim -f -
-
-# Enable the packet filter
-sudo pfctl -E
+sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p msg-sim --all-features -- --test-threads=1
 ```
 
-* Remove the rules and the pipe
-```bash
-# Apply the default configuration
-sudo pfctl -f /etc/pf.conf
-# Disable the packet filter
-sudo pfctl -d
-# Remove the alias & reset the MTU
-sudo ifconfig lo0 -alias 127.0.0.3
-sudo ifconfig lo0 mtu 16384
-# Remove the dummynet pipes
-sudo dnctl pipe delete 1
-```
-
-### Questions
-- Do we need to create 2 pipes to simulate a bidirectional link? MAN page seems to say so.
-
-### Linux
-On Linux, we use dummy interfaces and `tc` with `netem` to simulate and shape traffic.
+The `--test-threads=1` flag is recommended to avoid conflicts between concurrent namespace operations.

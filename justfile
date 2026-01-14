@@ -12,5 +12,8 @@ clippy:
 fmt:
     cargo +nightly fmt --all -- --check
 
+# test:
+#     cargo nextest run --workspace --all-features --retries 3 
+
 test:
-    cargo nextest run --workspace --all-features --retries 3 
+    cargo nextest run --workspace --all-features --retries 3 -E 'not (package(msg-sim))'
