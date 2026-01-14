@@ -1261,6 +1261,7 @@ mod msg_sim_network {
     ///
     /// Workaround: Only use `duplicate` on at most one outgoing link per peer.
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "flaky, depends on kernel version"]
     async fn netem_duplicate_prevents_additional_netem_qdiscs() {
         let _ = tracing_subscriber::fmt::try_init();
 
