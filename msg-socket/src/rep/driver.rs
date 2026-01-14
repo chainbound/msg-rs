@@ -76,12 +76,24 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
 /// this is because after an inner task has completed some work it will restart the loop, thus
 /// allowing earlier tasks to work again.
 ///
-/// Currently, this driver will use the following sources of work:
-/// 1. Connected peers (scheduled in task 2 and 3)
-/// 2. Authentication tasks for connecting peers (scheduled in task 3)
-/// 3. Incoming new connections for connecting peers (scheduled in task 5)
+/// Currently, this driver will use the following "tasks":
+/// 1. Connected peers (created in task 2 and 3)
+/// 2. Authentication tasks for connecting peers (future created by task 3)
+/// 3. Incoming new connections for connecting peers (future created by task 5)
 /// 4. Process control signals for the underlying transport (doesn't restart the loop)
 /// 5. Incoming connections from the underlying transport
+///
+/// ```text
+/// (5) Transport ────> (3) conn_tasks ────> (2) auth_tasks
+///                            │                    │
+///                            │ (no auth)          │
+///                            v                    v
+///                     ┌─────────────────────────────┐
+///                     │ (1) peer_states             │
+///                     └─────────────────────────────┘
+///
+/// (4) control_rx ──on_control──> Transport
+/// ```
 #[allow(clippy::type_complexity)]
 pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// The server transport used to accept incoming connections.
