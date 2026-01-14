@@ -35,11 +35,11 @@ keywords = [
 ]
 
 [workspace.dependencies]
-msg-wire = { path = "./msg-wire" }
-msg-socket = { path = "./msg-socket" }
-msg-transport = { path = "./msg-transport" }
-msg-common = { path = "./msg-common" }
-msg-sim = { path = "./msg-sim" }
+msg-wire = { version = "0.1.5", path = "./msg-wire" }
+msg-socket = { version = "0.1.5", path = "./msg-socket" }
+msg-transport = { version = "0.1.5", path = "./msg-transport" }
+msg-common = { version = "0.1.5", path = "./msg-common" }
+msg-sim = { version = "0.1.5", path = "./msg-sim" }
 
 # async
 async-trait = "0.1"
