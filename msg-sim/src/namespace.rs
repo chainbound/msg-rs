@@ -38,12 +38,13 @@ const PROC_SELF_FD: &str = "/proc/self/fd";
 const PROC_SELF_TASK: &str = "/proc/self/task";
 
 /// Helpers for managing namespaces.
-mod helpers {
+pub(crate) mod helpers {
     use std::{
         fs, io,
         os::fd::{AsRawFd as _, BorrowedFd},
     };
 
+    use nix::mount::{MsFlags, mount};
     use nix::sched::CloneFlags;
 
     /// Kernel-stable network namespace identity
@@ -113,6 +114,34 @@ mod helpers {
         }
 
         Ok((before, after))
+    }
+
+    /// Create a new mount namespace and remount /proc.
+    ///
+    /// This is necessary to access namespace-specific sysctls at `/proc/sys/net/*`.
+    /// Without a fresh /proc mount, the process would see the host's /proc regardless
+    /// of which network namespace it's in.
+    ///
+    /// # How it works
+    ///
+    /// 1. `unshare(CLONE_NEWNS)` creates a new mount namespace for this thread
+    /// 2. `mount("proc", "/proc", "proc", ...)` remounts /proc in the new namespace
+    ///
+    /// After this, `/proc/sys/net/ipv4/*` will show this network namespace's values.
+    pub fn setup_mount_namespace() -> io::Result<()> {
+        // Create a new mount namespace
+        nix::sched::unshare(CloneFlags::CLONE_NEWNS)
+            .map_err(|e| io::Error::other(format!("unshare(CLONE_NEWNS) failed: {}", e)))?;
+
+        tracing::debug!("created new mount namespace");
+
+        // Remount /proc to see this network namespace's view
+        mount(Some("proc"), "/proc", Some("proc"), MsFlags::empty(), None::<&str>)
+            .map_err(|e| io::Error::other(format!("mount proc failed: {}", e)))?;
+
+        tracing::debug!("remounted /proc for namespace-specific view");
+
+        Ok(())
     }
 
     /// A guard to check whether the thread remains on the same network namespace when this is
@@ -212,6 +241,9 @@ impl NetworkNamespaceInner {
 
             let (_before, after) = helpers::setns_verified(fd)?;
             let _guard = helpers::NetnsGuard::new(after)?;
+
+            // Create mount namespace and remount /proc for namespace-specific sysctl access
+            helpers::setup_mount_namespace()?;
 
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
 
