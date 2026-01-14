@@ -1,6 +1,7 @@
-use std::io;
+use std::{io, time::Duration};
 
 use bytes::Bytes;
+use msg_common::constants::KiB;
 use thiserror::Error;
 
 mod driver;
@@ -11,7 +12,7 @@ mod socket;
 pub use socket::*;
 
 mod stats;
-use crate::stats::SocketStats;
+use crate::{Profile, stats::SocketStats};
 use stats::PubStats;
 
 mod trie;
@@ -21,8 +22,8 @@ use msg_wire::{
     pubsub,
 };
 
-/// The default buffer size for the socket.
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+/// The default high water mark for the socket.
+const DEFAULT_HWM: usize = 1024;
 
 #[derive(Debug, Error)]
 pub enum PubError {
@@ -47,26 +48,52 @@ pub struct PubOptions {
     /// The maximum number of concurrent clients.
     max_clients: Option<usize>,
     /// The maximum number of outgoing messages that can be buffered per session.
-    session_buffer_size: usize,
-    /// The interval at which each session should be flushed. If this is `None`,
-    /// the session will be flushed on every publish, which can add a lot of overhead.
-    flush_interval: Option<std::time::Duration>,
-    /// The maximum number of bytes that can be buffered in the session before being flushed.
-    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    backpressure_boundary: usize,
+    high_water_mark: usize,
+    /// The size of the write buffer in bytes.
+    pub write_buffer_size: usize,
+    /// The linger duration for the write buffer (how long to wait before flushing).
+    pub write_buffer_linger: Option<Duration>,
     /// Minimum payload size in bytes for compression to be used. If the payload is smaller than
     /// this threshold, it will not be compressed.
     min_compress_size: usize,
 }
 
-impl Default for PubOptions {
-    fn default() -> Self {
+impl PubOptions {
+    /// Creates new options based on the given profile.
+    pub fn new(profile: Profile) -> Self {
+        match profile {
+            Profile::Balanced => Self::balanced(),
+            Profile::Latency => Self::low_latency(),
+            Profile::Throughput => Self::high_throughput(),
+        }
+    }
+}
+
+impl PubOptions {
+    /// Creates options optimized for low latency.
+    pub fn low_latency() -> Self {
         Self {
-            max_clients: None,
-            session_buffer_size: DEFAULT_BUFFER_SIZE,
-            flush_interval: Some(std::time::Duration::from_micros(50)),
-            backpressure_boundary: 8192,
-            min_compress_size: 8192,
+            write_buffer_size: 8 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(50)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for high throughput.
+    pub fn high_throughput() -> Self {
+        Self {
+            write_buffer_size: 256 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(200)),
+            ..Default::default()
+        }
+    }
+
+    /// Creates options optimized for a balanced trade-off between latency and throughput.
+    pub fn balanced() -> Self {
+        Self {
+            write_buffer_size: 32 * KiB as usize,
+            write_buffer_linger: Some(Duration::from_micros(100)),
+            ..Default::default()
         }
     }
 }
@@ -78,24 +105,10 @@ impl PubOptions {
         self
     }
 
-    /// Sets the session channel buffer size. This is the amount of messages that can be buffered
+    /// Sets the high-water mark per session. This is the amount of messages that can be buffered
     /// per session before messages start being dropped.
-    pub fn with_session_buffer_size(mut self, session_buffer_size: usize) -> Self {
-        self.session_buffer_size = session_buffer_size;
-        self
-    }
-
-    /// Sets the maximum number of bytes that can be buffered in the session before being flushed.
-    /// This internally sets [`Framed::set_backpressure_boundary`](tokio_util::codec::Framed).
-    pub fn with_backpressure_boundary(mut self, backpressure_boundary: usize) -> Self {
-        self.backpressure_boundary = backpressure_boundary;
-        self
-    }
-
-    /// Sets the interval at which each session should be flushed. If this is `None`,
-    /// the session will be flushed on every publish, which can add a lot of overhead.
-    pub fn with_flush_interval(mut self, flush_interval: std::time::Duration) -> Self {
-        self.flush_interval = Some(flush_interval);
+    pub fn with_high_water_mark(mut self, hwm: usize) -> Self {
+        self.high_water_mark = hwm;
         self
     }
 
@@ -104,6 +117,36 @@ impl PubOptions {
     pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
+    }
+
+    /// Sets the size (max capacity) of the write buffer in bytes.
+    /// When the buffer is full, it will be flushed to the underlying transport.
+    ///
+    /// Default: 8KiB
+    pub fn with_write_buffer_size(mut self, size: usize) -> Self {
+        self.write_buffer_size = size;
+        self
+    }
+
+    /// Sets the linger duration for the write buffer. If `None`, the write buffer will only be
+    /// flushed when the buffer is full.
+    ///
+    /// Default: 100µs
+    pub fn with_write_buffer_linger(mut self, duration: Option<Duration>) -> Self {
+        self.write_buffer_linger = duration;
+        self
+    }
+}
+
+impl Default for PubOptions {
+    fn default() -> Self {
+        Self {
+            max_clients: None,
+            high_water_mark: DEFAULT_HWM,
+            min_compress_size: 8192,
+            write_buffer_size: 8192,
+            write_buffer_linger: Some(Duration::from_micros(100)),
+        }
     }
 }
 
