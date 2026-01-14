@@ -21,6 +21,9 @@ const ETH_P_IP: u16 = nix::libc::ETH_P_IP as u16;
 /// EtherType for IPv6 packets (0x86DD).
 const ETH_P_IPV6: u16 = nix::libc::ETH_P_IPV6 as u16;
 
+/// EtherType for matching all protocols supported by Ethernet.
+const ETH_P_ALL: u16 = nix::libc::ETH_P_ALL as u16;
+
 /// Compute an IPv4 netmask from a prefix length.
 fn ipv4_mask(prefix_len: u8) -> Ipv4Addr {
     if prefix_len == 0 {
@@ -82,9 +85,9 @@ pub struct FlowerFilterRequest {
 }
 
 impl FlowerFilterRequest {
-    /// Create a new flower filter for the given destination IP.
+    /// Create a new flower filter for the given destination IP
     ///
-    /// By default, uses /32 (exact match) for IPv4 or /128 for IPv6.
+    /// By default, uses /32 (exact match) for IPv4 or /128 for IPv6 and root class id.
     pub fn new(inner: QdiscRequestInner, destination: IpAddr) -> Self {
         let default_mask = match destination {
             IpAddr::V4(_) => 32,
@@ -95,7 +98,7 @@ impl FlowerFilterRequest {
             destination,
             mask: default_mask,
             // Default class ID will be set by caller
-            class_id: 0,
+            class_id: u32::MAX, // Root class id
         }
     }
 
@@ -213,6 +216,14 @@ struct TcU32Sel {
     // Followed by nkeys * tc_u32_key structures
 }
 
+impl TcU32Sel {
+    /// Returns an instance of [`Self`] with all fields set to zero.
+    #[allow(dead_code)]
+    fn zero() -> Self {
+        Self { flags: 0, offmask: 0, offshift: 0, nkeys: 0, off: 0, offoff: 0, hoff: 0, hmask: 0 }
+    }
+}
+
 /// The kernel's `tc_u32_key` structure for u32 matching.
 #[derive(Debug, Clone, Copy, Default)]
 struct TcU32Key {
@@ -224,6 +235,13 @@ struct TcU32Key {
     off: i32,
     /// Offset mask (usually 0).
     offmask: i32,
+}
+
+impl TcU32Key {
+    /// Returns an instance of [`Self`] with all fields set to zero.
+    fn zero() -> Self {
+        Self { mask: 0, val: 0, off: 0, offmask: 0 }
+    }
 }
 
 /// Builder for creating a u32 catch-all filter.
@@ -241,8 +259,10 @@ struct TcU32Key {
 /// # Why u32 Instead of matchall
 ///
 /// The `matchall` filter requires the `cls_matchall` kernel module which may not be
-/// available on all systems. The `u32` filter is more universally supported and can
-/// achieve the same effect with `match u32 0 0` (which always matches).
+/// available on all systems (e.g., minimal/embedded kernels, older distros, or containers
+/// without the module loaded). The `u32` filter is part of `cls_u32`, which is almost
+/// always built-in, and can achieve the same effect with `match u32 0 0` (mask=0 matches
+/// everything).
 ///
 /// # Priority System
 ///
@@ -280,8 +300,8 @@ impl U32CatchallFilterRequest {
     pub fn new(inner: QdiscRequestInner) -> Self {
         Self {
             inner,
-            class_id: 0,
-            priority: 65535, // Lowest priority = checked last
+            class_id: u32::MAX, // Root class id.
+            priority: 65535,    // Lowest priority = checked last
         }
     }
 
@@ -304,10 +324,7 @@ impl U32CatchallFilterRequest {
         let mut tc_msg = TcMessage::with_index(self.inner.interface_index);
         tc_msg.header.parent = self.inner.parent;
         tc_msg.header.handle = TcHandle::from(0u32);
-        // The info field contains the priority (in upper 16 bits) and protocol (in lower 16 bits)
-        // ETH_P_ALL (0x0003) matches all protocols
-        let eth_p_all: u16 = 0x0003;
-        tc_msg.header.info = ((self.priority as u32) << 16) | (eth_p_all.to_be() as u32);
+        tc_msg.header.info = ((self.priority as u32) << 16) | (ETH_P_ALL.to_be() as u32);
 
         tc_msg.attributes.push(TcAttribute::Kind("u32".to_string()));
 
@@ -320,7 +337,7 @@ impl U32CatchallFilterRequest {
 
         // Mask of 0 means "don't care".
         // Value doesn't matter when mask is 0
-        let key = TcU32Key::default();
+        let key = TcU32Key::zero();
 
         // Serialize selector + key
         let mut sel_bytes = Vec::with_capacity(size_of::<TcU32Sel>() + size_of::<TcU32Key>());

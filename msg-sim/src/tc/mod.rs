@@ -58,8 +58,8 @@
 //!
 //! | Component        | Handle          | Example (peer_id=2) |
 //! |------------------|-----------------|---------------------|
-//! | DRR root         | `1:0`           | `1:0`               |
-//! | Default class    | `1:1`           | `1:1`               |
+//! | DRR root         | `1:0`           | `N/A`               |
+//! | Default class    | `1:1`           | `N/A`               |
 //! | Per-dest class   | `1:(10+id)`     | `1:12`              |
 //! | TBF qdisc        | `(10+id):0`     | `12:0`              |
 //! | Netem qdisc      | `(20+id):0`     | `22:0`              |

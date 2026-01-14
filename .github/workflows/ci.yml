@@ -53,8 +53,12 @@ jobs:
         with:
           cache-on-failure: true
 
+      # Install nextest
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run msg-sim tests (requires root for network namespaces)
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test run -p msg-sim --all-features --no-fail-fast -- --test-threads=1
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo nextest run -p msg-sim --all-features --no-fail-fast --test-threads=1
 
   cargo-lint:
     runs-on: ubuntu-latest

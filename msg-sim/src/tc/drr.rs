@@ -1,8 +1,4 @@
 //! DRR (Deficit Round Robin) qdisc and class support.
-//!
-//! DRR is our root qdisc, chosen because it allows an unlimited number of classes
-//! to be created dynamically with minimal overhead. Each class can have its own
-//! qdisc chain (TBF → netem) for per-destination impairments.
 
 use rtnetlink::packet_core::{
     NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REPLACE, NLM_F_REQUEST, NetlinkMessage,
@@ -28,7 +24,7 @@ const TCA_DRR_QUANTUM: u16 = 1;
 /// The quantum must be at least as large as the maximum packet size (MTU) to ensure packets
 /// can always be dequeued. 1MB is large enough to handle any reasonable packet while still
 /// being well within safe bounds.
-pub const DRR_DEFAULT_QUANTUM: u32 = u32::MAX; // 1 MB
+pub const DRR_DEFAULT_QUANTUM: u32 = u32::MAX; // 4GiB
 
 /// Builder for creating a DRR (Deficit Round Robin) root qdisc.
 ///
@@ -88,13 +84,13 @@ impl QdiscDrrRequest {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::handle::{CLASS_MINOR_OFFSET, QdiscRequestInner};
+/// use msg_sim::tc::handle::{ID_OFFSET, QdiscRequestInner};
 /// use msg_sim::tc::drr::DrrClassRequest;
 /// use rtnetlink::packet_route::tc::TcHandle;
 ///
 /// let if_index = 1; // Network interface index
 /// // Create class for traffic to peer 2
-/// let class_minor = CLASS_MINOR_OFFSET + 2; // 12
+/// let class_minor = ID_OFFSET + 2; // 12
 /// let request = DrrClassRequest::new(
 ///     QdiscRequestInner::new(if_index)
 ///         .with_parent(TcHandle::from(0x0001_0000))  // Parent is DRR root (1:0)

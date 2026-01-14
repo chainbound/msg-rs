@@ -19,12 +19,16 @@
 //! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example multi_region -p msg-sim
 //! ```
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::{Duration, Instant};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::{Duration, Instant},
+};
 
-use msg_sim::ip::Subnet;
-use msg_sim::network::{Link, Network, PeerIdExt};
-use msg_sim::tc::impairment::LinkImpairment;
+use msg_sim::{
+    ip::Subnet,
+    network::{Link, Network, PeerIdExt},
+    tc::impairment::LinkImpairment,
+};
 use tracing_subscriber::EnvFilter;
 
 // Peer IDs (assigned sequentially by add_peer)

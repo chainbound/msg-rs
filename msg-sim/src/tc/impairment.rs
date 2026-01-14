@@ -57,7 +57,7 @@ pub struct LinkImpairment {
     ///
     /// When this limit is reached, additional packets are dropped. Default is 1000,
     /// which matches netem's default. Increase for high-bandwidth, high-latency links
-    /// to avoid artificial drops.
+    /// to avoid unintended drops.
     pub netem_limit: u32,
 
     /// Packet loss percentage (0.0 to 100.0).
@@ -251,10 +251,15 @@ impl LinkImpairment {
         if let Some(burst_kib) = self.burst_kib {
             burst_kib * 1024
         } else if let Some(bandwidth_mbit) = self.bandwidth_mbit_s {
-            // Compute default: max(bandwidth/8 seconds, 10 MTU packets)
+            // TBF requires a non-zero burst: it defines how many tokens can accumulate
+            // in the bucket. With burst=0, no packets could ever be sent.
+            //
+            // Default: max(1/8 second of bandwidth, 10 MTU packets). This is large
+            // enough to handle typical traffic bursts without being so large that
+            // rate limiting becomes ineffective.
             let bandwidth_bytes_per_sec = (bandwidth_mbit * 1_000_000.0 / 8.0) as u32;
             let one_eighth_second = bandwidth_bytes_per_sec / 8;
-            let ten_packets = MTU_ETHERNET * 10; // 10 MTU-sized packets
+            let ten_packets = MTU_ETHERNET * 10;
             std::cmp::max(one_eighth_second, ten_packets)
         } else {
             // No bandwidth limit, burst is irrelevant
@@ -272,8 +277,7 @@ impl LinkImpairment {
         let queue_latency_ms = self.tbf_queue_latency_ms.unwrap_or(200);
         let burst_bytes = self.effective_burst_bytes();
 
-        if let Some(bandwidth_mbit) = self.bandwidth_mbit_s {
-            let rate_bytes_per_sec = (bandwidth_mbit * 1_000_000.0 / 8.0) as u32;
+        if let Some(rate_bytes_per_sec) = self.bandwidth_bytes_per_sec() {
             let rate_bytes_per_ms = rate_bytes_per_sec / 1000;
             rate_bytes_per_ms * queue_latency_ms + burst_bytes
         } else {
@@ -285,7 +289,7 @@ impl LinkImpairment {
     /// Compute the bandwidth rate in bytes per second.
     ///
     /// Returns `None` if no bandwidth limit is configured.
-    pub fn bandwidth_bytes_per_sec(&self) -> Option<u64> {
-        self.bandwidth_mbit_s.map(|mbit| (mbit * 1_000_000.0 / 8.0) as u64)
+    pub fn bandwidth_bytes_per_sec(&self) -> Option<u32> {
+        self.bandwidth_mbit_s.map(|mbit| (mbit * 1_000_000.0 / 8.0) as u32)
     }
 }

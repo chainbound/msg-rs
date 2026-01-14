@@ -21,6 +21,8 @@ use rtnetlink::packet_core::{DefaultNla, NLA_HEADER_SIZE};
 /// └─────────────────────────────────────────┘
 /// ```
 ///
+/// Reference: <linux/netlink.h>
+///
 /// # Returns
 ///
 /// A byte vector containing the complete NLA (header + value + padding).
