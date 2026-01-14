@@ -114,7 +114,7 @@ pub struct ReqOptions {
     /// before the socket returns [`ReqError::HighWaterMarkReached`].
     pub max_queue_size: usize,
     /// High-water mark for pending requests. When this limit is reached, new requests
-    /// will not be processed and will be queued up to [`channel_size`](Self::channel_size)
+    /// will not be processed and will be queued up to [`max_queue_size`](Self::max_queue_size)
     /// elements. Once both limits are reached, new requests will return
     /// [`ReqError::HighWaterMarkReached`].
     pub max_pending_requests: usize,
