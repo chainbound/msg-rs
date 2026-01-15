@@ -248,15 +248,14 @@ where
                 let span = this.span.clone().entered();
 
                 // Reject incoming connections if we have `max_clients` active clients already
-                if let Some(max) = this.options.max_clients {
-                    if this.state.stats.specific.active_clients() >= max {
-                        warn!(
-                            limit = max,
-                            "max connections reached, rejecting new incoming connection",
-                        );
+                let active_clients = this.state.stats.specific.active_clients();
+                if this.options.max_clients.is_some_and(|max| active_clients >= max) {
+                    warn!(
+                        active_clients,
+                        "max connections reached, rejecting new incoming connection",
+                    );
 
-                        continue;
-                    }
+                    continue;
                 }
 
                 // Increment the active clients counter.
