@@ -21,13 +21,13 @@ async fn main() {
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().with_ingress_buffer_size(1024),
+        SubOptions::default().with_ingress_queue_size(1024),
     );
 
     let mut sub2 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Tcp::default(),
-        SubOptions::default().with_ingress_buffer_size(1024),
+        SubOptions::default().with_ingress_queue_size(1024),
     );
 
     tracing::info!("Setting up the sockets...");

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use msg_socket::{DEFAULT_BUFFER_SIZE, RepSocket, ReqOptions, ReqSocket};
+use msg_socket::{DEFAULT_QUEUE_SIZE, RepSocket, ReqOptions, ReqSocket};
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
@@ -273,11 +273,11 @@ async fn reqrep_hwm_reached() {
     // Share req via Arc for concurrent access
     let req = std::sync::Arc::new(req);
 
-    const TOTAL_CAPACITY: usize = HWM + DEFAULT_BUFFER_SIZE;
+    const TOTAL_CAPACITY: usize = HWM + DEFAULT_QUEUE_SIZE;
 
     // Send requests until the channel is full (HighWaterMarkReached error)
     // - HWM requests will be moved to pending_requests
-    // - DEFAULT_BUFFER_SIZE requests will be buffered in the channel (driver stops polling at HWM)
+    // - DEFAULT_QUEUE_SIZE requests will be buffered in the channel (driver stops polling at HWM)
     // - The next request will fail with HighWaterMarkReached
     let mut success_receivers = Vec::new();
     let mut sent_count = 0;
