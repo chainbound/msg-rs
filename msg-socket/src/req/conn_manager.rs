@@ -52,6 +52,18 @@ where
     span: tracing::Span,
 }
 
+impl<T, A, S> ConnectionManager<T, A, S>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    /// Set the connection manager tracing span.
+    pub(crate) fn with_span(mut self, span: tracing::Span) -> Self {
+        self.span = span;
+        self
+    }
+}
+
 /// A client connection to a remote server.
 pub(crate) struct ClientConnection<T, A>
 where

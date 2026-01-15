@@ -95,8 +95,8 @@ impl Default for ClientOptions {
 /// The request socket options.
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
-    /// Options for the connection manager.
-    pub conn: ClientOptions,
+    /// Client options for the connection manager.
+    pub client: ClientOptions,
     /// Timeout duration for requests.
     pub timeout: Duration,
     /// Wether to block on initial connection to the target.
@@ -151,7 +151,7 @@ impl ReqOptions {
 impl ReqOptions {
     /// Sets the authentication token for the socket.
     pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
-        self.conn.auth_token = Some(auth_token);
+        self.client.auth_token = Some(auth_token);
         self
     }
 
@@ -169,7 +169,7 @@ impl ReqOptions {
 
     /// Sets the backoff duration for the socket.
     pub fn with_backoff_duration(mut self, backoff_duration: Duration) -> Self {
-        self.conn.backoff_duration = backoff_duration;
+        self.client.backoff_duration = backoff_duration;
         self
     }
 
@@ -177,7 +177,7 @@ impl ReqOptions {
     ///
     /// If `None`, all connections will be retried indefinitely.
     pub fn with_retry_attempts(mut self, retry_attempts: usize) -> Self {
-        self.conn.retry_attempts = Some(retry_attempts);
+        self.client.retry_attempts = Some(retry_attempts);
         self
     }
 
@@ -211,7 +211,7 @@ impl ReqOptions {
 impl Default for ReqOptions {
     fn default() -> Self {
         Self {
-            conn: ClientOptions::default(),
+            client: ClientOptions::default(),
             timeout: Duration::from_secs(5),
             blocking_connect: false,
             min_compress_size: 8192,
