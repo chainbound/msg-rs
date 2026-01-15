@@ -6,7 +6,7 @@ use std::{
 };
 use tokio::time::sleep;
 
-use crate::ClientOptions;
+use crate::ConnOptions;
 
 /// Helper trait alias for backoff streams.
 /// We define any stream that yields `Duration`s as a backoff
@@ -41,8 +41,8 @@ impl ExponentialBackoff {
     }
 }
 
-impl From<&ClientOptions> for ExponentialBackoff {
-    fn from(options: &ClientOptions) -> Self {
+impl From<&ConnOptions> for ExponentialBackoff {
+    fn from(options: &ConnOptions) -> Self {
         Self::new(options.backoff_duration, options.retry_attempts)
     }
 }

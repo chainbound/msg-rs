@@ -68,7 +68,7 @@ impl SendCommand {
 
 /// Options for the connection manager.
 #[derive(Debug, Clone)]
-pub struct ClientOptions {
+pub struct ConnOptions {
     /// Optional authentication token.
     pub auth_token: Option<Bytes>,
     /// The backoff duration for the underlying transport on reconnections.
@@ -77,7 +77,7 @@ pub struct ClientOptions {
     pub retry_attempts: Option<usize>,
 }
 
-impl Default for ClientOptions {
+impl Default for ConnOptions {
     fn default() -> Self {
         Self {
             auth_token: None,
@@ -96,7 +96,7 @@ impl Default for ClientOptions {
 #[derive(Debug, Clone)]
 pub struct ReqOptions {
     /// Options for the connection manager.
-    pub conn: ClientOptions,
+    pub conn: ConnOptions,
     /// Timeout duration for requests.
     pub timeout: Duration,
     /// Wether to block on initial connection to the target.
@@ -211,7 +211,7 @@ impl ReqOptions {
 impl Default for ReqOptions {
     fn default() -> Self {
         Self {
-            conn: ClientOptions::default(),
+            conn: ConnOptions::default(),
             timeout: Duration::from_secs(5),
             blocking_connect: false,
             min_compress_size: 8192,

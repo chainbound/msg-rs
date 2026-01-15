@@ -27,22 +27,9 @@ use msg_wire::{
     reqrep,
 };
 
-/// Type state for a client connection.
-struct ClientConnection<T, A>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    conn_manager: ConnManager<T, A>,
-}
-
 /// The request socket driver. Endless future that drives
 /// the socket forward.
-pub(crate) struct ReqDriver<T, A>
-where
-    T: Transport<A>,
-    A: Address,
-{
+pub(crate) struct ReqDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(crate) options: Arc<ReqOptions>,
     /// State shared with the socket.
