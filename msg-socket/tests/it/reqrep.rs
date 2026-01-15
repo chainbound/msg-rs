@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use msg_socket::{RepSocket, ReqSocket};
+use msg_socket::{DEFAULT_QUEUE_SIZE, RepSocket, ReqOptions, ReqSocket};
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
@@ -235,4 +235,88 @@ async fn reqrep_late_bind_works() {
     let response = reply.await.unwrap();
     let hello = Bytes::from_static(b"hello");
     assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
+}
+
+/// Tests that the high-water mark for pending requests is enforced.
+/// When HWM is reached, new requests should return `HighWaterMarkReached` error.
+#[tokio::test]
+async fn reqrep_hwm_reached() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    const HWM: usize = 2;
+
+    let mut rep = RepSocket::new(Tcp::default());
+    // Set HWM for pending requests
+    let options =
+        ReqOptions::default().with_max_pending_requests(HWM).with_timeout(Duration::from_secs(30));
+    let mut req = ReqSocket::with_options(Tcp::default(), options);
+
+    rep.bind("0.0.0.0:0").await.unwrap();
+    req.connect(rep.local_addr().unwrap()).await.unwrap();
+
+    // Give time for connection to establish
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Spawn the rep handler that won't respond but keep the request alive
+    tokio::spawn(async move {
+        let mut requests = Vec::new();
+        // Collect requests until we get the signal
+        loop {
+            tokio::select! {
+                Some(request) = rep.next() => {
+                    requests.push(request);
+                }
+            }
+        }
+    });
+
+    // Share req via Arc for concurrent access
+    let req = std::sync::Arc::new(req);
+
+    const TOTAL_CAPACITY: usize = HWM + DEFAULT_QUEUE_SIZE;
+
+    // Send requests until the channel is full (HighWaterMarkReached error)
+    // - HWM requests will be moved to pending_requests
+    // - DEFAULT_QUEUE_SIZE requests will be buffered in the channel (driver stops polling at HWM)
+    // - The next request will fail with HighWaterMarkReached
+    let mut success_receivers = Vec::new();
+    let mut sent_count = 0;
+
+    let (loop_tx, mut loop_rx) = tokio::sync::mpsc::channel(1);
+    loop {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let req_clone = std::sync::Arc::clone(&req);
+        let loop_tx = loop_tx.clone();
+
+        let i = sent_count;
+
+        // Spawn the request task - it will block waiting for response
+        tokio::spawn(async move {
+            let result = req_clone.request(Bytes::from(format!("request{}", i))).await;
+            if result.is_err() {
+                _ = loop_tx.send(()).await;
+            }
+
+            let _ = tx.send(result);
+        });
+
+        success_receivers.push(rx);
+        sent_count += 1;
+
+        // Give time for the request to be processed by the driver
+        tokio::time::sleep(Duration::from_millis(1)).await;
+
+        // Check if we received an error from a spawned task
+        // If so it's either a timeout or HWM limit - since the rep wouldn't respond yet
+        if loop_rx.try_recv().is_ok() {
+            break;
+        }
+    }
+
+    let expected_limit = TOTAL_CAPACITY + 1;
+    assert_eq!(
+        sent_count, expected_limit,
+        "Expected to send {} requests before HWM, but sent {}",
+        expected_limit, sent_count
+    );
 }

@@ -8,12 +8,12 @@ use tokio::sync::oneshot;
 
 mod driver;
 mod socket;
-mod stats;
-use crate::{Profile, stats::SocketStats};
 pub use socket::*;
+
+mod stats;
 use stats::RepStats;
 
-const DEFAULT_MIN_COMPRESS_SIZE: usize = 8192;
+use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_QUEUE_SIZE, Profile, stats::SocketStats};
 
 /// Errors that can occur when using a reply socket.
 #[derive(Debug, Error)]
@@ -44,19 +44,30 @@ impl RepError {
 /// The reply socket options.
 pub struct RepOptions {
     /// The maximum number of concurrent clients.
-    max_clients: Option<usize>,
-    min_compress_size: usize,
-    write_buffer_size: usize,
-    write_buffer_linger: Option<Duration>,
+    pub(crate) max_clients: Option<usize>,
+    /// Minimum payload size in bytes for compression to be used.
+    ///
+    /// If the payload is smaller than this threshold, it will not be compressed.
+    pub(crate) min_compress_size: usize,
+    /// The size of the write buffer in bytes.
+    pub(crate) write_buffer_size: usize,
+    /// The maximum duration between flushes to the underlying transport
+    pub(crate) write_buffer_linger: Option<Duration>,
+    /// High-water mark for pending responses per peer.
+    ///
+    /// When this limit is reached, new requests will not be read from the underlying connection
+    /// until pending responses are fulfilled.
+    pub(crate) max_pending_responses: usize,
 }
 
 impl Default for RepOptions {
     fn default() -> Self {
         Self {
             max_clients: None,
-            min_compress_size: DEFAULT_MIN_COMPRESS_SIZE,
-            write_buffer_size: 8192,
+            min_compress_size: DEFAULT_BUFFER_SIZE,
+            write_buffer_size: DEFAULT_BUFFER_SIZE,
             write_buffer_linger: Some(Duration::from_micros(100)),
+            max_pending_responses: DEFAULT_QUEUE_SIZE,
         }
     }
 }
@@ -108,6 +119,8 @@ impl RepOptions {
 
     /// Sets the minimum payload size for compression.
     /// If the payload is smaller than this value, it will not be compressed.
+    ///
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
@@ -116,7 +129,7 @@ impl RepOptions {
     /// Sets the size (max capacity) of the write buffer in bytes. When the buffer is full, it will
     /// be flushed to the underlying transport.
     ///
-    /// Default: 8KiB
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_write_buffer_size(mut self, size: usize) -> Self {
         self.write_buffer_size = size;
         self
@@ -128,6 +141,16 @@ impl RepOptions {
     /// Default: 100µs
     pub fn with_write_buffer_linger(mut self, duration: Option<Duration>) -> Self {
         self.write_buffer_linger = duration;
+        self
+    }
+
+    /// Sets the high-water mark for pending responses per peer. When this limit is reached,
+    /// new requests will not be read from the underlying connection until pending
+    /// responses are fulfilled.
+    ///
+    /// Default: [`DEFAULT_QUEUE_SIZE`]
+    pub fn with_max_pending_responses(mut self, hwm: usize) -> Self {
+        self.max_pending_responses = hwm;
         self
     }
 }

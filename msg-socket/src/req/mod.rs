@@ -23,8 +23,7 @@ pub use socket::*;
 use crate::{Profile, stats::SocketStats};
 use stats::ReqStats;
 
-/// The default buffer size for the socket.
-const DEFAULT_BUFFER_SIZE: usize = 1024;
+use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_QUEUE_SIZE};
 
 pub(crate) static DRIVER_ID: AtomicUsize = AtomicUsize::new(0);
 
@@ -45,6 +44,8 @@ pub enum ReqError {
     NoValidEndpoints,
     #[error("Failed to connect to the target endpoint: {0:?}")]
     Connect(Box<dyn std::error::Error + Send + Sync>),
+    #[error("High-water mark reached")]
+    HighWaterMarkReached,
 }
 
 /// A command to send a request message and wait for a response.
@@ -108,6 +109,15 @@ pub struct ReqOptions {
     pub write_buffer_size: usize,
     /// The linger duration for the write buffer (how long to wait before flushing).
     pub write_buffer_linger: Option<Duration>,
+    /// The size of the channel buffer between the socket and the driver.
+    /// This controls how many requests can be queued, on top of the current pending requests,
+    /// before the socket returns [`ReqError::HighWaterMarkReached`].
+    pub max_queue_size: usize,
+    /// High-water mark for pending requests. When this limit is reached, new requests
+    /// will not be processed and will be queued up to [`max_queue_size`](Self::max_queue_size)
+    /// elements. Once both limits are reached, new requests will return
+    /// [`ReqError::HighWaterMarkReached`].
+    pub max_pending_requests: usize,
 }
 
 impl ReqOptions {
@@ -184,6 +194,8 @@ impl ReqOptions {
     /// Sets the minimum payload size in bytes for compression to be used.
     ///
     /// If the payload is smaller than this threshold, it will not be compressed.
+    ///
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_min_compress_size(mut self, min_compress_size: usize) -> Self {
         self.min_compress_size = min_compress_size;
         self
@@ -192,7 +204,7 @@ impl ReqOptions {
     /// Sets the size (max capacity) of the write buffer in bytes.
     /// When the buffer is full, it will be flushed to the underlying transport.
     ///
-    /// Default: 8KiB
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_write_buffer_size(mut self, size: usize) -> Self {
         self.write_buffer_size = size;
         self
@@ -206,6 +218,26 @@ impl ReqOptions {
         self.write_buffer_linger = duration;
         self
     }
+
+    /// Sets the size of the channel buffer between the socket and the driver.
+    /// This controls how many requests can be queued, on top of the current pending requests,
+    /// before the socket returns [`ReqError::HighWaterMarkReached`].
+    ///
+    /// Default: [`DEFAULT_QUEUE_SIZE`]
+    pub fn with_max_queue_size(mut self, size: usize) -> Self {
+        self.max_queue_size = size;
+        self
+    }
+
+    /// Sets the high-water mark for pending requests. When this limit is reached, new requests
+    /// will not be processed and will be queued up to [`Self::with_max_queue_size`] elements.
+    /// Once both limits are reached, new requests will return [`ReqError::HighWaterMarkReached`].
+    ///
+    /// Default: [`DEFAULT_QUEUE_SIZE`]
+    pub fn with_max_pending_requests(mut self, hwm: usize) -> Self {
+        self.max_pending_requests = hwm;
+        self
+    }
 }
 
 impl Default for ReqOptions {
@@ -214,9 +246,11 @@ impl Default for ReqOptions {
             conn: ConnOptions::default(),
             timeout: Duration::from_secs(5),
             blocking_connect: false,
-            min_compress_size: 8192,
-            write_buffer_size: 8192,
+            min_compress_size: DEFAULT_BUFFER_SIZE,
+            write_buffer_size: DEFAULT_BUFFER_SIZE,
             write_buffer_linger: Some(Duration::from_micros(100)),
+            max_queue_size: DEFAULT_QUEUE_SIZE,
+            max_pending_requests: DEFAULT_QUEUE_SIZE,
         }
     }
 }

@@ -17,19 +17,9 @@ use tokio::{
 use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
-// ADDED: Import the specific SubStats struct for the API
-use super::stats::SubStats;
-// Import the rest from the parent module (sub/mod.rs)
-use super::{
-    // REMOVED: Old/removed stats structs
-    // Command, PubMessage, SocketState, SocketStats, SocketWideStats, SubDriver, SubError,
-    Command,
-    DEFAULT_BUFFER_SIZE,
-    PubMessage,
-    SocketState,
-    SubDriver,
-    SubError,
-    SubOptions,
+use crate::sub::{
+    Command, DEFAULT_BUFFER_SIZE, PubMessage, SocketState, SubDriver, SubError, SubOptions,
+    stats::SubStats,
 };
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
@@ -136,7 +126,7 @@ where
     /// Creates a new subscriber socket with the given transport and options.
     pub fn with_options(transport: T, options: SubOptions) -> Self {
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-        let (to_socket, from_driver) = mpsc::channel(options.ingress_buffer_size);
+        let (to_socket, from_driver) = mpsc::channel(options.ingress_queue_size);
 
         let options = Arc::new(options);
 

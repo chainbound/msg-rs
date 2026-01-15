@@ -16,7 +16,7 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    Authenticator, DEFAULT_BUFFER_SIZE, RepOptions, Request,
+    Authenticator, DEFAULT_QUEUE_SIZE, RepOptions, Request,
     rep::{RepError, SocketState, driver::RepDriver},
 };
 
@@ -110,8 +110,8 @@ where
 
     /// Binds the socket to the given address. This spawns the socket driver task.
     pub async fn try_bind(&mut self, addresses: Vec<A>) -> Result<(), RepError> {
-        let (to_socket, from_backend) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-        let (control_tx, control_rx) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let (to_socket, from_backend) = mpsc::channel(DEFAULT_QUEUE_SIZE);
+        let (control_tx, control_rx) = mpsc::channel(DEFAULT_QUEUE_SIZE);
 
         let mut transport = self.transport.take().expect("transport has been moved already");
 

@@ -27,7 +27,7 @@ async fn run_tcp() {
     // Configure the subscribers with options
     let mut sub1 = SubSocket::with_options(
         Tcp::default(),
-        SubOptions::default().with_ingress_buffer_size(1024),
+        SubOptions::default().with_ingress_queue_size(1024),
     );
 
     tracing::info!("Setting up the sockets...");
@@ -60,7 +60,7 @@ async fn run_quic() {
     let mut sub1 = SubSocket::with_options(
         // TCP transport with blocking connect, usually connection happens in the background.
         Quic::default(),
-        SubOptions::default().with_ingress_buffer_size(1024),
+        SubOptions::default().with_ingress_queue_size(1024),
     );
 
     tracing::info!("Setting up the sockets...");

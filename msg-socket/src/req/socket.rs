@@ -10,7 +10,7 @@ use bytes::Bytes;
 use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
-    sync::{mpsc, oneshot},
+    sync::{mpsc, mpsc::error::TrySendError, oneshot},
 };
 use tokio_util::codec::Framed;
 
@@ -18,7 +18,7 @@ use msg_common::span::WithSpan;
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::{compression::Compressor, reqrep};
 
-use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
+use super::{ReqError, ReqOptions};
 use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
@@ -130,9 +130,11 @@ where
         self.to_driver
             .as_ref()
             .ok_or(ReqError::SocketClosed)?
-            .send(SendCommand::new(WithSpan::current(msg), response_tx))
-            .await
-            .map_err(|_| ReqError::SocketClosed)?;
+            .try_send(SendCommand::new(WithSpan::current(msg), response_tx))
+            .map_err(|err| match err {
+                TrySendError::Full(_) => ReqError::HighWaterMarkReached,
+                TrySendError::Closed(_) => ReqError::SocketClosed,
+            })?;
 
         response_rx.await.map_err(|_| ReqError::SocketClosed)?
     }
@@ -169,8 +171,7 @@ where
 
     /// Internal method to initialize and spawn the driver.
     fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
-        // Initialize communication channels
-        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
+        let (to_driver, from_socket) = mpsc::channel(self.options.max_queue_size);
 
         let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
 
@@ -207,7 +208,7 @@ where
             linger_timer,
             pending_requests,
             timeout_check_interval,
-            egress_queue: Default::default(),
+            pending_egress: None,
             compressor: self.compressor.clone(),
             id,
             span,

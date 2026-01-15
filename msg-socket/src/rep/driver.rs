@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     io,
     pin::Pin,
     sync::Arc,
@@ -56,13 +55,45 @@ pub(crate) struct PeerState<T: AsyncRead + AsyncWrite, A: Address> {
     write_buffer_size: usize,
     /// The address of the peer.
     addr: A,
-    egress_queue: VecDeque<WithSpan<reqrep::Message>>,
+    /// Single pending outgoing message waiting to be sent.
+    pending_egress: Option<WithSpan<reqrep::Message>>,
+    /// High-water mark for pending responses. When reached, new requests are blocked
+    /// (backpressure is applied) until responses drain below the limit.
+    max_pending_responses: usize,
     state: Arc<SocketState>,
     /// The optional message compressor.
     compressor: Option<Arc<dyn Compressor>>,
     span: tracing::Span,
 }
 
+/// The driver behind a `Rep` socket.
+///
+/// # Driver Event Loop
+/// The event loop of the driver will try to do as much work as possible in a given call, also
+/// accounting for work that might become available as a result of the driver running.
+///
+/// There's an implicit priority based on the order in which the tasks are polled,
+/// this is because after an inner task has completed some work it will restart the loop, thus
+/// allowing earlier tasks to work again.
+///
+/// Currently, this driver will use the following "tasks":
+/// 1. Connected peers (created in task 2 and 3)
+/// 2. Authentication tasks for connecting peers (future created by task 3)
+/// 3. Incoming new connections for connecting peers (future created by task 5)
+/// 4. Process control signals for the underlying transport (doesn't restart the loop)
+/// 5. Incoming connections from the underlying transport
+///
+/// ```text
+/// (5) Transport ────> (3) conn_tasks ────> (2) auth_tasks
+///                            │                    │
+///                            │ (no auth)          │
+///                            v                    v
+///                     ┌─────────────────────────────┐
+///                     │ (1) peer_states             │
+///                     └─────────────────────────────┘
+///
+/// (4) control_rx ──on_control──> Transport
+/// ```
 #[allow(clippy::type_complexity)]
 pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     /// The server transport used to accept incoming connections.
@@ -103,6 +134,7 @@ where
         let this = self.get_mut();
 
         loop {
+            // Check connected peers, handle disconnections and incoming request
             if let Poll::Ready(Some((peer, maybe_result))) = this.peer_states.poll_next_unpin(cx) {
                 let Some(result) = maybe_result.enter() else {
                     debug!(?peer, "peer disconnected");
@@ -141,6 +173,8 @@ where
                 continue;
             }
 
+            // Drive authentication tasks, when authentication succeeds we register the peer as
+            // connected
             if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx).enter() {
                 match auth.inner {
                     Ok(auth) => {
@@ -166,7 +200,8 @@ where
                                 linger_timer,
                                 write_buffer_size: this.options.write_buffer_size,
                                 addr: auth.addr,
-                                egress_queue: VecDeque::with_capacity(128),
+                                pending_egress: None,
+                                max_pending_responses: this.options.max_pending_responses,
                                 state: Arc::clone(&this.state),
                                 compressor: this.compressor.clone(),
                             }),
@@ -181,6 +216,7 @@ where
                 continue;
             }
 
+            // Drive accepting incoming connections
             if let Poll::Ready(Some(conn)) = this.conn_tasks.poll_next_unpin(cx).enter() {
                 match conn.inner {
                     Ok(io) => {
@@ -192,8 +228,8 @@ where
                     Err(e) => {
                         debug!(?e, "failed to accept incoming connection");
 
-                        // Active clients have already been incremented in the initial call to
-                        // `poll_accept`, so we need to decrement them here.
+                        // Active clients have already been incremented when accepting them from the
+                        // underlying transport, so we need to decrement them here.
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -201,6 +237,7 @@ where
                 continue;
             }
 
+            // Drive control signals for the underlying transport
             if let Poll::Ready(Some(cmd)) = this.control_rx.poll_recv(cx) {
                 this.transport.on_control(cmd);
             }
@@ -210,19 +247,20 @@ where
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
                 let span = this.span.clone().entered();
 
-                if let Some(max) = this.options.max_clients {
-                    if this.state.stats.specific.active_clients() >= max {
-                        warn!(
-                            limit = max,
-                            "max connections reached, rejecting new incoming connection",
-                        );
+                // Reject incoming connections if we have `max_clients` active clients already
+                let active_clients = this.state.stats.specific.active_clients();
+                if this.options.max_clients.is_some_and(|max| active_clients >= max) {
+                    warn!(
+                        active_clients,
+                        "max connections reached, rejecting new incoming connection",
+                    );
 
-                        continue;
-                    }
+                    continue;
                 }
 
-                // Increment the active clients counter. If the authentication fails, this counter
-                // will be decremented.
+                // Increment the active clients counter.
+                // IMPORTANT: decrement the active clients counter when the connection fails or is
+                // closed.
                 this.state.stats.specific.increment_active_clients();
 
                 this.conn_tasks.push(accept.with_span(span));
@@ -240,8 +278,12 @@ where
     T: Transport<A>,
     A: Address,
 {
-    /// Handles an accepted connection. If this returns an error, the active connections counter
+    /// Handles an accepted connection.
+    ///
+    /// If this returns an error, the active connections counter
     /// should be decremented.
+    ///
+    /// Will schedule an authentication task if `self.auth` is set
     fn on_accepted_connection(&mut self, io: T::Io) -> Result<(), io::Error> {
         let addr = io.peer_addr()?;
         info!(?addr, "new connection");
@@ -253,6 +295,7 @@ where
         });
 
         let Some(ref auth) = self.auth else {
+            // Create peer without authenticating
             self.peer_states.insert(
                 addr.clone(),
                 StreamNotifyClose::new(PeerState {
@@ -262,7 +305,8 @@ where
                     linger_timer,
                     write_buffer_size: self.options.write_buffer_size,
                     addr,
-                    egress_queue: VecDeque::with_capacity(128),
+                    pending_egress: None,
+                    max_pending_responses: self.options.max_pending_responses,
                     state: Arc::clone(&self.state),
                     compressor: self.compressor.clone(),
                 }),
@@ -313,24 +357,24 @@ where
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin, A: Address> PeerState<T, A> {
-    /// Prepares for shutting down by sending and flushing all messages in [`Self::egress_queue`].
+    /// Prepares for shutting down by sending and flushing all pending messages.
     /// When [`Poll::Ready`] is returned, the connection with this peer can be shutdown.
     ///
     /// TODO: there might be some [`Self::pending_requests`] yet to processed. TBD how to handle
     /// them, for now they're dropped.
     fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        let messages = std::mem::take(&mut self.egress_queue);
+        let pending_msg = self.pending_egress.take();
         let buffer_size = self.conn.write_buffer().len();
-        if messages.is_empty() && buffer_size == 0 {
+        if pending_msg.is_none() && buffer_size == 0 {
             debug!("flushed everything, closing connection");
             return Poll::Ready(());
         }
 
-        debug!(messages = ?messages.len(), write_buffer_size = ?buffer_size, "found data to send");
+        debug!(has_pending = ?pending_msg.is_some(), write_buffer_size = ?buffer_size, "found data to send");
 
-        for msg in messages {
+        if let Some(msg) = pending_msg {
             if let Err(e) = self.conn.start_send_unpin(msg.inner) {
-                error!(?e, "failed to send final messages to socket, closing");
+                error!(?e, "failed to send final message to socket, closing");
                 return Poll::Ready(());
             }
         }
@@ -351,15 +395,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
         let this = self.get_mut();
 
         loop {
-            let mut progress = false;
-            if let Some(msg) = this.egress_queue.pop_front().enter() {
+            // First, try to send the pending egress message if we have one.
+            if let Some(msg) = this.pending_egress.take().enter() {
                 let msg_len = msg.size();
+                debug!(msg_id = msg.id(), "sending response");
                 match this.conn.start_send_unpin(msg.inner) {
                     Ok(_) => {
                         this.state.stats.specific.increment_tx(msg_len);
-
-                        // We might be able to send more queued messages
-                        progress = true;
+                        // Continue to potentially send more or flush
+                        continue;
                     }
                     Err(e) => {
                         this.state.stats.specific.increment_failed_requests();
@@ -392,68 +436,51 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            // Then, try to drain the egress queue.
-            if this.conn.poll_ready_unpin(cx).is_ready() {
-                if let Some(msg) = this.egress_queue.pop_front().enter() {
-                    let msg_len = msg.size();
-
-                    debug!(msg_id = msg.id(), "sending response");
-                    match this.conn.start_send_unpin(msg.inner) {
-                        Ok(_) => {
-                            this.state.stats.specific.increment_tx(msg_len);
-
-                            // We might be able to send more queued messages
-                            continue;
-                        }
-                        Err(e) => {
-                            this.state.stats.specific.increment_failed_requests();
-                            error!(?e, "failed to send message to socket");
-                            // End this stream as we can't send any more messages
-                            return Poll::Ready(None);
-                        }
-                    }
-                }
-            }
-
-            // Then we check for completed requests, and push them onto the egress queue.
-            if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter() {
-                match result.inner {
-                    Err(_) => tracing::error!("response channel closed unexpectedly"),
-                    Ok(Response { msg_id, mut response }) => {
-                        let mut compression_type = 0;
-                        let len_before = response.len();
-                        if let Some(ref compressor) = this.compressor {
-                            match compressor.compress(&response) {
-                                Ok(compressed) => {
-                                    response = compressed;
-                                    compression_type = compressor.compression_type() as u8;
+            // Check for completed requests, and set pending_egress (only if empty).
+            if this.pending_egress.is_none() {
+                if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
+                {
+                    match result.inner {
+                        Err(_) => tracing::error!("response channel closed unexpectedly"),
+                        Ok(Response { msg_id, mut response }) => {
+                            let mut compression_type = 0;
+                            let len_before = response.len();
+                            if let Some(ref compressor) = this.compressor {
+                                match compressor.compress(&response) {
+                                    Ok(compressed) => {
+                                        response = compressed;
+                                        compression_type = compressor.compression_type() as u8;
+                                    }
+                                    Err(e) => {
+                                        error!(?e, "failed to compress message");
+                                        continue;
+                                    }
                                 }
-                                Err(e) => {
-                                    error!(?e, "failed to compress message");
-                                    continue;
-                                }
+
+                                debug!(
+                                    msg_id,
+                                    len_before,
+                                    len_after = response.len(),
+                                    "compressed message"
+                                )
                             }
 
-                            debug!(
-                                msg_id,
-                                len_before,
-                                len_after = response.len(),
-                                "compressed message"
-                            )
+                            debug!(msg_id, "received response to send");
+
+                            let msg = reqrep::Message::new(msg_id, compression_type, response);
+                            this.pending_egress = Some(msg.with_span(result.span));
+
+                            continue;
                         }
-
-                        debug!(msg_id, "received response to send");
-
-                        let msg = reqrep::Message::new(msg_id, compression_type, response);
-                        this.egress_queue.push_back(msg.with_span(result.span));
-
-                        continue;
                     }
                 }
             }
 
-            // Finally we accept incoming requests from the peer.
-            {
+            // Accept incoming requests from the peer.
+            // Only accept new requests if we're under the HWM for pending responses.
+            let under_hwm = this.pending_requests.len() < this.max_pending_responses;
+
+            if under_hwm {
                 let _g = this.span.clone().entered();
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Ready(Some(result)) => {
@@ -504,10 +531,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                     }
                     Poll::Pending => {}
                 }
-            }
-
-            if progress {
-                continue;
+            } else {
+                // At HWM - not polling from underlying connection until responses drain.
+                // The waker is registered on pending_requests, so we'll wake when responses
+                // complete.
+                trace!(
+                    hwm = this.max_pending_responses,
+                    pending = this.pending_requests.len(),
+                    "at high-water mark, not polling from underlying connection until responses drain"
+                );
             }
 
             return Poll::Pending;

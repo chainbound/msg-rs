@@ -12,8 +12,6 @@ mod socket;
 pub use socket::*;
 
 mod stats;
-
-use crate::stats::SocketStats;
 use stats::SubStats;
 
 mod stream;
@@ -21,7 +19,7 @@ mod stream;
 use msg_transport::Address;
 use msg_wire::pubsub;
 
-use crate::DEFAULT_BUFFER_SIZE;
+use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_QUEUE_SIZE, stats::SocketStats};
 
 #[derive(Debug, Error)]
 pub enum SubError {
@@ -61,7 +59,7 @@ pub struct SubOptions {
     auth_token: Option<Bytes>,
     /// The maximum amount of incoming messages that will be buffered before being dropped due to
     /// a slow consumer.
-    ingress_buffer_size: usize,
+    ingress_queue_size: usize,
     /// The read buffer size for each session.
     read_buffer_size: usize,
     /// The initial backoff for reconnecting to a publisher.
@@ -78,15 +76,19 @@ impl SubOptions {
         self
     }
 
-    /// Sets the ingress buffer size. This is the maximum amount of incoming messages that will be
+    /// Sets the ingress queue size. This is the maximum amount of incoming messages that will be
     /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
     /// being dropped.
-    pub fn with_ingress_buffer_size(mut self, ingress_buffer_size: usize) -> Self {
-        self.ingress_buffer_size = ingress_buffer_size;
+    ///
+    /// Default: [`DEFAULT_QUEUE_SIZE`]
+    pub fn with_ingress_queue_size(mut self, ingress_queue_size: usize) -> Self {
+        self.ingress_queue_size = ingress_queue_size;
         self
     }
 
     /// Sets the read buffer size. This sets the size of the read buffer for each session.
+    ///
+    /// Default: [`DEFAULT_BUFFER_SIZE`]
     pub fn with_read_buffer_size(mut self, read_buffer_size: usize) -> Self {
         self.read_buffer_size = read_buffer_size;
         self
@@ -110,7 +112,7 @@ impl Default for SubOptions {
     fn default() -> Self {
         Self {
             auth_token: None,
-            ingress_buffer_size: DEFAULT_BUFFER_SIZE,
+            ingress_queue_size: DEFAULT_QUEUE_SIZE,
             read_buffer_size: 8192,
             initial_backoff: Duration::from_millis(100),
             retry_attempts: Some(24),

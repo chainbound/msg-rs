@@ -34,7 +34,10 @@ mod connection;
 pub use connection::*;
 
 /// The default buffer size for a socket.
-const DEFAULT_BUFFER_SIZE: usize = 8192;
+pub const DEFAULT_BUFFER_SIZE: usize = 8192;
+
+/// The default queue size for a channel.
+pub const DEFAULT_QUEUE_SIZE: usize = 8192;
 
 /// A request Identifier.
 pub struct RequestId(u32);
