@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(sudo ip netns exec msg-sim-1 tc qdisc show:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(just check:*)",
+      "Bash(just clippy:*)",
+      "Bash(just fmt:*)",
+      "Bash(ls:*)",
+      "Bash(RUSTDOCFLAGS=\"-D warnings\" cargo +nightly doc:*)",
+      "WebSearch",
+      "Bash(cat:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(cargo test:*)",
+      "Bash(git show:*)"
+    ]
+  }
+}
