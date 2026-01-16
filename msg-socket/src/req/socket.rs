@@ -23,7 +23,7 @@ use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
-        conn_manager::{ClientConnection, ConnCtl, ConnManager, ConnectionManager},
+        conn_manager::{ClientConnection, ConnectionController, ConnectionManager},
         driver::ReqDriver,
         stats::ReqStats,
     },
@@ -72,7 +72,17 @@ where
             backoff: ExponentialBackoff::from(&self.options.client),
         };
 
-        self.spawn_driver(addr, transport, conn_state)
+        // Initialize client-side connection manager
+        let conn_manager = ConnectionManager::<T, SocketAddr, ClientConnection<T, SocketAddr>>::new(
+            self.options.client.clone(),
+            transport,
+            addr.clone(),
+            conn_state,
+            Arc::clone(&self.state.transport_stats),
+            tracing::Span::none(),
+        );
+
+        self.spawn(addr, conn_manager)
     }
 }
 
@@ -166,19 +176,23 @@ where
         let conn_manager = ConnectionManager::<T, A, ClientConnection<T, A>>::new(
             self.options.client.clone(),
             transport,
-            endpoint,
+            endpoint.clone(),
             conn_state,
             Arc::clone(&self.state.transport_stats),
             tracing::Span::none(),
         );
 
         // Spawn the driver task
-        self.spawn(conn_manager);
+        self.spawn(endpoint, conn_manager);
 
         Ok(())
     }
 
-    fn spawn<S>(&mut self, mut conn_manager: ConnectionManager<T, A, S>) {
+    fn spawn<S: ConnectionController<T, A> + Send + Unpin + 'static>(
+        &mut self,
+        addr: A,
+        mut conn_manager: ConnectionManager<T, A, S>,
+    ) {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
 
@@ -189,10 +203,11 @@ where
         let pending_requests = FxHashMap::default();
 
         let id = DRIVER_ID.fetch_add(1, Ordering::Relaxed);
-        let span = tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), addr = ?endpoint);
+        let span =
+            tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), ?addr);
 
         // Set driver span
-        conn_manager = conn_manager.with_span(span);
+        conn_manager = conn_manager.with_span(span.clone());
 
         let linger_timer = self.options.write_buffer_linger.map(|duration| {
             let mut timer = tokio::time::interval(duration);
@@ -201,59 +216,7 @@ where
         });
 
         // Create the socket backend
-        let driver: ReqDriver<T, A> = ReqDriver {
-            options: Arc::clone(&self.options),
-            socket_state: self.state.clone(),
-            id_counter: 0,
-            from_socket,
-            conn_manager,
-            linger_timer,
-            pending_requests,
-            timeout_check_interval,
-            egress_queue: Default::default(),
-            compressor: self.compressor.clone(),
-            id,
-            span,
-        };
-
-        // Spawn the backend task
-        tokio::spawn(driver);
-
-        self.to_driver = Some(to_driver);
-    }
-
-    /// Internal method to initialize and spawn the driver.
-    fn spawn_driver(&mut self, endpoint: A, transport: T, conn_ctl: ConnCtl<T::Io, T::Stats, A>) {
-        // Initialize communication channels
-        let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);
-
-        let timeout_check_interval = tokio::time::interval(self.options.timeout / 10);
-
-        // TODO: we should limit the amount of active outgoing requests, and that should be the
-        // capacity. If we do this, we'll never have to re-allocate.
-        let pending_requests = FxHashMap::default();
-
-        let id = DRIVER_ID.fetch_add(1, Ordering::Relaxed);
-        let span = tracing::info_span!(parent: None, "req_driver", id = format!("req-{}", id), addr = ?endpoint);
-
-        let linger_timer = self.options.write_buffer_linger.map(|duration| {
-            let mut timer = tokio::time::interval(duration);
-            timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            timer
-        });
-
-        // Create connection manager
-        let conn_manager = ConnManager::new(
-            self.options.client.clone(),
-            transport,
-            endpoint,
-            conn_ctl,
-            Arc::clone(&self.state.transport_stats),
-            span.clone(),
-        );
-
-        // Create the socket backend
-        let driver: ReqDriver<T, A> = ReqDriver {
+        let driver: ReqDriver<T, A, S> = ReqDriver {
             options: Arc::clone(&self.options),
             socket_state: self.state.clone(),
             id_counter: 0,

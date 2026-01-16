@@ -34,6 +34,28 @@ pub(crate) type Conn<Io, S, A> = Framed<MeteredIo<Io, S, A>, reqrep::Codec>;
 /// A connection controller that manages the connection to a server with an exponential backoff.
 pub(crate) type ConnCtl<Io, S, A> = ConnectionState<Conn<Io, S, A>, ExponentialBackoff, A>;
 
+/// Trait for interacting with the connection, regardless of its "side" (client or server).
+pub(crate) trait ConnectionController<T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    /// Polls the connection logic, and returns a mutable reference to the connection if it's ready.
+    fn poll(
+        &mut self,
+        transport: &mut T,
+        stats: &Arc<ArcSwap<T::Stats>>,
+        span: &tracing::Span,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>>;
+
+    /// Resets the connection controller.
+    fn reset(&mut self);
+
+    /// Returns a mutable reference to the active connection, if it exists.
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>>;
+}
+
 /// A connection manager for managing client OR server connections.
 /// The type parameter `S` contains the connection state, including its "side" (client / server).
 pub(crate) struct ConnectionManager<T, A, S>
@@ -81,30 +103,128 @@ where
     conn_ctl: ConnCtl<T::Io, T::Stats, A>,
 }
 
-impl<T, A> ClientConnection<T, A>
+impl<T, A> ConnectionController<T, A> for ClientConnection<T, A>
 where
     T: Transport<A>,
     A: Address,
 {
+    /// Poll connection management logic: connection task, backoff, and retry logic.
+    /// Loops until the connection is active, then returns a mutable reference to the channel.
+    ///
+    /// Note: this is not a `Future` impl because we want to return a reference; doing it in
+    /// a `Future` would require lifetime headaches or unsafe code.
+    ///
+    /// Returns:
+    /// * `Poll::Ready(Some(&mut channel))` if the connection is active
+    /// * `Poll::Ready(None)` if we should terminate (max retries exceeded)
+    /// * `Poll::Pending` if we need to wait for backoff
+    fn poll(
+        &mut self,
+        transport: &mut T,
+        stats: &Arc<ArcSwap<T::Stats>>,
+        span: &tracing::Span,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
+        loop {
+            // Poll the active connection task, if any
+            if let Some(ref mut conn_task) = self.conn_task {
+                if let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
+                    // As soon as the connection task finishes, set it to `None`.
+                    // - If it was successful, set the connection to active
+                    // - If it failed, it will be re-tried until the backoff limit is reached.
+                    self.conn_task = None;
+
+                    match result.inner {
+                        Ok(io) => {
+                            tracing::info!("connected");
+
+                            let metered = MeteredIo::new(io, stats.clone());
+                            let framed = Framed::new(metered, reqrep::Codec::new());
+                            self.conn_ctl = ConnectionState::Active { channel: framed };
+                        }
+                        Err(e) => {
+                            tracing::error!(?e, "failed to connect");
+                        }
+                    }
+                }
+            }
+
+            // If the connection is inactive, try to connect to the server or poll the backoff
+            // timer if we're already trying to connect.
+            if let ConnectionState::Inactive { backoff, .. } = &mut self.conn_ctl {
+                let Poll::Ready(item) = backoff.poll_next_unpin(cx) else {
+                    return Poll::Pending;
+                };
+
+                let _span = tracing::info_span!(parent: span, "connect").entered();
+
+                if let Some(duration) = item {
+                    if self.conn_task.is_none() {
+                        tracing::debug!(backoff = ?duration, "trying connection");
+                        self.try_connect(transport);
+                    } else {
+                        tracing::debug!(
+                            backoff = ?duration,
+                            "not retrying as there is already a connection task"
+                        );
+                    }
+                } else {
+                    tracing::error!("exceeded maximum number of retries, terminating connection");
+                    return Poll::Ready(None);
+                }
+            }
+
+            if let ConnectionState::Active { ref mut channel } = self.conn_ctl {
+                return Poll::Ready(Some(channel));
+            }
+        }
+    }
+
     /// Reset the connection state to inactive, so that it will be re-tried.
     ///
     /// This is done when the connection is closed or an error occurs.
     #[inline]
-    pub(crate) fn reset_connection(&mut self) {
+    fn reset(&mut self) {
         self.conn_ctl = ConnectionState::Inactive {
             addr: self.addr.clone(),
             backoff: ExponentialBackoff::from(&self.options),
         };
     }
 
-    /// Returns a mutable reference to the connection channel if it is active.
-    #[inline]
-    pub fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+    /// Returns a mutable reference to the active connection, if it exists.
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
         if let ConnectionState::Active { ref mut channel } = self.conn_ctl {
             Some(channel)
         } else {
             None
         }
+    }
+}
+
+impl<T, A> ClientConnection<T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    /// Start the connection task to the server, handling authentication if necessary.
+    /// The result will be polled by the driver and re-tried according to the backoff policy.
+    fn try_connect(&mut self, transport: &mut T) {
+        let connect = transport.connect(self.addr.clone());
+        let token = self.options.auth_token.clone();
+
+        let task = async move {
+            let io = connect.await?;
+
+            let Some(token) = token else {
+                return Ok(io);
+            };
+
+            authentication_handshake::<T, A>(io, token).await
+        }
+        .in_current_span();
+
+        // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
+        self.conn_task = Some(WithSpan::current(Box::pin(task)));
     }
 }
 
@@ -162,83 +282,34 @@ where
         // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
         self.state.conn_task = Some(WithSpan::current(Box::pin(task)));
     }
+}
 
+impl<T, A, C> ConnectionManager<T, A, C>
+where
+    T: Transport<A>,
+    A: Address,
+    C: ConnectionController<T, A>,
+{
     /// Reset the connection state to inactive, so that it will be re-tried.
     ///
     /// This is done when the connection is closed or an error occurs.
     #[inline]
     pub(crate) fn reset_connection(&mut self) {
-        self.state.reset_connection();
+        self.state.reset();
     }
 
-    /// Poll connection management logic: connection task, backoff, and retry logic.
-    /// Loops until the connection is active, then returns a mutable reference to the channel.
-    ///
-    /// Note: this is not a `Future` impl because we want to return a reference; doing it in
-    /// a `Future` would require lifetime headaches or unsafe code.
-    ///
-    /// Returns:
-    /// * `Poll::Ready(Some(&mut channel))` if the connection is active
-    /// * `Poll::Ready(None)` if we should terminate (max retries exceeded)
-    /// * `Poll::Pending` if we need to wait for backoff
+    /// Poll the connection controller.
     #[allow(clippy::type_complexity)]
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
-        loop {
-            // Poll the active connection task, if any
-            if let Some(ref mut conn_task) = self.state.conn_task {
-                if let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
-                    // As soon as the connection task finishes, set it to `None`.
-                    // - If it was successful, set the connection to active
-                    // - If it failed, it will be re-tried until the backoff limit is reached.
-                    self.state.conn_task = None;
+        self.state.poll(&mut self.transport, &self.transport_stats, &self.span, cx)
+    }
 
-                    match result.inner {
-                        Ok(io) => {
-                            tracing::info!("connected");
-
-                            let metered = MeteredIo::new(io, self.transport_stats.clone());
-                            let framed = Framed::new(metered, reqrep::Codec::new());
-                            self.state.conn_ctl = ConnectionState::Active { channel: framed };
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "failed to connect");
-                        }
-                    }
-                }
-            }
-
-            // If the connection is inactive, try to connect to the server or poll the backoff
-            // timer if we're already trying to connect.
-            if let ConnectionState::Inactive { backoff, .. } = &mut self.state.conn_ctl {
-                let Poll::Ready(item) = backoff.poll_next_unpin(cx) else {
-                    return Poll::Pending;
-                };
-
-                let _span = tracing::info_span!(parent: &self.span, "connect").entered();
-
-                if let Some(duration) = item {
-                    if self.state.conn_task.is_none() {
-                        tracing::debug!(backoff = ?duration, "trying connection");
-                        self.try_connect();
-                    } else {
-                        tracing::debug!(
-                            backoff = ?duration,
-                            "not retrying as there is already a connection task"
-                        );
-                    }
-                } else {
-                    tracing::error!("exceeded maximum number of retries, terminating connection");
-                    return Poll::Ready(None);
-                }
-            }
-
-            if let ConnectionState::Active { ref mut channel } = self.state.conn_ctl {
-                return Poll::Ready(Some(channel));
-            }
-        }
+    /// Returns a mutable reference to the active connection, if it exists.
+    pub(crate) fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+        self.state.active_connection()
     }
 }
 
@@ -261,26 +332,6 @@ where
 
         Self { state: conn, transport, transport_stats, span }
     }
-}
-
-/// Manages the connection lifecycle: connecting, reconnecting, and maintaining the connection.
-pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
-    /// Options for the connection manager.
-    options: ClientOptions,
-    /// The connection task which handles the connection to the server.
-    conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
-    /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
-    /// The [`Framed`] object can send and receive messages from the socket.
-    conn_ctl: ConnCtl<T::Io, T::Stats, A>,
-    /// The transport for this socket.
-    transport: T,
-    /// The address of the server.
-    addr: A,
-    /// Transport stats for metering IO.
-    transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
-
-    /// A span to use for connection-related logging.
-    span: tracing::Span,
 }
 
 /// Perform the authentication handshake with the server.
@@ -310,134 +361,5 @@ where
             Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
         }
         Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-    }
-}
-
-impl<T, A> ConnManager<T, A>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    pub(crate) fn new(
-        options: ClientOptions,
-        transport: T,
-        addr: A,
-        conn_ctl: ConnCtl<T::Io, T::Stats, A>,
-        transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
-        span: tracing::Span,
-    ) -> Self {
-        Self { options, conn_task: None, conn_ctl, transport, addr, transport_stats, span }
-    }
-
-    /// Start the connection task to the server, handling authentication if necessary.
-    /// The result will be polled by the driver and re-tried according to the backoff policy.
-    fn try_connect(&mut self) {
-        let connect = self.transport.connect(self.addr.clone());
-        let token = self.options.auth_token.clone();
-
-        let task = async move {
-            let io = connect.await?;
-
-            let Some(token) = token else {
-                return Ok(io);
-            };
-
-            authentication_handshake::<T, A>(io, token).await
-        }
-        .in_current_span();
-
-        // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
-        self.conn_task = Some(WithSpan::current(Box::pin(task)));
-    }
-
-    /// Reset the connection state to inactive, so that it will be re-tried.
-    ///
-    /// This is done when the connection is closed or an error occurs.
-    #[inline]
-    pub(crate) fn reset_connection(&mut self) {
-        self.conn_ctl = ConnectionState::Inactive {
-            addr: self.addr.clone(),
-            backoff: ExponentialBackoff::from(&self.options),
-        };
-    }
-
-    /// Returns a mutable reference to the connection channel if it is active.
-    #[inline]
-    pub(crate) fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
-        if let ConnectionState::Active { ref mut channel } = self.conn_ctl {
-            Some(channel)
-        } else {
-            None
-        }
-    }
-
-    /// Poll connection management logic: connection task, backoff, and retry logic.
-    /// Loops until the connection is active, then returns a mutable reference to the channel.
-    ///
-    /// Note: this is not a `Future` impl because we want to return a reference; doing it in
-    /// a `Future` would require lifetime headaches or unsafe code.
-    ///
-    /// Returns:
-    /// * `Poll::Ready(Some(&mut channel))` if the connection is active
-    /// * `Poll::Ready(None)` if we should terminate (max retries exceeded)
-    /// * `Poll::Pending` if we need to wait for backoff
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn poll(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
-        loop {
-            // Poll the active connection task, if any
-            if let Some(ref mut conn_task) = self.conn_task {
-                if let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
-                    // As soon as the connection task finishes, set it to `None`.
-                    // - If it was successful, set the connection to active
-                    // - If it failed, it will be re-tried until the backoff limit is reached.
-                    self.conn_task = None;
-
-                    match result.inner {
-                        Ok(io) => {
-                            tracing::info!("connected");
-
-                            let metered = MeteredIo::new(io, self.transport_stats.clone());
-                            let framed = Framed::new(metered, reqrep::Codec::new());
-                            self.conn_ctl = ConnectionState::Active { channel: framed };
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "failed to connect");
-                        }
-                    }
-                }
-            }
-
-            // If the connection is inactive, try to connect to the server or poll the backoff
-            // timer if we're already trying to connect.
-            if let ConnectionState::Inactive { backoff, .. } = &mut self.conn_ctl {
-                let Poll::Ready(item) = backoff.poll_next_unpin(cx) else {
-                    return Poll::Pending;
-                };
-
-                let _span = tracing::info_span!(parent: &self.span, "connect").entered();
-
-                if let Some(duration) = item {
-                    if self.conn_task.is_none() {
-                        tracing::debug!(backoff = ?duration, "trying connection");
-                        self.try_connect();
-                    } else {
-                        tracing::debug!(
-                            backoff = ?duration,
-                            "not retrying as there is already a connection task"
-                        );
-                    }
-                } else {
-                    tracing::error!("exceeded maximum number of retries, terminating connection");
-                    return Poll::Ready(None);
-                }
-            }
-
-            if let ConnectionState::Active { ref mut channel } = self.conn_ctl {
-                return Poll::Ready(Some(channel));
-            }
-        }
     }
 }

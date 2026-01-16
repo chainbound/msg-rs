@@ -17,7 +17,10 @@ use tokio::{
 use super::{ReqError, ReqOptions};
 use crate::{
     SendCommand,
-    req::{SocketState, conn_manager::ConnManager},
+    req::{
+        SocketState,
+        conn_manager::{ConnectionController, ConnectionManager},
+    },
 };
 
 use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
@@ -27,18 +30,9 @@ use msg_wire::{
     reqrep,
 };
 
-/// Type state for a client connection.
-struct ClientConnection<T, A>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    conn_manager: ConnManager<T, A>,
-}
-
 /// The request socket driver. Endless future that drives
 /// the socket forward.
-pub(crate) struct ReqDriver<T, A>
+pub(crate) struct ReqDriver<T, A, S>
 where
     T: Transport<A>,
     A: Address,
@@ -52,7 +46,7 @@ where
     /// Commands from the socket.
     pub(crate) from_socket: mpsc::Receiver<SendCommand>,
     /// Connection manager that handles connection lifecycle.
-    pub(crate) conn_manager: ConnManager<T, A>,
+    pub(crate) conn_manager: ConnectionManager<T, A, S>,
     /// The timer for the write buffer linger.
     pub(crate) linger_timer: Option<Interval>,
     /// The outgoing message queue.
@@ -79,7 +73,7 @@ pub(crate) struct PendingRequest {
     sender: oneshot::Sender<Result<Bytes, ReqError>>,
 }
 
-impl<T, A> ReqDriver<T, A>
+impl<T, A, S> ReqDriver<T, A, S>
 where
     T: Transport<A>,
     A: Address,
@@ -178,10 +172,11 @@ where
     }
 }
 
-impl<T, A> Future for ReqDriver<T, A>
+impl<T, A, S> Future for ReqDriver<T, A, S>
 where
     T: Transport<A>,
     A: Address,
+    S: ConnectionController<T, A> + Unpin,
 {
     type Output = ();
 
