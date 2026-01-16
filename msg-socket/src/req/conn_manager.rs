@@ -49,7 +49,7 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>>;
 
-    /// Resets the connection controller.
+    /// Resets the connection controller. Will close any active connections.
     fn reset(&mut self);
 
     /// Returns a mutable reference to the active connection, if it exists.
@@ -241,9 +241,43 @@ where
     /// The accept task which handles accepting an incoming connection.
     accept_task: Option<WithSpan<T::Accept>>,
     /// The inbound connection.
-    conn: Conn<T::Io, T::Stats, A>,
+    conn: Option<Conn<T::Io, T::Stats, A>>,
 }
 
+impl<T, A> ConnectionController<T, A> for ServerConnection<T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    fn poll(
+        &mut self,
+        transport: &mut T,
+        stats: &Arc<ArcSwap<T::Stats>>,
+        span: &tracing::Span,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
+        todo!()
+        // If connection is active, return it
+        //
+        // If no connection BUT accept task is active, poll it
+        //
+        // If no connection AND no accept task, create a new accept task, disable listener?
+    }
+
+    fn reset(&mut self) {
+        if let Some(ref mut conn) = self.conn.take() {
+            // FIXME: This doesn't actually close the underlying connection, it just drops it.
+            // To actually close it, we'd need to poll the close future.
+            let _ = conn.close();
+        }
+    }
+
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+        self.conn.as_mut()
+    }
+}
+
+// Client-side connection manager implementations.
 impl<T, A> ConnectionManager<T, A, ClientConnection<T, A>>
 where
     T: Transport<A>,
@@ -284,6 +318,27 @@ where
     }
 }
 
+pub struct ServerOptions {}
+
+impl<T, A> ConnectionManager<T, A, ServerConnection<T, A>>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    pub(crate) fn new(
+        options: ServerOptions,
+        transport: T,
+        addr: A,
+        transport_stats: Arc<ArcSwap<T::Stats>>,
+        span: tracing::Span,
+    ) -> Self {
+        let conn = ServerConnection { addr, accept_task: None, conn: None };
+
+        Self { state: conn, transport, transport_stats, span }
+    }
+}
+
+// Generic connection manager implementations.
 impl<T, A, C> ConnectionManager<T, A, C>
 where
     T: Transport<A>,
@@ -310,27 +365,6 @@ where
     /// Returns a mutable reference to the active connection, if it exists.
     pub(crate) fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
         self.state.active_connection()
-    }
-}
-
-pub struct ServerOptions {}
-
-impl<T, A> ConnectionManager<T, A, ServerConnection<T, A>>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    pub(crate) fn new(
-        options: ServerOptions,
-        transport: T,
-        addr: A,
-        conn: Conn<T::Io, T::Stats, A>,
-        transport_stats: Arc<ArcSwap<T::Stats>>,
-        span: tracing::Span,
-    ) -> Self {
-        let conn = ServerConnection { addr, accept_task: None, conn };
-
-        Self { state: conn, transport, transport_stats, span }
     }
 }
 

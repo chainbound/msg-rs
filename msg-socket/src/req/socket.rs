@@ -23,7 +23,10 @@ use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
     req::{
         SocketState,
-        conn_manager::{ClientConnection, ConnectionController, ConnectionManager},
+        conn_manager::{
+            ClientConnection, ConnectionController, ConnectionManager, ServerConnection,
+            ServerOptions,
+        },
         driver::ReqDriver,
         stats::ReqStats,
     },
@@ -83,6 +86,22 @@ where
         );
 
         self.spawn(addr, conn_manager)
+    }
+
+    pub async fn bind(&mut self, addr: SocketAddr) -> Result<(), ReqError> {
+        let transport = self.transport.take().expect("Transport has been moved");
+
+        // Initialize server-side connection manager
+        let conn_manager = ConnectionManager::<T, SocketAddr, ServerConnection<T, SocketAddr>>::new(
+            ServerOptions {},
+            transport,
+            addr.clone(),
+            Arc::clone(&self.state.transport_stats),
+            tracing::Span::none(),
+        );
+
+        self.spawn(addr, conn_manager);
+        Ok(())
     }
 }
 
