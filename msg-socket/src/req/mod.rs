@@ -5,23 +5,21 @@ use std::{
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use thiserror::Error;
-use tokio::sync::oneshot;
-
 use msg_common::{constants::KiB, span::WithSpan};
 use msg_wire::{
     compression::{CompressionType, Compressor},
     reqrep,
 };
+use thiserror::Error;
+use tokio::sync::oneshot;
 
-mod conn_manager;
 mod driver;
 mod socket;
 mod stats;
 pub use socket::*;
+use stats::ReqStats;
 
 use crate::{Profile, stats::SocketStats};
-use stats::ReqStats;
 
 /// The default buffer size for the socket.
 const DEFAULT_BUFFER_SIZE: usize = 1024;

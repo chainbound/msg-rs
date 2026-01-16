@@ -23,15 +23,10 @@ use tokio_util::codec::Framed;
 use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
     ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
-    req::{
-        SocketState,
-        conn_manager::{
-            ClientConnection, ConnectionController, ConnectionManager, ServerConnection,
-            ServerOptions,
-        },
-        driver::ReqDriver,
-        stats::ReqStats,
+    connection::{
+        ClientConnection, ConnectionController, ConnectionManager, ServerConnection, ServerOptions,
     },
+    req::{SocketState, driver::ReqDriver, stats::ReqStats},
     stats::SocketStats,
 };
 

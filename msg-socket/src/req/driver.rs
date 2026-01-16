@@ -23,10 +23,8 @@ use tokio::{
 use super::{ReqError, ReqOptions};
 use crate::{
     SendCommand,
-    req::{
-        SocketState,
-        conn_manager::{ConnectionController, ConnectionManager},
-    },
+    connection::{ConnectionController, ConnectionManager},
+    req::SocketState,
 };
 
 /// The request socket driver. Endless future that drives
