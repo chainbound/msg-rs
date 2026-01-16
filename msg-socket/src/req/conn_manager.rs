@@ -8,13 +8,13 @@ use std::{
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
-use msg_common::span::{EnterSpan as _, WithSpan};
+use msg_common::span::{EnterSpan as _, SpanExt, WithSpan};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
 use crate::{ClientOptions, ConnectionState, ExponentialBackoff};
 
-use msg_transport::{Address, MeteredIo, Transport};
+use msg_transport::{Address, MeteredIo, PeerAddress as _, Transport};
 use msg_wire::{auth, reqrep};
 
 /// A connection task that connects to a server and returns the underlying IO object.
@@ -236,6 +236,9 @@ where
     T: Transport<A>,
     A: Address,
 {
+    /// The server options.
+    #[allow(unused)]
+    options: ServerOptions,
     /// The local address.
     addr: A,
     /// The accept task which handles accepting an incoming connection.
@@ -249,6 +252,10 @@ where
     T: Transport<A>,
     A: Address,
 {
+    /// Poll the server-side connection controller. This will return:
+    /// - Poll::Ready(Some(conn)) if a connection is active.
+    /// - Poll::Pending if no connection is active and the accept task is pending.
+    /// - Poll::Ready(None) if no connection is active and the accept task is not pending.
     fn poll(
         &mut self,
         transport: &mut T,
@@ -256,12 +263,46 @@ where
         span: &tracing::Span,
         cx: &mut Context<'_>,
     ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
-        todo!()
-        // If connection is active, return it
-        //
-        // If no connection BUT accept task is active, poll it
-        //
-        // If no connection AND no accept task, create a new accept task, disable listener?
+        let mut transport = Pin::new(transport);
+        loop {
+            // 1. If connection is active, return it
+            if self.conn.is_some() {
+                return Poll::Ready(self.conn.as_mut());
+            }
+
+            let _span =
+                tracing::info_span!(parent: span, "accept", local_addr = ?self.addr).entered();
+
+            // 2. If connection is not active, but we have an accept task, poll it.
+            if let Some(ref mut accept) = self.accept_task {
+                if let Poll::Ready(result) = accept.poll_unpin(cx).enter() {
+                    match result.inner {
+                        Ok(io) => {
+                            tracing::debug!(peer_addr = ?io.peer_addr(), "Accepted connection");
+                            let metered = MeteredIo::new(io, stats.clone());
+                            let framed = Framed::new(metered, reqrep::Codec::new());
+
+                            self.conn = Some(framed);
+                            return Poll::Ready(self.conn.as_mut());
+                        }
+                        Err(err) => {
+                            tracing::error!("Accept error: {err:?}");
+                            self.accept_task = None;
+                        }
+                    }
+                }
+            }
+
+            // 3. Create a new accept task
+            if let Poll::Ready(accept_task) = transport.as_mut().poll_accept(cx) {
+                self.accept_task = Some(accept_task.with_current_span());
+
+                // Continue to poll the accept task
+                continue;
+            }
+
+            return Poll::Pending;
+        }
     }
 
     fn reset(&mut self) {
@@ -295,27 +336,6 @@ where
 
         Self { state: conn, transport, transport_stats, span }
     }
-
-    /// Start the connection task to the server, handling authentication if necessary.
-    /// The result will be polled by the driver and re-tried according to the backoff policy.
-    fn try_connect(&mut self) {
-        let connect = self.transport.connect(self.state.addr.clone());
-        let token = self.state.options.auth_token.clone();
-
-        let task = async move {
-            let io = connect.await?;
-
-            let Some(token) = token else {
-                return Ok(io);
-            };
-
-            authentication_handshake::<T, A>(io, token).await
-        }
-        .in_current_span();
-
-        // FIX: coercion to BoxFuture for [`SpanExt::with_current_span`]
-        self.state.conn_task = Some(WithSpan::current(Box::pin(task)));
-    }
 }
 
 pub struct ServerOptions {}
@@ -325,6 +345,7 @@ where
     T: Transport<A>,
     A: Address,
 {
+    /// Create a new server-side connection manager.
     pub(crate) fn new(
         options: ServerOptions,
         transport: T,
@@ -332,9 +353,15 @@ where
         transport_stats: Arc<ArcSwap<T::Stats>>,
         span: tracing::Span,
     ) -> Self {
-        let conn = ServerConnection { addr, accept_task: None, conn: None };
+        debug_assert!(transport.local_addr().is_some(), "Transport must be bound");
+        let conn = ServerConnection { options, addr, accept_task: None, conn: None };
 
         Self { state: conn, transport, transport_stats, span }
+    }
+
+    /// Bind the socket to the given address.
+    pub(crate) async fn bind(&mut self, addr: A) -> Result<(), T::Error> {
+        self.transport.bind(addr).await
     }
 }
 

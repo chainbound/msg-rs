@@ -45,6 +45,8 @@ pub enum ReqError {
     NoValidEndpoints,
     #[error("Failed to connect to the target endpoint: {0:?}")]
     Connect(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Failed to bind to the socket address")]
+    Bind(Box<dyn std::error::Error + Send + Sync>),
 }
 
 /// A command to send a request message and wait for a response.
