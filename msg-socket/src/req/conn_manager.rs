@@ -41,6 +41,7 @@ where
     A: Address,
 {
     /// Polls the connection logic, and returns a mutable reference to the connection if it's ready.
+    #[allow(clippy::type_complexity)]
     fn poll(
         &mut self,
         transport: &mut T,
@@ -306,10 +307,10 @@ where
     }
 
     fn reset(&mut self) {
-        if let Some(ref mut conn) = self.conn.take() {
+        if let Some(ref mut _conn) = self.conn.take() {
             // FIXME: This doesn't actually close the underlying connection, it just drops it.
             // To actually close it, we'd need to poll the close future.
-            let _ = conn.close();
+            // let _ = _conn.close().await;
         }
     }
 
