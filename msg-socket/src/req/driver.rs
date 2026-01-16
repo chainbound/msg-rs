@@ -8,6 +8,12 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Future, SinkExt, StreamExt};
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+use msg_transport::{Address, Transport};
+use msg_wire::{
+    compression::{Compressor, try_decompress_payload},
+    reqrep,
+};
 use rustc_hash::FxHashMap;
 use tokio::{
     sync::{mpsc, oneshot},
@@ -21,13 +27,6 @@ use crate::{
         SocketState,
         conn_manager::{ConnectionController, ConnectionManager},
     },
-};
-
-use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
-use msg_transport::{Address, Transport};
-use msg_wire::{
-    compression::{Compressor, try_decompress_payload},
-    reqrep,
 };
 
 /// The request socket driver. Endless future that drives
@@ -46,7 +45,7 @@ where
     /// Commands from the socket.
     pub(crate) from_socket: mpsc::Receiver<SendCommand>,
     /// Connection manager that handles connection lifecycle.
-    pub(crate) conn_manager: ConnectionManager<T, A, S>,
+    pub(crate) conn_manager: ConnectionManager<T, A, S, reqrep::Codec>,
     /// The timer for the write buffer linger.
     pub(crate) linger_timer: Option<Interval>,
     /// The outgoing message queue.
@@ -176,7 +175,7 @@ impl<T, A, S> Future for ReqDriver<T, A, S>
 where
     T: Transport<A>,
     A: Address,
-    S: ConnectionController<T, A> + Unpin,
+    S: ConnectionController<T, A, reqrep::Codec> + Unpin,
 {
     type Output = ();
 

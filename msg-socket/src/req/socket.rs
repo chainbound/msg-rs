@@ -7,16 +7,18 @@ use std::{
 
 use arc_swap::Guard;
 use bytes::Bytes;
+use msg_common::span::WithSpan;
+use msg_transport::{Address, MeteredIo, Transport};
+use msg_wire::{
+    compression::Compressor,
+    reqrep::{self, Codec},
+};
 use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::{mpsc, oneshot},
 };
 use tokio_util::codec::Framed;
-
-use msg_common::span::WithSpan;
-use msg_transport::{Address, MeteredIo, Transport};
-use msg_wire::{compression::Compressor, reqrep};
 
 use super::{DEFAULT_BUFFER_SIZE, ReqError, ReqOptions};
 use crate::{
@@ -76,14 +78,16 @@ where
         };
 
         // Initialize client-side connection manager
-        let conn_manager = ConnectionManager::<T, SocketAddr, ClientConnection<T, SocketAddr>>::new(
-            self.options.client.clone(),
-            transport,
-            addr,
-            conn_state,
-            Arc::clone(&self.state.transport_stats),
-            tracing::Span::none(),
-        );
+        let conn_manager =
+            ConnectionManager::<T, SocketAddr, ClientConnection<T, SocketAddr, Codec>, Codec>::new(
+                self.options.client.clone(),
+                transport,
+                addr,
+                conn_state,
+                Arc::clone(&self.state.transport_stats),
+                Box::new(|| Codec::new()),
+                tracing::Span::none(),
+            );
 
         self.spawn(addr, conn_manager)
     }
@@ -94,12 +98,13 @@ where
 
         // Initialize server-side connection manager
         let mut conn_manager =
-            ConnectionManager::<T, SocketAddr, ServerConnection<T, SocketAddr>>::new(
+            ConnectionManager::<T, SocketAddr, ServerConnection<T, SocketAddr, Codec>, Codec>::new(
                 // TODO: Server options from config
                 ServerOptions {},
                 transport,
                 addr,
                 Arc::clone(&self.state.transport_stats),
+                Box::new(|| Codec::new()),
                 tracing::Span::none(),
             );
 
@@ -198,12 +203,13 @@ where
         };
 
         // Initialize client-side connection manager
-        let conn_manager = ConnectionManager::<T, A, ClientConnection<T, A>>::new(
+        let conn_manager = ConnectionManager::<T, A, ClientConnection<T, A, Codec>, Codec>::new(
             self.options.client.clone(),
             transport,
             endpoint.clone(),
             conn_state,
             Arc::clone(&self.state.transport_stats),
+            Box::new(|| Codec::new()),
             tracing::Span::none(),
         );
 
@@ -213,10 +219,10 @@ where
         Ok(())
     }
 
-    fn spawn<S: ConnectionController<T, A> + Send + Unpin + 'static>(
+    fn spawn<S: ConnectionController<T, A, Codec> + Send + Unpin + 'static>(
         &mut self,
         addr: A,
-        mut conn_manager: ConnectionManager<T, A, S>,
+        mut conn_manager: ConnectionManager<T, A, S, Codec>,
     ) {
         // Initialize communication channels
         let (to_driver, from_socket) = mpsc::channel(DEFAULT_BUFFER_SIZE);

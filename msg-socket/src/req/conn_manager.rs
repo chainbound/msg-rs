@@ -9,13 +9,15 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use futures::{Future, FutureExt, SinkExt, StreamExt};
 use msg_common::span::{EnterSpan as _, SpanExt, WithSpan};
+use msg_transport::{Address, MeteredIo, PeerAddress as _, Transport};
+use msg_wire::auth;
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
 use crate::{ClientOptions, ConnectionState, ExponentialBackoff};
 
-use msg_transport::{Address, MeteredIo, PeerAddress as _, Transport};
-use msg_wire::{auth, reqrep};
+/// Type alias for a factory function that creates a codec.
+type CodecFactory<C> = Box<dyn Fn() -> C + Send>;
 
 /// A connection task that connects to a server and returns the underlying IO object.
 type ConnTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
@@ -29,13 +31,13 @@ type ConnTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 ///
 /// However, we don't use `poll_ready` here, and instead we flush every time we write a message to
 /// the framed buffer.
-pub(crate) type Conn<Io, S, A> = Framed<MeteredIo<Io, S, A>, reqrep::Codec>;
+pub(crate) type Conn<Io, S, A, C> = Framed<MeteredIo<Io, S, A>, C>;
 
 /// A connection controller that manages the connection to a server with an exponential backoff.
-pub(crate) type ConnCtl<Io, S, A> = ConnectionState<Conn<Io, S, A>, ExponentialBackoff, A>;
+pub(crate) type ConnCtl<Io, S, A, C> = ConnectionState<Conn<Io, S, A, C>, ExponentialBackoff, A>;
 
 /// Trait for interacting with the connection, regardless of its "side" (client or server).
-pub(crate) trait ConnectionController<T, A>
+pub(crate) trait ConnectionController<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -47,19 +49,20 @@ where
         transport: &mut T,
         stats: &Arc<ArcSwap<T::Stats>>,
         span: &tracing::Span,
+        make_codec: &impl Fn() -> C,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>>;
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A, C>>>;
 
     /// Resets the connection controller. Will close any active connections.
     fn reset(&mut self);
 
     /// Returns a mutable reference to the active connection, if it exists.
-    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>>;
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A, C>>;
 }
 
 /// A connection manager for managing client OR server connections.
 /// The type parameter `S` contains the connection state, including its "side" (client / server).
-pub(crate) struct ConnectionManager<T, A, S>
+pub(crate) struct ConnectionManager<T, A, S, C>
 where
     T: Transport<A>,
     A: Address,
@@ -70,12 +73,14 @@ where
     transport: T,
     /// Transport stats for metering IO.
     transport_stats: Arc<ArcSwap<T::Stats>>,
+    /// Factory function for creating a codec.
+    make_codec: CodecFactory<C>,
 
     /// Connection manager tracing span.
     span: tracing::Span,
 }
 
-impl<T, A, S> ConnectionManager<T, A, S>
+impl<T, A, S, C> ConnectionManager<T, A, S, C>
 where
     T: Transport<A>,
     A: Address,
@@ -87,8 +92,8 @@ where
     }
 }
 
-/// A client connection to a remote server.
-pub(crate) struct ClientConnection<T, A>
+/// A client connection to a remote server. Generic over transport, address type and codec.
+pub(crate) struct ClientConnection<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -101,10 +106,10 @@ where
     conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
-    conn_ctl: ConnCtl<T::Io, T::Stats, A>,
+    conn_ctl: ConnCtl<T::Io, T::Stats, A, C>,
 }
 
-impl<T, A> ConnectionController<T, A> for ClientConnection<T, A>
+impl<T, A, C> ConnectionController<T, A, C> for ClientConnection<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -124,8 +129,9 @@ where
         transport: &mut T,
         stats: &Arc<ArcSwap<T::Stats>>,
         span: &tracing::Span,
+        make_codec: &impl Fn() -> C,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A, C>>> {
         loop {
             // Poll the active connection task, if any
             if let Some(ref mut conn_task) = self.conn_task {
@@ -140,7 +146,7 @@ where
                             tracing::info!("connected");
 
                             let metered = MeteredIo::new(io, stats.clone());
-                            let framed = Framed::new(metered, reqrep::Codec::new());
+                            let framed = Framed::new(metered, make_codec());
                             self.conn_ctl = ConnectionState::Active { channel: framed };
                         }
                         Err(e) => {
@@ -193,7 +199,7 @@ where
     }
 
     /// Returns a mutable reference to the active connection, if it exists.
-    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A, C>> {
         if let ConnectionState::Active { ref mut channel } = self.conn_ctl {
             Some(channel)
         } else {
@@ -202,7 +208,7 @@ where
     }
 }
 
-impl<T, A> ClientConnection<T, A>
+impl<T, A, C> ClientConnection<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -232,7 +238,7 @@ where
 /// A local server connection. Manages the connection lifecycle:
 /// - Accepting incoming connections.
 /// - Handling established connections.
-pub(crate) struct ServerConnection<T, A>
+pub(crate) struct ServerConnection<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -245,10 +251,10 @@ where
     /// The accept task which handles accepting an incoming connection.
     accept_task: Option<WithSpan<T::Accept>>,
     /// The inbound connection.
-    conn: Option<Conn<T::Io, T::Stats, A>>,
+    conn: Option<Conn<T::Io, T::Stats, A, C>>,
 }
 
-impl<T, A> ConnectionController<T, A> for ServerConnection<T, A>
+impl<T, A, C> ConnectionController<T, A, C> for ServerConnection<T, A, C>
 where
     T: Transport<A>,
     A: Address,
@@ -262,8 +268,9 @@ where
         transport: &mut T,
         stats: &Arc<ArcSwap<T::Stats>>,
         span: &tracing::Span,
+        make_codec: &impl Fn() -> C,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A, C>>> {
         let mut transport = Pin::new(transport);
         loop {
             // 1. If connection is active, return it
@@ -281,7 +288,7 @@ where
                         Ok(io) => {
                             tracing::debug!(peer_addr = ?io.peer_addr(), "Accepted connection");
                             let metered = MeteredIo::new(io, stats.clone());
-                            let framed = Framed::new(metered, reqrep::Codec::new());
+                            let framed = Framed::new(metered, make_codec());
 
                             self.conn = Some(framed);
                             return Poll::Ready(self.conn.as_mut());
@@ -314,13 +321,13 @@ where
         }
     }
 
-    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+    fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A, C>> {
         self.conn.as_mut()
     }
 }
 
 // Client-side connection manager implementations.
-impl<T, A> ConnectionManager<T, A, ClientConnection<T, A>>
+impl<T, A, C> ConnectionManager<T, A, ClientConnection<T, A, C>, C>
 where
     T: Transport<A>,
     A: Address,
@@ -329,19 +336,20 @@ where
         options: ClientOptions,
         transport: T,
         addr: A,
-        conn_ctl: ConnCtl<T::Io, T::Stats, A>,
+        conn_ctl: ConnCtl<T::Io, T::Stats, A, C>,
         transport_stats: Arc<ArcSwap<T::Stats>>,
+        make_codec: CodecFactory<C>,
         span: tracing::Span,
     ) -> Self {
         let conn = ClientConnection { options, addr, conn_task: None, conn_ctl };
 
-        Self { state: conn, transport, transport_stats, span }
+        Self { state: conn, transport, transport_stats, make_codec, span }
     }
 }
 
 pub struct ServerOptions {}
 
-impl<T, A> ConnectionManager<T, A, ServerConnection<T, A>>
+impl<T, A, C> ConnectionManager<T, A, ServerConnection<T, A, C>, C>
 where
     T: Transport<A>,
     A: Address,
@@ -352,12 +360,13 @@ where
         transport: T,
         addr: A,
         transport_stats: Arc<ArcSwap<T::Stats>>,
+        make_codec: CodecFactory<C>,
         span: tracing::Span,
     ) -> Self {
         debug_assert!(transport.local_addr().is_some(), "Transport must be bound");
         let conn = ServerConnection { options, addr, accept_task: None, conn: None };
 
-        Self { state: conn, transport, transport_stats, span }
+        Self { state: conn, transport, transport_stats, make_codec, span }
     }
 
     /// Bind the socket to the given address.
@@ -367,11 +376,11 @@ where
 }
 
 // Generic connection manager implementations.
-impl<T, A, C> ConnectionManager<T, A, C>
+impl<T, A, Ctr, C> ConnectionManager<T, A, Ctr, C>
 where
     T: Transport<A>,
     A: Address,
-    C: ConnectionController<T, A>,
+    Ctr: ConnectionController<T, A, C>,
 {
     /// Reset the connection state to inactive, so that it will be re-tried.
     ///
@@ -386,12 +395,18 @@ where
     pub(crate) fn poll(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
-        self.state.poll(&mut self.transport, &self.transport_stats, &self.span, cx)
+    ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A, C>>> {
+        self.state.poll(
+            &mut self.transport,
+            &self.transport_stats,
+            &self.span,
+            &self.make_codec,
+            cx,
+        )
     }
 
     /// Returns a mutable reference to the active connection, if it exists.
-    pub(crate) fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A>> {
+    pub(crate) fn active_connection(&mut self) -> Option<&mut Conn<T::Io, T::Stats, A, C>> {
         self.state.active_connection()
     }
 }
