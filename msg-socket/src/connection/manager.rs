@@ -14,13 +14,14 @@ use msg_wire::auth;
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use crate::{ClientOptions, ConnectionState, ExponentialBackoff};
+use crate::{Authenticator, ClientOptions, ConnectionState, ExponentialBackoff};
 
 /// Type alias for a factory function that creates a codec.
 type CodecFactory<C> = Box<dyn Fn() -> C + Send>;
 
-/// A connection task that connects to a server and returns the underlying IO object.
-type ConnTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
+/// A connection setup task that connects to a server or handles a connection from a client and
+/// returns the underlying IO object.
+type ConnSetup<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
 
 /// A connection from the transport to a server.
 ///
@@ -103,7 +104,7 @@ where
     /// The address of the remote.
     addr: A,
     /// The connection task which handles the connection to the server.
-    conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
+    conn_task: Option<WithSpan<ConnSetup<T::Io, T::Error>>>,
     /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     conn_ctl: ConnCtl<T::Io, T::Stats, A, C>,
@@ -226,7 +227,7 @@ where
                 return Ok(io);
             };
 
-            authentication_handshake::<T, A>(io, token).await
+            outbound_handshake::<T, A>(io, token).await
         }
         .in_current_span();
 
@@ -248,8 +249,10 @@ where
     options: ServerOptions,
     /// The local address.
     addr: A,
+    /// The optional authenticator.
+    authenticator: Option<Arc<dyn Authenticator>>,
     /// The accept task which handles accepting an incoming connection.
-    accept_task: Option<WithSpan<T::Accept>>,
+    accept_task: Option<WithSpan<ConnSetup<T::Io, T::Error>>>,
     /// The inbound connection.
     conn: Option<Conn<T::Io, T::Stats, A, C>>,
 }
@@ -303,7 +306,22 @@ where
 
             // 3. Create a new accept task
             if let Poll::Ready(accept_task) = transport.as_mut().poll_accept(cx) {
-                self.accept_task = Some(accept_task.with_current_span());
+                // NOTE: Compiler needs some help here.
+                let task: ConnSetup<T::Io, T::Error> =
+                    // If we have an authenticator, create a task that performs the inbound handshake.
+                    if let Some(ref authenticator) = self.authenticator {
+                        let authenticator = authenticator.clone();
+                        Box::pin(async move {
+                            let io = accept_task.await?;
+
+                            inbound_handshake::<T, A>(io, &authenticator).await
+                        })
+                    } else {
+                        // Otherwise just accept the connection as-is.
+                        Box::pin(async move { accept_task.await })
+                    };
+
+                self.accept_task = Some(task.with_current_span());
 
                 // Continue to poll the accept task
                 continue;
@@ -359,12 +377,13 @@ where
         options: ServerOptions,
         transport: T,
         addr: A,
+        authenticator: Option<Arc<dyn Authenticator>>,
         transport_stats: Arc<ArcSwap<T::Stats>>,
         make_codec: CodecFactory<C>,
         span: tracing::Span,
     ) -> Self {
         debug_assert!(transport.local_addr().is_some(), "Transport must be bound");
-        let conn = ServerConnection { options, addr, accept_task: None, conn: None };
+        let conn = ServerConnection { options, addr, authenticator, accept_task: None, conn: None };
 
         Self { state: conn, transport, transport_stats, make_codec, span }
     }
@@ -413,7 +432,7 @@ where
 
 /// Perform the authentication handshake with the server.
 #[tracing::instrument(skip_all, "auth", fields(token = ?token))]
-async fn authentication_handshake<T, A>(mut io: T::Io, token: Bytes) -> Result<T::Io, T::Error>
+async fn outbound_handshake<T, A>(mut io: T::Io, token: Bytes) -> Result<T::Io, T::Error>
 where
     T: Transport<A>,
     A: Address,
@@ -439,4 +458,53 @@ where
         }
         Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
     }
+}
+
+/// Perform the authentication handshake with the client
+#[tracing::instrument(skip_all, "auth")]
+async fn inbound_handshake<T, A>(
+    mut io: T::Io,
+    authenticator: &Arc<dyn Authenticator>,
+) -> Result<T::Io, T::Error>
+where
+    T: Transport<A>,
+    A: Address,
+{
+    let mut conn = Framed::new(&mut io, auth::Codec::new_server());
+
+    // Wait for the response
+    let Some(res) = conn.next().await else {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed").into());
+    };
+    match res {
+        Ok(auth::Message::Auth(token)) => {
+            tracing::debug!(?token, "auth received");
+            // If authentication fails, send a reject message and close the connection
+            if !authenticator.authenticate(&token) {
+                conn.send(auth::Message::Reject).await?;
+                conn.close().await?;
+                return Err(abort().into())
+            }
+
+            // Send ack
+            conn.send(auth::Message::Ack).await?;
+
+            return Ok(io);
+        }
+        Ok(msg) => {
+            tracing::debug!(?msg, "unexpected message during authentication");
+            conn.send(auth::Message::Reject).await?;
+            conn.close().await?;
+            Err(abort().into())
+        }
+        Err(e) => {
+            tracing::error!(?e, "error during authentication");
+            Err(abort().into())
+        }
+    }
+}
+
+// Helper function for an abort error
+fn abort() -> io::Error {
+    io::Error::new(io::ErrorKind::Other, "authentication failed, connection aborted")
 }
