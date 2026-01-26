@@ -101,7 +101,7 @@ impl SubOptions {
 impl Default for SubOptions {
     fn default() -> Self {
         Self {
-            ingress_buffer_size: DEFAULT_QUEUE_SIZE,
+            ingress_queue_size: DEFAULT_QUEUE_SIZE,
             read_buffer_size: 8192,
             initial_backoff: Duration::from_millis(100),
             retry_attempts: Some(24),
