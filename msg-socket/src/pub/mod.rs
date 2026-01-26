@@ -222,7 +222,10 @@ mod tests {
     use msg_wire::compression::GzipCompressor;
     use tracing::info;
 
-    use crate::{SubOptions, SubSocket, hooks::token::{ClientHook, ServerHook}};
+    use crate::{
+        SubOptions, SubSocket,
+        hooks::token::{ClientHook, ServerHook},
+    };
 
     use super::*;
 
@@ -253,7 +256,8 @@ mod tests {
     async fn pubsub_auth_tcp() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
+        let mut pub_socket =
+            PubSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
 
         let mut sub_socket = SubSocket::new(Tcp::default())
             .with_connection_hook(ClientHook::new(Bytes::from("client1")));
@@ -277,7 +281,8 @@ mod tests {
     async fn pubsub_auth_quic() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Quic::default()).with_connection_hook(ServerHook::accept_all());
+        let mut pub_socket =
+            PubSocket::new(Quic::default()).with_connection_hook(ServerHook::accept_all());
 
         let mut sub_socket = SubSocket::new(Quic::default())
             .with_connection_hook(ClientHook::new(Bytes::from("client1")));

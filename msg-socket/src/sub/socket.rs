@@ -17,10 +17,13 @@ use tokio::{
 use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
-use crate::{ConnectionHook, ConnectionHookErased, sub::{
-    Command, DEFAULT_BUFFER_SIZE, PubMessage, SocketState, SubDriver, SubError, SubOptions,
-    stats::SubStats,
-}};
+use crate::{
+    ConnectionHook, ConnectionHookErased,
+    sub::{
+        Command, DEFAULT_BUFFER_SIZE, PubMessage, SocketState, SubDriver, SubError, SubOptions,
+        stats::SubStats,
+    },
+};
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
 pub struct SubSocket<T: Transport<A>, A: Address> {
