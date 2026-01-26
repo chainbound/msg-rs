@@ -181,8 +181,7 @@ where
 
                         let conn = Framed::new(result.stream, reqrep::Codec::new());
 
-                        let span =
-                            tracing::info_span!(parent: this.span.clone(), "peer", addr = ?result.addr);
+                        let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?result.addr);
 
                         let linger_timer = this.options.write_buffer_linger.map(|duration| {
                             let mut timer = tokio::time::interval(duration);

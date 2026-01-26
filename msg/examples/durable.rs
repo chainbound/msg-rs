@@ -10,7 +10,11 @@ use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, error, info, info_span, instrument, warn};
 
-use msg::{RepSocket, ReqOptions, ReqSocket, hooks::token::{ClientHook, ServerHook}, tcp::Tcp};
+use msg::{
+    RepSocket, ReqOptions, ReqSocket,
+    hooks::token::{ClientHook, ServerHook},
+    tcp::Tcp,
+};
 
 #[instrument(name = "RepSocket")]
 async fn start_rep() {
@@ -53,8 +57,11 @@ async fn main() {
 
     // Initialize the request socket (client side) with a transport
     // and a connection hook for authentication.
-    let mut req = ReqSocket::with_options(Tcp::default(), ReqOptions::default().with_timeout(Duration::from_secs(4)))
-        .with_connection_hook(ClientHook::new(Bytes::from("client1")));
+    let mut req = ReqSocket::with_options(
+        Tcp::default(),
+        ReqOptions::default().with_timeout(Duration::from_secs(4)),
+    )
+    .with_connection_hook(ClientHook::new(Bytes::from("client1")));
 
     let (tx, rx) = oneshot::channel();
 

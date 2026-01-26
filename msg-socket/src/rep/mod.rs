@@ -199,7 +199,11 @@ mod tests {
     use rand::Rng;
     use tracing::{debug, info};
 
-    use crate::{ReqOptions, req::ReqSocket, hooks::token::{ClientHook, ServerHook}};
+    use crate::{
+        ReqOptions,
+        hooks::token::{ClientHook, ServerHook},
+        req::ReqSocket,
+    };
 
     use super::*;
 

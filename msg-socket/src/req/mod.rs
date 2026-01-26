@@ -1,4 +1,7 @@
-use std::{sync::Arc, sync::atomic::AtomicUsize, time::Duration};
+use std::{
+    sync::{Arc, atomic::AtomicUsize},
+    time::Duration,
+};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
