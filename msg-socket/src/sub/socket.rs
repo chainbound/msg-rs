@@ -17,10 +17,10 @@ use tokio::{
 use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
-use crate::sub::{
+use crate::{ConnectionHook, ConnectionHookErased, sub::{
     Command, DEFAULT_BUFFER_SIZE, PubMessage, SocketState, SubDriver, SubError, SubOptions,
     stats::SubStats,
-};
+}};
 
 /// A subscriber socket. This socket implements [`Stream`] and yields incoming [`PubMessage`]s.
 pub struct SubSocket<T: Transport<A>, A: Address> {
@@ -35,13 +35,15 @@ pub struct SubSocket<T: Transport<A>, A: Address> {
     driver: Option<SubDriver<T, A>>,
     /// Socket state. This is shared with the socket frontend. Contains the unified stats.
     state: Arc<SocketState<A>>,
+    /// Optional connection hook.
+    hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// Marker for the transport type.
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T> SubSocket<T, SocketAddr>
 where
-    T: Transport<SocketAddr>,
+    T: Transport<SocketAddr> + Send + Sync + Unpin + 'static,
 {
     /// Connects to the given endpoint asynchronously.
     pub async fn connect(&mut self, endpoint: impl ToSocketAddrs) -> Result<(), SubError> {
@@ -90,7 +92,7 @@ where
 
 impl<T> SubSocket<T, PathBuf>
 where
-    T: Transport<PathBuf>,
+    T: Transport<PathBuf> + Send + Sync + Unpin + 'static,
 {
     /// Connects to the given path asynchronously.
     pub async fn connect_path(&mut self, path: impl Into<PathBuf>) -> Result<(), SubError> {
@@ -130,7 +132,7 @@ where
 
         let options = Arc::new(options);
 
-        let state = Arc::new(SocketState::default()); // SocketState uses default
+        let state = Arc::new(SocketState::default());
 
         let mut publishers = FxHashMap::default();
         publishers.reserve(32);
@@ -144,6 +146,7 @@ where
             publishers,
             subscribed_topics: HashSet::with_capacity(32),
             state: Arc::clone(&state),
+            hook: None,
         };
 
         Self {
@@ -152,8 +155,29 @@ where
             driver: Some(driver),
             options,
             state,
+            hook: None,
             _marker: std::marker::PhantomData,
         }
+    }
+
+    /// Sets the connection hook for this socket.
+    ///
+    /// The hook is called after connecting to each publisher, before the connection
+    /// is used for pub/sub communication.
+    pub fn with_connection_hook<H>(mut self, hook: H) -> Self
+    where
+        H: ConnectionHook<T::Io>,
+    {
+        let hook_arc: Arc<dyn ConnectionHookErased<T::Io>> = Arc::new(hook);
+
+        // Take the transport from the existing driver and rebuild with the hook
+        if let Some(mut driver) = self.driver.take() {
+            driver.hook = Some(hook_arc.clone());
+            self.driver = Some(driver);
+        }
+
+        self.hook = Some(hook_arc);
+        self
     }
 
     /// Asynchronously connects to the endpoint.

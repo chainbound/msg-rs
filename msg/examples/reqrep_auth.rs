@@ -1,33 +1,23 @@
+//! Request-Reply with token-based authentication example.
+//!
+//! This example demonstrates using the built-in token authentication hooks.
+//! For custom authentication logic, implement the `ConnectionHook` trait directly.
+
 use bytes::Bytes;
-use msg_socket::ReqOptions;
 use tokio_stream::StreamExt;
 
-use msg::{Authenticator, RepSocket, ReqSocket, tcp::Tcp};
-
-#[derive(Default)]
-struct Auth;
-
-impl Authenticator for Auth {
-    fn authenticate(&self, id: &Bytes) -> bool {
-        println!("Auth request from: {id:?}");
-        // Custom authentication logic
-        true
-    }
-}
+use msg::{RepSocket, ReqSocket, hooks::token::{ClientHook, ServerHook}, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
-    // Initialize the reply socket (server side) with a transport
-    // and an authenticator.
-    let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
+    // Initialize the reply socket (server side) with a token validation hook.
+    // The ServerHook accepts all tokens in this example; use a custom validator for real apps.
+    let mut rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
     rep.bind("0.0.0.0:4444").await.unwrap();
 
-    // Initialize the request socket (client side) with a transport
-    // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default().with_auth_token(Bytes::from("REQ")),
-    );
+    // Initialize the request socket (client side) with a token hook
+    let mut req =
+        ReqSocket::new(Tcp::default()).with_connection_hook(ClientHook::new(Bytes::from("REQ")));
 
     req.connect("0.0.0.0:4444").await.unwrap();
 

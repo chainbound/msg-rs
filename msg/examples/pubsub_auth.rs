@@ -1,48 +1,32 @@
-use bytes::Bytes;
-use futures::StreamExt;
-use msg_socket::SubOptions;
+//! Pub-Sub with token-based authentication example.
+//!
+//! This example demonstrates using connection hooks for authentication in pub/sub patterns.
+
 use std::time::Duration;
+
+use bytes::Bytes;
 use tokio::time::timeout;
+use tokio_stream::StreamExt;
 use tracing::{Instrument, info, info_span, warn};
 
-use msg::{Authenticator, PubSocket, SubSocket, tcp::Tcp};
-
-#[derive(Default)]
-struct Auth;
-
-impl Authenticator for Auth {
-    fn authenticate(&self, id: &Bytes) -> bool {
-        info!("Auth request from: {:?}", id);
-        if id.as_ref() == b"client1" {
-            info!("Client authenticated: {:?}", id);
-            true
-        } else {
-            warn!("Unknown client: {:?}", id);
-            false
-        }
-    }
-}
+use msg::{PubSocket, SubSocket, hooks::token::{ClientHook, ServerHook}, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
-    // Configure the publisher socket with options
+
+    // Configure the publisher socket with a hook that accepts both clients
     let mut pub_socket = PubSocket::new(Tcp::default())
-        // Enable the authenticator
-        .with_auth(Auth);
+        .with_connection_hook(ServerHook::new(|token| {
+            token.as_ref() == b"client1" || token.as_ref() == b"client2"
+        }));
 
-    // Configure the subscribers with options
-    let mut sub1 = SubSocket::with_options(
-        Tcp::default(),
-        // Set the authentication token
-        SubOptions::default().with_auth_token(Bytes::from("client1")),
-    );
+    // Configure the subscribers with different tokens
+    let mut sub1 =
+        SubSocket::new(Tcp::default()).with_connection_hook(ClientHook::new(Bytes::from("client1")));
 
-    let mut sub2 = SubSocket::with_options(
-        Tcp::default(),
-        // Set the authentication token
-        SubOptions::default().with_auth_token(Bytes::from("client2")),
-    );
+    let mut sub2 =
+        SubSocket::new(Tcp::default()).with_connection_hook(ClientHook::new(Bytes::from("client2")));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();

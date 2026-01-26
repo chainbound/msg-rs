@@ -25,14 +25,13 @@ use msg_wire::{
 /// The default high water mark for the socket.
 const DEFAULT_HWM: usize = 1024;
 
+/// Errors that can occur when using a publisher socket.
 #[derive(Debug, Error)]
 pub enum PubError {
     #[error("IO error: {0:?}")]
     Io(#[from] io::Error),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] msg_wire::reqrep::Error),
-    #[error("Authentication error: {0}")]
-    Auth(String),
     #[error("Socket closed")]
     SocketClosed,
     #[error("Topic already exists")]
@@ -223,18 +222,9 @@ mod tests {
     use msg_wire::compression::GzipCompressor;
     use tracing::info;
 
-    use crate::{Authenticator, SubOptions, SubSocket};
+    use crate::{SubOptions, SubSocket, hooks::token::{ClientHook, ServerHook}};
 
     use super::*;
-
-    struct Auth;
-
-    impl Authenticator for Auth {
-        fn authenticate(&self, id: &Bytes) -> bool {
-            info!("Auth request from: {:?}", id);
-            true
-        }
-    }
 
     #[tokio::test]
     async fn pubsub_simple() {
@@ -263,12 +253,10 @@ mod tests {
     async fn pubsub_auth_tcp() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Tcp::default()).with_auth(Auth);
+        let mut pub_socket = PubSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
 
-        let mut sub_socket = SubSocket::with_options(
-            Tcp::default(),
-            SubOptions::default().with_auth_token(Bytes::from("client1")),
-        );
+        let mut sub_socket = SubSocket::new(Tcp::default())
+            .with_connection_hook(ClientHook::new(Bytes::from("client1")));
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();
@@ -289,12 +277,10 @@ mod tests {
     async fn pubsub_auth_quic() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let mut pub_socket = PubSocket::new(Quic::default()).with_auth(Auth);
+        let mut pub_socket = PubSocket::new(Quic::default()).with_connection_hook(ServerHook::accept_all());
 
-        let mut sub_socket = SubSocket::with_options(
-            Quic::default(),
-            SubOptions::default().with_auth_token(Bytes::from("client1")),
-        );
+        let mut sub_socket = SubSocket::new(Quic::default())
+            .with_connection_hook(ClientHook::new(Bytes::from("client1")));
 
         pub_socket.bind("0.0.0.0:0").await.unwrap();
         let addr = pub_socket.local_addr().unwrap();

@@ -21,11 +21,10 @@ use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{AuthResult, Authenticator, RepOptions, Request, rep::SocketState};
+use crate::{ConnectionHookErased, HookError, HookResult, RepOptions, Request, rep::SocketState};
 
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{
-    auth,
     compression::{Compressor, try_decompress_payload},
     reqrep,
 };
@@ -107,15 +106,15 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     pub(crate) peer_states: StreamMap<A, StreamNotifyClose<PeerState<T::Io, A>>>,
     /// Sender to the socket front-end. Used to notify the socket of incoming requests.
     pub(crate) to_socket: mpsc::Sender<Request<A>>,
-    /// Optional connection authenticator.
-    pub(crate) auth: Option<Arc<dyn Authenticator>>,
+    /// Optional connection hook.
+    pub(crate) hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// Optional message compressor. This is shared with the socket to keep
     /// the API consistent with other socket types (e.g. `PubSocket`)
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(crate) conn_tasks: FuturesUnordered<WithSpan<T::Accept>>,
-    /// A joinset of authentication tasks.
-    pub(crate) auth_tasks: JoinSet<WithSpan<Result<AuthResult<T::Io, A>, RepError>>>,
+    /// A joinset of hook tasks.
+    pub(crate) hook_tasks: JoinSet<WithSpan<Result<HookResult<T::Io, A>, HookError>>>,
     /// A receiver of [`Transport::Control`]s changes.
     pub(crate) control_rx: mpsc::Receiver<T::Control>,
 
@@ -173,17 +172,17 @@ where
                 continue;
             }
 
-            // Drive authentication tasks, when authentication succeeds we register the peer as
+            // Drive hook tasks, when the hook succeeds we register the peer as
             // connected
-            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx).enter() {
-                match auth.inner {
-                    Ok(auth) => {
-                        // Run custom authenticator
-                        info!(id = ?auth.id, "passed");
+            if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx).enter() {
+                match hook_result.inner {
+                    Ok(result) => {
+                        info!(addr = ?result.addr, "connection hook passed");
 
-                        let conn = Framed::new(auth.stream, reqrep::Codec::new());
+                        let conn = Framed::new(result.stream, reqrep::Codec::new());
 
-                        let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?auth.addr);
+                        let span =
+                            tracing::info_span!(parent: this.span.clone(), "peer", addr = ?result.addr);
 
                         let linger_timer = this.options.write_buffer_linger.map(|duration| {
                             let mut timer = tokio::time::interval(duration);
@@ -192,14 +191,14 @@ where
                         });
 
                         this.peer_states.insert(
-                            auth.addr.clone(),
+                            result.addr.clone(),
                             StreamNotifyClose::new(PeerState {
                                 span,
                                 pending_requests: FuturesUnordered::new(),
                                 conn,
                                 linger_timer,
                                 write_buffer_size: this.options.write_buffer_size,
-                                addr: auth.addr,
+                                addr: result.addr,
                                 pending_egress: None,
                                 max_pending_responses: this.options.max_pending_responses,
                                 state: Arc::clone(&this.state),
@@ -208,7 +207,7 @@ where
                         );
                     }
                     Err(e) => {
-                        debug!(?e, "failed to authenticate peer");
+                        debug!(?e, "connection hook failed");
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -294,8 +293,8 @@ where
             timer
         });
 
-        let Some(ref auth) = self.auth else {
-            // Create peer without authenticating
+        let Some(ref hook) = self.hook else {
+            // Create peer without any connection hooks
             self.peer_states.insert(
                 addr.clone(),
                 StreamNotifyClose::new(PeerState {
@@ -315,42 +314,16 @@ where
             return Ok(());
         };
 
-        // start the authentication process
-        let authenticator = Arc::clone(auth);
-        let span = tracing::info_span!("auth", ?addr);
+        // Start the connection hook
+        let hook = Arc::clone(hook);
+        let span = tracing::info_span!("hook", ?addr);
 
         let fut = async move {
-            let mut conn = Framed::new(io, auth::Codec::new_server());
-
-            // Wait for the response
-            let token = conn
-                .next()
-                .await
-                .ok_or(RepError::SocketClosed)?
-                .map_err(|e| RepError::Auth(e.to_string()))?;
-
-            debug!(?token, "auth received");
-
-            let auth::Message::Auth(id) = token else {
-                conn.send(auth::Message::Reject).await?;
-                conn.close().await?;
-                return Err(RepError::Auth("invalid auth message".to_string()));
-            };
-
-            // If authentication fails, send a reject message and close the connection
-            if !authenticator.authenticate(&id) {
-                conn.send(auth::Message::Reject).await?;
-                conn.close().await?;
-                return Err(RepError::Auth("authentication failed".to_string()));
-            }
-
-            // Send ack
-            conn.send(auth::Message::Ack).await?;
-
-            Ok(AuthResult { id, addr, stream: conn.into_inner() })
+            let stream = hook.on_connection(io).await?;
+            Ok(HookResult { addr, stream })
         };
 
-        self.auth_tasks.spawn(fut.with_span(span));
+        self.hook_tasks.spawn(fut.with_span(span));
 
         Ok(())
     }

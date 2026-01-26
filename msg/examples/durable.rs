@@ -1,30 +1,24 @@
+//! Durable request-reply example demonstrating connection resilience.
+//!
+//! This example shows how the ReqSocket continues to try connecting in the background
+//! and handles reconnections gracefully. It also demonstrates request timeouts.
+
 use std::time::Duration;
 
 use bytes::Bytes;
 use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
-
-use msg::{Authenticator, RepSocket, ReqOptions, ReqSocket, tcp::Tcp};
 use tracing::{Instrument, error, info, info_span, instrument, warn};
 
-#[derive(Default)]
-struct Auth;
-
-impl Authenticator for Auth {
-    fn authenticate(&self, id: &Bytes) -> bool {
-        info!("Auth request from: {:?}, authentication passed.", id);
-        // Custom authentication logic
-        true
-    }
-}
+use msg::{RepSocket, ReqOptions, ReqSocket, hooks::token::{ClientHook, ServerHook}, tcp::Tcp};
 
 #[instrument(name = "RepSocket")]
 async fn start_rep() {
     // Initialize the reply socket (server side) with a transport
-    // and an authenticator.
-    let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
+    // and a connection hook for authentication.
+    let mut rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
     while rep.bind("0.0.0.0:4444").await.is_err() {
-        rep = RepSocket::new(Tcp::default()).with_auth(Auth);
+        rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
         warn!("Failed to bind rep socket, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -58,13 +52,9 @@ async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
     // Initialize the request socket (client side) with a transport
-    // and an identifier. This will implicitly turn on client authentication.
-    let mut req = ReqSocket::with_options(
-        Tcp::default(),
-        ReqOptions::default()
-            .with_timeout(Duration::from_secs(4))
-            .with_auth_token(Bytes::from("client1")),
-    );
+    // and a connection hook for authentication.
+    let mut req = ReqSocket::with_options(Tcp::default(), ReqOptions::default().with_timeout(Duration::from_secs(4)))
+        .with_connection_hook(ClientHook::new(Bytes::from("client1")));
 
     let (tx, rx) = oneshot::channel();
 

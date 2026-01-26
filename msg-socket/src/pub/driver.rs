@@ -1,11 +1,10 @@
 use std::{
-    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use futures::{Future, SinkExt, StreamExt, stream::FuturesUnordered};
+use futures::{Future, StreamExt, stream::FuturesUnordered};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
@@ -13,12 +12,12 @@ use tracing::{debug, error, info, warn};
 use super::{
     PubError, PubMessage, PubOptions, SocketState, session::SubscriberSession, trie::PrefixTrie,
 };
-use crate::{AuthResult, Authenticator};
+use crate::{ConnectionHookErased, HookError, HookResult};
 use msg_transport::{Address, PeerAddress, Transport};
-use msg_wire::{auth, pubsub};
+use msg_wire::pubsub;
 
 /// The driver for the publisher socket. This is responsible for accepting incoming connections,
-/// authenticating them, and spawning new [`SubscriberSession`]s for each connection.
+/// running connection hooks, and spawning new [`SubscriberSession`]s for each connection.
 pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// Session ID counter.
     pub(super) id_counter: u32,
@@ -28,12 +27,12 @@ pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     pub(super) options: Arc<PubOptions>,
     /// The publisher socket state, shared with the socket front-end.
     pub(crate) state: Arc<SocketState>,
-    /// Optional connection authenticator.
-    pub(super) auth: Option<Arc<dyn Authenticator>>,
+    /// Optional connection hook.
+    pub(super) hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
-    /// A joinset of authentication tasks.
-    pub(super) auth_tasks: JoinSet<Result<AuthResult<T::Io, A>, PubError>>,
+    /// A joinset of hook tasks.
+    pub(super) hook_tasks: JoinSet<Result<HookResult<T::Io, A>, HookError>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by
     /// [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
@@ -50,15 +49,14 @@ where
         let this = self.get_mut();
 
         loop {
-            // First, poll the joinset of authentication tasks. If a new connection has been handled
+            // First, poll the joinset of hook tasks. If a new connection has been handled
             // we spawn a new session for it.
-            if let Poll::Ready(Some(Ok(auth))) = this.auth_tasks.poll_join_next(cx) {
-                match auth {
-                    Ok(auth) => {
-                        // Run custom authenticator
-                        debug!("Authentication passed for {:?} ({:?})", auth.id, auth.addr);
+            if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx) {
+                match hook_result {
+                    Ok(result) => {
+                        debug!("Connection hook passed for {:?}", result.addr);
 
-                        let framed = Framed::new(auth.stream, pubsub::Codec::new());
+                        let framed = Framed::new(result.stream, pubsub::Codec::new());
 
                         let session = SubscriberSession {
                             seq: 0,
@@ -80,7 +78,7 @@ where
                         this.id_counter = this.id_counter.wrapping_add(1);
                     }
                     Err(e) => {
-                        error!(err = ?e, "Error authenticating client");
+                        error!(err = ?e, "Error in connection hook");
                         this.state.stats.specific.decrement_active_clients();
                     }
                 }
@@ -89,7 +87,7 @@ where
             }
 
             // Then poll the incoming connection tasks. If a new connection has been accepted, spawn
-            // a new authentication task for it.
+            // a new hook task for it (or directly spawn a session if no hook is configured).
             if let Poll::Ready(Some(incoming)) = this.conn_tasks.poll_next_unpin(cx) {
                 match incoming {
                     Ok(io) => {
@@ -120,7 +118,7 @@ where
                     }
                 }
 
-                // Increment the active clients counter. If the authentication fails,
+                // Increment the active clients counter. If the hook fails,
                 // this counter will be decremented.
                 this.state.stats.specific.increment_active_clients();
 
@@ -141,48 +139,18 @@ where
 {
     /// Handles an incoming connection. If this returns an error, the active connections counter
     /// should be decremented.
-    fn on_incoming(&mut self, io: T::Io) -> Result<(), io::Error> {
+    fn on_incoming(&mut self, io: T::Io) -> Result<(), std::io::Error> {
         let addr = io.peer_addr()?;
 
         info!("New connection from {:?}", addr);
 
-        // If authentication is enabled, start the authentication process
-        if let Some(ref auth) = self.auth {
-            let authenticator = Arc::clone(auth);
-            debug!("New connection from {:?}, authenticating", addr);
-            self.auth_tasks.spawn(async move {
-                let mut conn = Framed::new(io, auth::Codec::new_server());
-
-                debug!("Waiting for auth");
-                // Wait for the response
-                let auth = conn
-                    .next()
-                    .await
-                    .ok_or(PubError::SocketClosed)?
-                    .map_err(|e| PubError::Auth(e.to_string()))?;
-
-                debug!("Auth received: {:?}", auth);
-
-                let auth::Message::Auth(id) = auth else {
-                    conn.send(auth::Message::Reject).await?;
-                    conn.flush().await?;
-                    conn.close().await?;
-                    return Err(PubError::Auth("Invalid auth message".to_string()));
-                };
-
-                // If authentication fails, send a reject message and close the connection
-                if !authenticator.authenticate(&id) {
-                    conn.send(auth::Message::Reject).await?;
-                    conn.flush().await?;
-                    conn.close().await?;
-                    return Err(PubError::Auth("Authentication failed".to_string()));
-                }
-
-                // Send ack
-                conn.send(auth::Message::Ack).await?;
-                conn.flush().await?;
-
-                Ok(AuthResult { id, addr, stream: conn.into_inner() })
+        // If a connection hook is configured, run it
+        if let Some(ref hook) = self.hook {
+            let hook = Arc::clone(hook);
+            debug!("New connection from {:?}, running hook", addr);
+            self.hook_tasks.spawn(async move {
+                let stream = hook.on_connection(io).await?;
+                Ok(HookResult { addr, stream })
             });
         } else {
             let framed = Framed::new(io, pubsub::Codec::new());

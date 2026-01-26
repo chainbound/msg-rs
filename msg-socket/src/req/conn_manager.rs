@@ -1,23 +1,21 @@
 use std::{
-    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::Bytes;
-use futures::{Future, FutureExt, SinkExt, StreamExt};
+use futures::{Future, FutureExt, StreamExt};
 use msg_common::span::{EnterSpan as _, WithSpan};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use crate::{ConnOptions, ConnectionState, ExponentialBackoff};
+use crate::{ConnOptions, ConnectionHookErased, ConnectionState, ExponentialBackoff, HookError};
 
 use msg_transport::{Address, MeteredIo, Transport};
-use msg_wire::{auth, reqrep};
+use msg_wire::reqrep;
 
 /// A connection task that connects to a server and returns the underlying IO object.
-type ConnTask<Io, Err> = Pin<Box<dyn Future<Output = Result<Io, Err>> + Send>>;
+type ConnTask<Io> = Pin<Box<dyn Future<Output = Result<Io, HookError>> + Send>>;
 
 /// A connection from the transport to a server.
 ///
@@ -38,8 +36,8 @@ pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
     /// Options for the connection manager.
     options: ConnOptions,
     /// The connection task which handles the connection to the server.
-    conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
-    /// The transport controller, wrapped in a [`ConnectionState`] for backoff.
+    conn_task: Option<WithSpan<ConnTask<T::Io>>>,
+    /// The connection controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     conn_ctl: ConnCtl<T::Io, T::Stats, A>,
     /// The transport for this socket.
@@ -48,39 +46,11 @@ pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
     addr: A,
     /// Transport stats for metering IO.
     transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
+    /// Optional connection hook.
+    hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
 
     /// A span to use for connection-related logging.
     span: tracing::Span,
-}
-
-/// Perform the authentication handshake with the server.
-#[tracing::instrument(skip_all, "auth", fields(token = ?token))]
-async fn authentication_handshake<T, A>(mut io: T::Io, token: Bytes) -> Result<T::Io, T::Error>
-where
-    T: Transport<A>,
-    A: Address,
-{
-    let mut conn = Framed::new(&mut io, auth::Codec::new_client());
-
-    conn.send(auth::Message::Auth(token)).await?;
-    tracing::debug!("sent auth, waiting ack from server");
-
-    // Wait for the response
-    let Some(res) = conn.next().await else {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed").into());
-    };
-
-    match res {
-        Ok(auth::Message::Ack) => {
-            tracing::debug!("received ack");
-            Ok(io)
-        }
-        Ok(msg) => {
-            tracing::error!(?msg, "unexpected ack result");
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, "rejected").into())
-        }
-        Err(e) => Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-    }
 }
 
 impl<T, A> ConnManager<T, A>
@@ -94,25 +64,26 @@ where
         addr: A,
         conn_ctl: ConnCtl<T::Io, T::Stats, A>,
         transport_stats: Arc<arc_swap::ArcSwap<T::Stats>>,
+        hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
         span: tracing::Span,
     ) -> Self {
-        Self { options, conn_task: None, conn_ctl, transport, addr, transport_stats, span }
+        Self { options, conn_task: None, conn_ctl, transport, addr, transport_stats, hook, span }
     }
 
-    /// Start the connection task to the server, handling authentication if necessary.
+    /// Start the connection task to the server, handling the hook if configured.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
     fn try_connect(&mut self) {
         let connect = self.transport.connect(self.addr.clone());
-        let token = self.options.auth_token.clone();
+        let hook = self.hook.clone();
 
         let task = async move {
-            let io = connect.await?;
+            let io = connect.await.map_err(|e| HookError::message(e.to_string()))?;
 
-            let Some(token) = token else {
+            let Some(hook) = hook else {
                 return Ok(io);
             };
 
-            authentication_handshake::<T, A>(io, token).await
+            hook.on_connection(io).await
         }
         .in_current_span();
 

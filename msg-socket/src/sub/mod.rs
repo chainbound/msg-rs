@@ -21,12 +21,11 @@ use msg_wire::pubsub;
 
 use crate::{DEFAULT_BUFFER_SIZE, DEFAULT_QUEUE_SIZE, stats::SocketStats};
 
+/// Errors that can occur when using a subscriber socket.
 #[derive(Debug, Error)]
 pub enum SubError {
     #[error("IO error: {0:?}")]
     Io(#[from] std::io::Error),
-    #[error("Authentication error: {0}")]
-    Auth(String),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] pubsub::Error),
     #[error("Socket closed")]
@@ -55,8 +54,6 @@ enum Command<A: Address> {
 
 #[derive(Debug, Clone)]
 pub struct SubOptions {
-    /// Optional authentication token.
-    auth_token: Option<Bytes>,
     /// The maximum amount of incoming messages that will be buffered before being dropped due to
     /// a slow consumer.
     ingress_queue_size: usize,
@@ -69,13 +66,6 @@ pub struct SubOptions {
 }
 
 impl SubOptions {
-    /// Sets the authentication token for this socket. This will activate the authentication layer
-    /// and send the token to the publisher.
-    pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
-        self.auth_token = Some(auth_token);
-        self
-    }
-
     /// Sets the ingress queue size. This is the maximum amount of incoming messages that will be
     /// buffered. If the consumer cannot keep up with the incoming messages, messages will start
     /// being dropped.
@@ -111,8 +101,7 @@ impl SubOptions {
 impl Default for SubOptions {
     fn default() -> Self {
         Self {
-            auth_token: None,
-            ingress_queue_size: DEFAULT_QUEUE_SIZE,
+            ingress_buffer_size: DEFAULT_QUEUE_SIZE,
             read_buffer_size: 8192,
             initial_backoff: Duration::from_millis(100),
             retry_attempts: Some(24),
