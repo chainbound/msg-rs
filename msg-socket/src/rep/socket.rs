@@ -16,7 +16,7 @@ use tokio_stream::StreamMap;
 use tracing::{debug, warn};
 
 use crate::{
-    Authenticator, DEFAULT_QUEUE_SIZE, RepOptions, Request,
+    ConnectionHook, ConnectionHookErased, DEFAULT_QUEUE_SIZE, RepOptions, Request,
     rep::{RepError, SocketState, driver::RepDriver},
 };
 
@@ -36,8 +36,8 @@ pub struct RepSocket<T: Transport<A>, A: Address> {
     /// The transport used by this socket. This value is temporary and will be moved
     /// to the driver task once the socket is bound.
     transport: Option<T>,
-    /// Optional connection authenticator.
-    auth: Option<Arc<dyn Authenticator>>,
+    /// Optional connection hook.
+    hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// The local address this socket is bound to.
     local_addr: Option<A>,
     /// Optional message compressor.
@@ -89,22 +89,28 @@ where
             transport: Some(transport),
             options: Arc::new(options),
             state: Arc::new(SocketState::default()),
-            auth: None,
+            hook: None,
             compressor: None,
             control_tx: None,
             _driver_task: None,
         }
     }
 
-    /// Sets the connection authenticator for this socket.
-    pub fn with_auth<O: Authenticator>(mut self, authenticator: O) -> Self {
-        self.auth = Some(Arc::new(authenticator));
-        self
-    }
-
     /// Sets the message compressor for this socket.
     pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
         self.compressor = Some(Arc::new(compressor));
+        self
+    }
+
+    /// Sets the connection hook for this socket.
+    ///
+    /// The hook is called when a new connection is accepted, before the connection
+    /// is used for request/reply communication.
+    pub fn with_connection_hook<H>(mut self, hook: H) -> Self
+    where
+        H: ConnectionHook<T::Io>,
+    {
+        self.hook = Some(Arc::new(hook));
         self
     }
 
@@ -141,8 +147,8 @@ where
             state: Arc::clone(&self.state),
             peer_states: StreamMap::with_capacity(self.options.max_clients.unwrap_or(64)),
             to_socket,
-            auth: self.auth.take(),
-            auth_tasks: JoinSet::new(),
+            hook: self.hook.take(),
+            hook_tasks: JoinSet::new(),
             compressor: self.compressor.take(),
             conn_tasks: FuturesUnordered::new(),
             control_rx,
@@ -185,7 +191,11 @@ where
     }
 }
 
-impl<T: Transport<A>, A: Address> Stream for RepSocket<T, A> {
+impl<T, A> Stream for RepSocket<T, A>
+where
+    T: Transport<A>,
+    A: Address,
+{
     type Item = Request<A>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

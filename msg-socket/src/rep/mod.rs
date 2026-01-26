@@ -22,8 +22,6 @@ pub enum RepError {
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] msg_wire::reqrep::Error),
-    #[error("Authentication error: {0}")]
-    Auth(String),
     #[error("Socket closed")]
     SocketClosed,
     #[error("Could not connect to any valid endpoints")]
@@ -197,10 +195,11 @@ mod tests {
     use futures::StreamExt;
     use msg_transport::tcp::Tcp;
     use msg_wire::compression::{GzipCompressor, SnappyCompressor};
+
     use rand::Rng;
     use tracing::{debug, info};
 
-    use crate::{Authenticator, ReqOptions, req::ReqSocket};
+    use crate::{ReqOptions, req::ReqSocket, hooks::token::{ClientHook, ServerHook}};
 
     use super::*;
 
@@ -281,24 +280,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn reqrep_auth() {
-        struct Auth;
-
-        impl Authenticator for Auth {
-            fn authenticate(&self, _id: &Bytes) -> bool {
-                info!("{:?}", _id);
-                true
-            }
-        }
-
         let _ = tracing_subscriber::fmt::try_init();
-        let mut rep = RepSocket::new(Tcp::default()).with_auth(Auth);
+        let mut rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
         rep.bind(localhost()).await.unwrap();
 
-        // Initialize socket with a client ID. This will implicitly enable authentication.
-        let mut req = ReqSocket::with_options(
-            Tcp::default(),
-            ReqOptions::default().with_auth_token(Bytes::from("REQ")),
-        );
+        // Initialize socket with a client ID via connection hook.
+        let mut req = ReqSocket::new(Tcp::default())
+            .with_connection_hook(ClientHook::new(Bytes::from("REQ")));
 
         req.connect(rep.local_addr().unwrap()).await.unwrap();
 

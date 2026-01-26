@@ -10,12 +10,14 @@
 #![doc(issue_tracker_base_url = "https://github.com/chainbound/msg-rs/issues/")]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-use bytes::Bytes;
-use tokio::io::{AsyncRead, AsyncWrite};
-
-use msg_transport::Address;
 
 pub mod stats;
+
+pub mod hooks;
+pub use hooks::{ConnectionHook, HookError};
+
+// Re-export type-erased hook and HookResult for internal use
+pub(crate) use hooks::{ConnectionHookErased, HookResult};
 
 #[path = "pub/mod.rs"]
 mod pubs;
@@ -54,18 +56,6 @@ impl RequestId {
     pub fn increment(&mut self) {
         self.0 = self.0.wrapping_add(1);
     }
-}
-
-/// An interface for authenticating clients, given their ID.
-pub trait Authenticator: Send + Sync + Unpin + 'static {
-    fn authenticate(&self, id: &Bytes) -> bool;
-}
-
-/// The result of an authentication attempt.
-pub(crate) struct AuthResult<S: AsyncRead + AsyncWrite, A: Address> {
-    id: Bytes,
-    addr: A,
-    stream: S,
 }
 
 /// The performance profile to tune socket options for.

@@ -1,12 +1,11 @@
 use std::{
     collections::HashSet,
-    io,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use futures::{Future, SinkExt, StreamExt};
+use futures::{Future, StreamExt};
 use rustc_hash::FxHashMap;
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_util::codec::Framed;
@@ -17,11 +16,11 @@ use super::{
     session::{PublisherSession, SessionCommand},
     stream::{PublisherStream, TopicMessage},
 };
-use crate::{ConnectionState, ExponentialBackoff};
+use crate::{ConnectionHookErased, ConnectionState, ExponentialBackoff, HookError};
 
 use msg_common::{Channel, JoinMap, channel};
 use msg_transport::{Address, Transport};
-use msg_wire::{auth, compression::try_decompress_payload, pubsub};
+use msg_wire::{compression::try_decompress_payload, pubsub};
 
 /// Publisher channel type, used to send messages to the publisher session
 /// and receive messages to forward to the socket frontend.
@@ -36,14 +35,16 @@ pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     pub(super) from_socket: mpsc::Receiver<Command<A>>,
     /// Messages to the socket.
     pub(super) to_socket: mpsc::Sender<PubMessage<A>>,
-    /// A joinset of authentication tasks.
-    pub(super) connection_tasks: JoinMap<A, Result<T::Io, T::Error>>,
+    /// A joinset of connection tasks.
+    pub(super) connection_tasks: JoinMap<A, Result<T::Io, HookError>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All publisher sessions for this subscriber socket, keyed by address.
     pub(super) publishers: FxHashMap<A, ConnectionState<PubChannel, ExponentialBackoff, A>>,
     /// Socket state. This is shared with the backend task. Contains the unified stats struct.
     pub(super) state: Arc<SocketState<A>>,
+    /// Optional connection hook.
+    pub(super) hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
 }
 
 impl<T, A> Future for SubDriver<T, A>
@@ -234,64 +235,27 @@ where
 
     fn connect(&mut self, addr: A) {
         let connect = self.transport.connect(addr.clone());
-        let token = self.options.auth_token.clone();
+        let hook = self.hook.clone();
 
         self.connection_tasks.spawn(addr.clone(), async move {
             let io = match connect.await {
                 Ok(io) => io,
                 Err(e) => {
-                    return (addr, Err(e));
+                    return (addr, Err(HookError::message(e.to_string())));
                 }
             };
 
-            if let Some(token) = token {
-                let mut conn = Framed::new(io, auth::Codec::new_client());
-
-                debug!("Sending auth message: {:?}", token);
-                // Send the authentication message
-                if let Err(e) = conn.send(auth::Message::Auth(token)).await {
-                    return (addr, Err(e.into()));
-                }
-
-                if let Err(e) = conn.flush().await {
-                    return (addr, Err(e.into()));
-                }
-
-                debug!("Waiting for ACK from server...");
-
-                // Wait for the response
-                let ack = match conn.next().await {
-                    Some(Ok(ack)) => ack,
-                    Some(Err(e)) => {
-                        return (
-                            addr,
-                            Err(io::Error::new(io::ErrorKind::PermissionDenied, e).into()),
-                        );
-                    }
-                    None => {
-                        return (
-                            addr,
-                            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Connection closed")
-                                .into()),
-                        );
-                    }
-                };
-
-                if matches!(ack, auth::Message::Ack) {
-                    (addr, Ok(conn.into_inner()))
-                } else {
-                    (
-                        addr,
-                        Err(io::Error::new(
-                            io::ErrorKind::PermissionDenied,
-                            "Publisher denied connection",
-                        )
-                        .into()),
-                    )
+            // Run the connection hook if configured
+            let io = if let Some(hook) = hook {
+                match hook.on_connection(io).await {
+                    Ok(io) => io,
+                    Err(e) => return (addr, Err(e)),
                 }
             } else {
-                (addr, Ok(io))
-            }
+                io
+            };
+
+            (addr, Ok(io))
         });
     }
 

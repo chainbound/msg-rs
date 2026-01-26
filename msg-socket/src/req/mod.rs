@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, atomic::AtomicUsize},
-    time::Duration,
-};
+use std::{sync::Arc, sync::atomic::AtomicUsize, time::Duration};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
@@ -34,8 +31,6 @@ pub enum ReqError {
     Io(#[from] std::io::Error),
     #[error("Wire protocol error: {0:?}")]
     Wire(#[from] reqrep::Error),
-    #[error("Authentication error: {0}")]
-    Auth(String),
     #[error("Socket closed")]
     SocketClosed,
     #[error("Request timed out")]
@@ -70,8 +65,6 @@ impl SendCommand {
 /// Options for the connection manager.
 #[derive(Debug, Clone)]
 pub struct ConnOptions {
-    /// Optional authentication token.
-    pub auth_token: Option<Bytes>,
     /// The backoff duration for the underlying transport on reconnections.
     pub backoff_duration: Duration,
     /// The maximum number of retry attempts. If `None`, the connection will retry indefinitely.
@@ -81,7 +74,6 @@ pub struct ConnOptions {
 impl Default for ConnOptions {
     fn default() -> Self {
         Self {
-            auth_token: None,
             // These values give a good default for most use cases.
             //
             // * formula: w_i = w_0 * 2^i
@@ -159,12 +151,6 @@ impl ReqOptions {
 }
 
 impl ReqOptions {
-    /// Sets the authentication token for the socket.
-    pub fn with_auth_token(mut self, auth_token: Bytes) -> Self {
-        self.conn.auth_token = Some(auth_token);
-        self
-    }
-
     /// Sets the timeout for the socket.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;

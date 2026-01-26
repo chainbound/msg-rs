@@ -10,7 +10,7 @@ use tokio::{
 use tracing::{debug, trace, warn};
 
 use super::{PubError, PubMessage, PubOptions, SocketState, driver::PubDriver, stats::PubStats};
-use crate::Authenticator;
+use crate::{ConnectionHook, ConnectionHookErased};
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;
@@ -35,8 +35,8 @@ pub struct PubSocket<T: Transport<A>, A: Address> {
     /// The broadcast channel to all active
     /// [`SubscriberSession`](super::session::SubscriberSession)s.
     to_sessions_bcast: Option<broadcast::Sender<PubMessage>>,
-    /// Optional connection authenticator.
-    auth: Option<Arc<dyn Authenticator>>,
+    /// Optional connection hook.
+    hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// Optional message compressor.
     // NOTE: for now we're using dynamic dispatch, since using generics here
     // complicates the API a lot. We can always change this later for perf reasons.
@@ -90,20 +90,26 @@ where
             options: Arc::new(options),
             transport: Some(transport),
             state: Arc::new(SocketState::default()),
-            auth: None,
+            hook: None,
             compressor: None,
         }
-    }
-
-    /// Sets the connection authenticator for this socket.
-    pub fn with_auth<O: Authenticator>(mut self, authenticator: O) -> Self {
-        self.auth = Some(Arc::new(authenticator));
-        self
     }
 
     /// Sets the message compressor for this socket.
     pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
         self.compressor = Some(Arc::new(compressor));
+        self
+    }
+
+    /// Sets the connection hook for this socket.
+    ///
+    /// The hook is called when a new connection is accepted, before the connection
+    /// is used for pub/sub communication.
+    pub fn with_connection_hook<H>(mut self, hook: H) -> Self
+    where
+        H: ConnectionHook<T::Io>,
+    {
+        self.hook = Some(Arc::new(hook));
         self
     }
 
@@ -137,8 +143,8 @@ where
             transport,
             options: Arc::clone(&self.options),
             state: Arc::clone(&self.state),
-            auth: self.auth.take(),
-            auth_tasks: JoinSet::new(),
+            hook: self.hook.take(),
+            hook_tasks: JoinSet::new(),
             conn_tasks: FuturesUnordered::new(),
             from_socket_bcast,
         };

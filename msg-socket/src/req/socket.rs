@@ -1,9 +1,4 @@
-use std::{
-    marker::PhantomData,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::{Arc, atomic::Ordering},
-};
+use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use arc_swap::Guard;
 use bytes::Bytes;
@@ -20,7 +15,8 @@ use msg_wire::{compression::Compressor, reqrep};
 
 use super::{ReqError, ReqOptions};
 use crate::{
-    ConnectionState, DRIVER_ID, ExponentialBackoff, ReqMessage, SendCommand,
+    ConnectionHook, ConnectionHookErased, ConnectionState, DRIVER_ID, ExponentialBackoff,
+    ReqMessage, SendCommand,
     req::{
         SocketState,
         conn_manager::{ConnCtl, ConnManager},
@@ -29,6 +25,7 @@ use crate::{
     },
     stats::SocketStats,
 };
+use std::sync::atomic::Ordering;
 
 /// The request socket.
 pub struct ReqSocket<T: Transport<A>, A: Address> {
@@ -40,6 +37,8 @@ pub struct ReqSocket<T: Transport<A>, A: Address> {
     options: Arc<ReqOptions>,
     /// Socket state. This is shared with the backend task.
     state: SocketState<T::Stats>,
+    /// Optional connection hook.
+    hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// Optional message compressor. This is shared with the backend task.
     // NOTE: for now we're using dynamic dispatch, since using generics here
     // complicates the API a lot. We can always change this later for perf reasons.
@@ -101,6 +100,7 @@ where
             transport: Some(transport),
             options: Arc::new(options),
             state: SocketState::default(),
+            hook: None,
             compressor: None,
             _marker: PhantomData,
         }
@@ -109,6 +109,18 @@ where
     /// Sets the message compressor for this socket.
     pub fn with_compressor<C: Compressor + 'static>(mut self, compressor: C) -> Self {
         self.compressor = Some(Arc::new(compressor));
+        self
+    }
+
+    /// Sets the connection hook for this socket.
+    ///
+    /// The hook is called after connecting to the server, before the connection
+    /// is used for request/reply communication.
+    pub fn with_connection_hook<H>(mut self, hook: H) -> Self
+    where
+        H: ConnectionHook<T::Io>,
+    {
+        self.hook = Some(Arc::new(hook));
         self
     }
 
@@ -195,6 +207,7 @@ where
             endpoint,
             conn_ctl,
             Arc::clone(&self.state.transport_stats),
+            self.hook.take(),
             span.clone(),
         );
 
