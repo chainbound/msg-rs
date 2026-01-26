@@ -26,7 +26,6 @@ pprof.workspace = true
 openssl.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
-tokio-util.workspace = true
 
 # Add jemalloc for extra perf on Linux systems.
 [target.'cfg(all(not(windows), not(target_env = "msvc")))'.dev-dependencies]
