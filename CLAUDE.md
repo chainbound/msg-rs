@@ -43,14 +43,14 @@ cargo flamegraph --bin example_name
 
 ### Core Crate Structure
 - **`msg/`** - Main user-facing crate (facade pattern, re-exports everything)
-- **`msg-socket/`** - Socket patterns (Req/Rep, Pub/Sub, with statistics and authentication)
+- **`msg-socket/`** - Socket patterns (Req/Rep, Pub/Sub, with statistics and connection hooks)
 - **`msg-transport/`** - Transport layer (TCP, QUIC, IPC with pluggable trait design)
 - **`msg-wire/`** - Wire protocol (authentication, compression: gzip/lz4/snappy/zstd)
 - **`msg-common/`** - Shared utilities (channels, task management, time utils)
 - **`msg-sim/`** - Network simulation on Linux, powered by rtnetlink.
 
 ### Key Design Patterns
-- **Trait-based extensibility** - Transport, Authenticator traits for pluggability
+- **Trait-based extensibility** - Transport, ConnectionHook traits for pluggability
 - **Async-first** - Built on Tokio, stream-based message handling
 - **Statistics collection** - Built-in latency/throughput/drop metrics in sockets
 - **Connection resilience** - Automatic reconnection with configurable backoff
@@ -92,9 +92,9 @@ cargo flamegraph --bin example_name
 
 ## Important Implementation Notes
 
-### Authentication System
-- Implement `Authenticator` trait for custom auth logic
-- Built-in support in wire protocol, examples available
+### Connection Hooks
+- Implement `ConnectionHook` trait for custom authentication, handshakes, or protocol negotiation
+- Built-in token-based auth via `hooks::token::ServerHook` and `hooks::token::ClientHook`
 
 ### Statistics Collection  
 - All socket types collect latency, throughput, and packet drop metrics
