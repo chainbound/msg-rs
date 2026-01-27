@@ -90,8 +90,8 @@ pub(crate) type ErasedHookResult<T> = HookResult<T, Box<dyn StdError + Send + Sy
 
 /// Connection hook executed during connection establishment.
 ///
-/// For server sockets (Rep, Pub): called when a connection is accepted.
-/// For client sockets (Req, Sub): called after connecting.
+/// For server sockets: called when a connection is accepted.
+/// For client sockets: called after connecting.
 ///
 /// The connection hook receives the raw IO stream and has full control over the handshake protocol.
 pub trait ConnectionHook<Io>: Send + Sync + 'static
