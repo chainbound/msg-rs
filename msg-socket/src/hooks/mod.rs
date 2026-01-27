@@ -16,7 +16,7 @@
 //!
 //! ```no_run
 //! use msg_socket::hooks::{ConnectionHook, Error, HookResult};
-//! use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
+//! use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 //!
 //! struct MyAuth;
 //!
@@ -143,7 +143,9 @@ where
         Box::pin(async move {
             ConnectionHook::on_connection(&*self, io).await.map_err(|e| match e {
                 Error::Io(io_err) => Error::Io(io_err),
-                Error::Hook(hook_err) => Error::Hook(Box::new(hook_err) as Box<dyn StdError + Send + Sync>),
+                Error::Hook(hook_err) => {
+                    Error::Hook(Box::new(hook_err) as Box<dyn StdError + Send + Sync>)
+                }
             })
         })
     }

@@ -6,10 +6,13 @@ use std::{
 };
 
 use futures::{Future, StreamExt};
-use rustc_hash::FxHashMap;
-use tokio::{sync::mpsc::{self, error::TrySendError}, task::JoinSet};
-use tokio_util::codec::Framed;
 use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+use rustc_hash::FxHashMap;
+use tokio::{
+    sync::mpsc::{self, error::TrySendError},
+    task::JoinSet,
+};
+use tokio_util::codec::Framed;
 use tracing::{debug, error, info, warn};
 
 use super::{
