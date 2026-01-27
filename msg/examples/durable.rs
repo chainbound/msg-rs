@@ -10,19 +10,17 @@ use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, error, info, info_span, instrument, warn};
 
-use msg::{
-    RepSocket, ReqOptions, ReqSocket,
-    hooks::token::{ClientHook, ServerHook},
-    tcp::Tcp,
-};
+use msg::{RepSocket, ReqOptions, ReqSocket, hooks, tcp::Tcp};
 
 #[instrument(name = "RepSocket")]
 async fn start_rep() {
     // Initialize the reply socket (server side) with a transport
     // and a connection hook for authentication.
-    let mut rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
+    let mut rep =
+        RepSocket::new(Tcp::default()).with_connection_hook(hooks::token::ServerHook::accept_all());
     while rep.bind("0.0.0.0:4444").await.is_err() {
-        rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::accept_all());
+        rep = RepSocket::new(Tcp::default())
+            .with_connection_hook(hooks::token::ServerHook::accept_all());
         warn!("Failed to bind rep socket, retrying...");
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
@@ -61,7 +59,7 @@ async fn main() {
         Tcp::default(),
         ReqOptions::default().with_timeout(Duration::from_secs(4)),
     )
-    .with_connection_hook(ClientHook::new(Bytes::from("client1")));
+    .with_connection_hook(hooks::token::ClientHook::new(Bytes::from("client1")));
 
     let (tx, rx) = oneshot::channel();
 

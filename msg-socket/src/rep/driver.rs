@@ -21,7 +21,7 @@ use tokio_stream::{StreamMap, StreamNotifyClose};
 use tokio_util::codec::Framed;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{ConnectionHookErased, HookError, HookResult, RepOptions, Request, rep::SocketState};
+use crate::{ConnectionHookErased, RepOptions, Request, hooks, rep::SocketState};
 
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::{
@@ -113,8 +113,8 @@ pub(crate) struct RepDriver<T: Transport<A>, A: Address> {
     pub(crate) compressor: Option<Arc<dyn Compressor>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(crate) conn_tasks: FuturesUnordered<WithSpan<T::Accept>>,
-    /// A joinset of hook tasks.
-    pub(crate) hook_tasks: JoinSet<WithSpan<Result<HookResult<T::Io, A>, HookError>>>,
+    /// A joinset of connection hook tasks.
+    pub(crate) hook_tasks: JoinSet<WithSpan<hooks::ErasedHookResult<(T::Io, A)>>>,
     /// A receiver of [`Transport::Control`]s changes.
     pub(crate) control_rx: mpsc::Receiver<T::Control>,
 
@@ -176,12 +176,12 @@ where
             // connected
             if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx).enter() {
                 match hook_result.inner {
-                    Ok(result) => {
-                        info!(addr = ?result.addr, "connection hook passed");
+                    Ok((stream, addr)) => {
+                        info!(?addr, "connection hook passed");
 
-                        let conn = Framed::new(result.stream, reqrep::Codec::new());
+                        let conn = Framed::new(stream, reqrep::Codec::new());
 
-                        let span = tracing::info_span!(parent: this.span.clone(), "peer", addr = ?result.addr);
+                        let span = tracing::info_span!(parent: this.span.clone(), "peer", ?addr);
 
                         let linger_timer = this.options.write_buffer_linger.map(|duration| {
                             let mut timer = tokio::time::interval(duration);
@@ -190,14 +190,14 @@ where
                         });
 
                         this.peer_states.insert(
-                            result.addr.clone(),
+                            addr.clone(),
                             StreamNotifyClose::new(PeerState {
                                 span,
                                 pending_requests: FuturesUnordered::new(),
                                 conn,
                                 linger_timer,
                                 write_buffer_size: this.options.write_buffer_size,
-                                addr: result.addr,
+                                addr,
                                 pending_egress: None,
                                 max_pending_responses: this.options.max_pending_responses,
                                 state: Arc::clone(&this.state),
@@ -315,11 +315,11 @@ where
 
         // Start the connection hook
         let hook = Arc::clone(hook);
-        let span = tracing::info_span!("hook", ?addr);
+        let span = tracing::info_span!("connection_hook", ?addr);
 
         let fut = async move {
             let stream = hook.on_connection(io).await?;
-            Ok(HookResult { addr, stream })
+            Ok((stream, addr))
         };
 
         self.hook_tasks.spawn(fut.with_span(span));

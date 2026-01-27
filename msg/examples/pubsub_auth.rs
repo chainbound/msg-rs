@@ -9,28 +9,24 @@ use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, info, info_span, warn};
 
-use msg::{
-    PubSocket, SubSocket,
-    hooks::token::{ClientHook, ServerHook},
-    tcp::Tcp,
-};
+use msg::{PubSocket, SubSocket, hooks, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    // Configure the publisher socket with a hook that accepts both clients
+    // Configure the publisher socket with a connection hook that accepts both clients
     let mut pub_socket =
-        PubSocket::new(Tcp::default()).with_connection_hook(ServerHook::new(|token| {
-            token.as_ref() == b"client1" || token.as_ref() == b"client2"
-        }));
+        PubSocket::new(Tcp::default()).with_connection_hook(hooks::token::ServerHook::new(
+            |token| token.as_ref() == b"client1" || token.as_ref() == b"client2",
+        ));
 
     // Configure the subscribers with different tokens
     let mut sub1 = SubSocket::new(Tcp::default())
-        .with_connection_hook(ClientHook::new(Bytes::from("client1")));
+        .with_connection_hook(hooks::token::ClientHook::new(Bytes::from("client1")));
 
     let mut sub2 = SubSocket::new(Tcp::default())
-        .with_connection_hook(ClientHook::new(Bytes::from("client2")));
+        .with_connection_hook(hooks::token::ClientHook::new(Bytes::from("client2")));
 
     tracing::info!("Setting up the sockets...");
     pub_socket.bind("127.0.0.1:0").await.unwrap();

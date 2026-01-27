@@ -103,12 +103,17 @@ where
 
     /// Sets the connection hook for this socket.
     ///
-    /// The hook is called when a new connection is accepted, before the connection
+    /// The connection hook is called when a new connection is accepted, before the connection
     /// is used for pub/sub communication.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the socket has already been bound (driver started).
     pub fn with_connection_hook<H>(mut self, hook: H) -> Self
     where
         H: ConnectionHook<T::Io>,
     {
+        assert!(self.transport.is_some(), "cannot set connection hook after socket has been bound");
         self.hook = Some(Arc::new(hook));
         self
     }

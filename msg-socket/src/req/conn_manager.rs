@@ -9,13 +9,34 @@ use msg_common::span::{EnterSpan as _, WithSpan};
 use tokio_util::codec::Framed;
 use tracing::Instrument;
 
-use crate::{ConnOptions, ConnectionHookErased, ConnectionState, ExponentialBackoff, HookError};
+use crate::{ConnOptions, ConnectionHookErased, ConnectionState, ExponentialBackoff, hooks};
 
 use msg_transport::{Address, MeteredIo, Transport};
 use msg_wire::reqrep;
 
+/// Error during connection establishment.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ConnectionError<T: std::error::Error> {
+    /// Transport or I/O error.
+    #[error("transport error: {0}")]
+    Transport(#[source] T),
+    /// Connection hook failed.
+    #[error("connection hook error: {0}")]
+    Hook(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl<T: std::error::Error + From<std::io::Error>> ConnectionError<T> {
+    /// Create a ConnectionError from an erased hook error, converting Io errors to Transport.
+    pub(crate) fn from_erased_hook(err: hooks::Error<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        match err {
+            hooks::Error::Io(io_err) => Self::Transport(T::from(io_err)),
+            hooks::Error::Hook(e) => Self::Hook(e),
+        }
+    }
+}
+
 /// A connection task that connects to a server and returns the underlying IO object.
-type ConnTask<Io> = Pin<Box<dyn Future<Output = Result<Io, HookError>> + Send>>;
+type ConnTask<Io, E> = Pin<Box<dyn Future<Output = Result<Io, ConnectionError<E>>> + Send>>;
 
 /// A connection from the transport to a server.
 ///
@@ -36,7 +57,7 @@ pub(crate) struct ConnManager<T: Transport<A>, A: Address> {
     /// Options for the connection manager.
     options: ConnOptions,
     /// The connection task which handles the connection to the server.
-    conn_task: Option<WithSpan<ConnTask<T::Io>>>,
+    conn_task: Option<WithSpan<ConnTask<T::Io, T::Error>>>,
     /// The connection controller, wrapped in a [`ConnectionState`] for backoff.
     /// The [`Framed`] object can send and receive messages from the socket.
     conn_ctl: ConnCtl<T::Io, T::Stats, A>,
@@ -70,20 +91,20 @@ where
         Self { options, conn_task: None, conn_ctl, transport, addr, transport_stats, hook, span }
     }
 
-    /// Start the connection task to the server, handling the hook if configured.
+    /// Start the connection task to the server, handling the connection hook if configured.
     /// The result will be polled by the driver and re-tried according to the backoff policy.
     fn try_connect(&mut self) {
         let connect = self.transport.connect(self.addr.clone());
         let hook = self.hook.clone();
 
         let task = async move {
-            let io = connect.await.map_err(|e| HookError::message(e.to_string()))?;
+            let io = connect.await.map_err(ConnectionError::Transport)?;
 
             let Some(hook) = hook else {
                 return Ok(io);
             };
 
-            hook.on_connection(io).await
+            hook.on_connection(io).await.map_err(ConnectionError::from_erased_hook)
         }
         .in_current_span();
 
