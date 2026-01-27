@@ -19,84 +19,138 @@
 //! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example multi_region -p msg-sim
 //! ```
 
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::{Duration, Instant},
-};
+#[cfg(not(target_os = "linux"))]
+fn main() {}
 
-use msg_sim::{
-    ip::Subnet,
-    network::{Link, Network, PeerIdExt},
-    tc::impairment::LinkImpairment,
-};
-use tracing_subscriber::EnvFilter;
-
-// Peer IDs (assigned sequentially by add_peer)
-const EU_WEST: usize = 1;
-const US_EAST_1: usize = 2;
-const US_EAST_2: usize = 3;
-const TOKYO: usize = 4;
-
-fn region_name(id: usize) -> &'static str {
-    match id {
-        EU_WEST => "EU-West",
-        US_EAST_1 => "US-East-1",
-        US_EAST_2 => "US-East-2",
-        TOKYO => "Tokyo",
-        _ => "Unknown",
-    }
-}
-
-/// Network impairment profiles based on typical cloud latencies.
-mod profiles {
-    use super::*;
-
-    // US-East-1 <-> US-East-2: Same region, very fast
-    pub fn same_region() -> LinkImpairment {
-        LinkImpairment {
-            latency: 1_000, // 1ms
-            jitter: 500,    // 0.5ms
-            loss: 0.01,     // 0.01%
-            ..Default::default()
-        }
-    }
-
-    // EU <-> US: Transatlantic
-    pub fn eu_to_us() -> LinkImpairment {
-        LinkImpairment {
-            latency: 40_000, // 40ms one-way
-            jitter: 5_000,   // 5ms
-            loss: 0.1,       // 0.1%
-            bandwidth_mbit_s: Some(1000.0),
-            ..Default::default()
-        }
-    }
-
-    // US <-> Tokyo: Transpacific
-    pub fn us_to_tokyo() -> LinkImpairment {
-        LinkImpairment {
-            latency: 80_000, // 80ms one-way
-            jitter: 10_000,  // 10ms
-            loss: 0.2,       // 0.2%
-            bandwidth_mbit_s: Some(500.0),
-            ..Default::default()
-        }
-    }
-
-    // EU <-> Tokyo: Longest route
-    pub fn eu_to_tokyo() -> LinkImpairment {
-        LinkImpairment {
-            latency: 120_000, // 120ms one-way
-            jitter: 15_000,   // 15ms
-            loss: 0.5,        // 0.5%
-            bandwidth_mbit_s: Some(300.0),
-            ..Default::default()
-        }
-    }
-}
-
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::{
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::{Duration, Instant},
+    };
+
+    use msg_sim::{
+        ip::Subnet,
+        network::{Link, Network, PeerIdExt},
+    };
+    use tracing_subscriber::EnvFilter;
+
+    // Peer IDs (assigned sequentially by add_peer)
+    const EU_WEST: usize = 1;
+    const US_EAST_1: usize = 2;
+    const US_EAST_2: usize = 3;
+    const TOKYO: usize = 4;
+
+    fn region_name(id: usize) -> &'static str {
+        match id {
+            EU_WEST => "EU-West",
+            US_EAST_1 => "US-East-1",
+            US_EAST_2 => "US-East-2",
+            TOKYO => "Tokyo",
+            _ => "Unknown",
+        }
+    }
+
+    /// Network impairment profiles based on typical cloud latencies.
+    mod profiles {
+        use msg_sim::tc::impairment::LinkImpairment;
+
+        // US-East-1 <-> US-East-2: Same region, very fast
+        pub fn same_region() -> LinkImpairment {
+            LinkImpairment {
+                latency: 1_000, // 1ms
+                jitter: 500,    // 0.5ms
+                loss: 0.01,     // 0.01%
+                ..Default::default()
+            }
+        }
+
+        // EU <-> US: Transatlantic
+        pub fn eu_to_us() -> LinkImpairment {
+            LinkImpairment {
+                latency: 40_000, // 40ms one-way
+                jitter: 5_000,   // 5ms
+                loss: 0.1,       // 0.1%
+                bandwidth_mbit_s: Some(1000.0),
+                ..Default::default()
+            }
+        }
+
+        // US <-> Tokyo: Transpacific
+        pub fn us_to_tokyo() -> LinkImpairment {
+            LinkImpairment {
+                latency: 80_000, // 80ms one-way
+                jitter: 10_000,  // 10ms
+                loss: 0.2,       // 0.2%
+                bandwidth_mbit_s: Some(500.0),
+                ..Default::default()
+            }
+        }
+
+        // EU <-> Tokyo: Longest route
+        pub fn eu_to_tokyo() -> LinkImpairment {
+            LinkImpairment {
+                latency: 120_000, // 120ms one-way
+                jitter: 15_000,   // 15ms
+                loss: 0.5,        // 0.5%
+                bandwidth_mbit_s: Some(300.0),
+                ..Default::default()
+            }
+        }
+    }
+
+    /// Simple UDP ping between two peers.
+    async fn ping(
+        network: &Network,
+        src: usize,
+        dst: usize,
+        subnet: Subnet,
+    ) -> Result<Duration, String> {
+        let dst_addr = SocketAddr::new(dst.veth_address(subnet), 9999);
+
+        // Start listener
+        let listener = network
+            .run_in_namespace(dst, |_| {
+                Box::pin(async {
+                    let sock = tokio::net::UdpSocket::bind("0.0.0.0:9999").await?;
+                    let mut buf = [0u8; 32];
+                    let (n, addr) = sock.recv_from(&mut buf).await?;
+                    sock.send_to(&buf[..n], addr).await?;
+                    Ok::<_, std::io::Error>(())
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Send ping
+        let rtt = network
+            .run_in_namespace(src, move |_| {
+                Box::pin(async move {
+                    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+                    let start = Instant::now();
+                    sock.send_to(b"ping", dst_addr).await?;
+                    let mut buf = [0u8; 32];
+                    tokio::time::timeout(Duration::from_secs(5), sock.recv(&mut buf))
+                        .await
+                        .map_err(|_| {
+                            std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")
+                        })??;
+                    Ok::<_, std::io::Error>(start.elapsed())
+                })
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+
+        let _ = listener.await;
+        Ok(rtt)
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -191,53 +245,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== Done ===\n");
     Ok(())
-}
-
-/// Simple UDP ping between two peers.
-async fn ping(
-    network: &Network,
-    src: usize,
-    dst: usize,
-    subnet: Subnet,
-) -> Result<Duration, String> {
-    let dst_addr = SocketAddr::new(dst.veth_address(subnet), 9999);
-
-    // Start listener
-    let listener = network
-        .run_in_namespace(dst, |_| {
-            Box::pin(async {
-                let sock = tokio::net::UdpSocket::bind("0.0.0.0:9999").await?;
-                let mut buf = [0u8; 32];
-                let (n, addr) = sock.recv_from(&mut buf).await?;
-                sock.send_to(&buf[..n], addr).await?;
-                Ok::<_, std::io::Error>(())
-            })
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-
-    tokio::time::sleep(Duration::from_millis(10)).await;
-
-    // Send ping
-    let rtt = network
-        .run_in_namespace(src, move |_| {
-            Box::pin(async move {
-                let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
-                let start = Instant::now();
-                sock.send_to(b"ping", dst_addr).await?;
-                let mut buf = [0u8; 32];
-                tokio::time::timeout(Duration::from_secs(5), sock.recv(&mut buf))
-                    .await
-                    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"))??;
-                Ok::<_, std::io::Error>(start.elapsed())
-            })
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-
-    let _ = listener.await;
-    Ok(rtt)
 }

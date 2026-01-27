@@ -100,10 +100,10 @@ jobs:
           cache-on-failure: true
 
       - name: Build all crates
-        run: cargo build --all --all-features
+        run: cargo build --all --all-features --examples
 
       - name: Build release
-        run: cargo build --all --all-features --release
+        run: cargo build --all --all-features --examples --release
 
   cargo-doc:
     runs-on: ubuntu-latest
@@ -123,7 +123,7 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo +nightly doc --all --no-deps --all-features --document-private-items
         env:
           RUSTDOCFLAGS: "-D warnings"
-        
+
   # Find unused dependencies, this will fail if any are found.
   cargo-shear:
     runs-on: ubuntu-latest

@@ -6,24 +6,28 @@
 //! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example tcp_tuning -p msg-sim
 //! ```
 
-use std::net::{IpAddr, Ipv4Addr};
+#[cfg(not(target_os = "linux"))]
+fn main() {}
 
-use msg_sim::{ip::Subnet, network::Network};
-use tracing_subscriber::EnvFilter;
-
-const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
-const TCP_WMEM: &str = "/proc/sys/net/ipv4/tcp_wmem";
-
-fn read_sysctl(path: &str) -> String {
-    std::fs::read_to_string(path).unwrap().trim().to_string()
-}
-
-fn write_sysctl(path: &str, value: &str) {
-    std::fs::write(path, value).unwrap();
-}
-
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use msg_sim::{ip::Subnet, network::Network};
+    use tracing_subscriber::EnvFilter;
+
+    const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
+    const TCP_WMEM: &str = "/proc/sys/net/ipv4/tcp_wmem";
+
+    fn read_sysctl(path: &str) -> String {
+        std::fs::read_to_string(path).unwrap().trim().to_string()
+    }
+
+    fn write_sysctl(path: &str, value: &str) {
+        std::fs::write(path, value).unwrap();
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
