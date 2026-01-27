@@ -18,7 +18,7 @@
 //! // Server side - validates incoming tokens
 //! let rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::new(|token| {
 //!     // Custom validation logic
-//!     token == b"secret"
+//!     **token == *b"secret"
 //! }));
 //!
 //! // Client side - sends token on connect
@@ -78,7 +78,7 @@ pub enum ClientHookError {
 /// let hook = ServerHook::accept_all();
 ///
 /// // Custom validation
-/// let hook = ServerHook::new(|token| token == b"my_secret_token");
+/// let hook = ServerHook::new(|token| **token == *b"my_secret_token");
 /// ```
 pub struct ServerHook<F> {
     validator: F,
