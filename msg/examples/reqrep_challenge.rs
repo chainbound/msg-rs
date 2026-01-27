@@ -9,7 +9,11 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqSocket, hooks::{ConnectionHook, Error, HookResult}, tcp::Tcp};
+use msg::{
+    RepSocket, ReqSocket,
+    hooks::{ConnectionHook, Error, HookResult},
+    tcp::Tcp,
+};
 
 const SECRET: [u8; 32] = *b"this_is_a_32_byte_secret_key!!!!";
 
