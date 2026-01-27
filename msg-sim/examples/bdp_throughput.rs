@@ -10,73 +10,77 @@
 //! sudo HOME=$HOME $(which cargo) run --example bdp_throughput -p msg-sim
 //! ```
 
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Instant,
-};
+#[cfg(not(target_os = "linux"))]
+fn main() {}
 
-use futures::StreamExt;
-use msg_sim::{
-    ip::Subnet,
-    network::{Link, Network, PeerIdExt},
-    tc::impairment::LinkImpairment,
-};
-use msg_socket::{RepSocket, ReqSocket};
-use msg_transport::tcp::Tcp;
-use tracing_subscriber::EnvFilter;
-
-const BANDWIDTH_MBIT: f64 = 10.0;
-const MSG_SIZE: usize = 256 * 1024; // 256 KB per message
-const NUM_MESSAGES: usize = 20; // Send multiple to let cwnd grow
-const LATENCY_MS: u32 = 20; // 20ms one-way = 40ms RTT
-
-const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
-const TCP_WINDOW_SCALING: &str = "/proc/sys/net/ipv4/tcp_window_scaling";
-
-/// Transfer multiple messages and measure throughput
-async fn transfer(network: &Network, sender: usize, receiver: usize, addr: SocketAddr) -> f64 {
-    let server = network
-        .run_in_namespace(receiver, move |_| {
-            Box::pin(async move {
-                let mut rep = RepSocket::new(Tcp::default());
-                rep.bind(addr).await.unwrap();
-                for _ in 0..NUM_MESSAGES {
-                    if let Some(req) = rep.next().await {
-                        req.respond("ok".into()).unwrap();
-                    }
-                }
-            })
-        })
-        .await
-        .unwrap();
-
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let client = network
-        .run_in_namespace(sender, move |_| {
-            Box::pin(async move {
-                let mut req = ReqSocket::new(Tcp::default());
-                req.connect_sync(addr);
-                let payload = vec![0u8; MSG_SIZE];
-                let start = Instant::now();
-                for _ in 0..NUM_MESSAGES {
-                    req.request(payload.clone().into()).await.unwrap();
-                }
-                start.elapsed()
-            })
-        })
-        .await
-        .unwrap();
-
-    let (elapsed, _) = tokio::try_join!(client, server).unwrap();
-    println!("Transfer elapsed: {elapsed:?}");
-
-    let total_bytes = MSG_SIZE * NUM_MESSAGES;
-    (total_bytes as f64 * 8.0) / (elapsed.as_secs_f64() * 1_000_000.0)
-}
-
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    use std::{
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        time::Instant,
+    };
+
+    use futures::StreamExt;
+    use msg_sim::{
+        ip::Subnet,
+        network::{Link, Network, PeerIdExt},
+        tc::impairment::LinkImpairment,
+    };
+    use msg_socket::{RepSocket, ReqSocket};
+    use msg_transport::tcp::Tcp;
+    use tracing_subscriber::EnvFilter;
+
+    const BANDWIDTH_MBIT: f64 = 10.0;
+    const MSG_SIZE: usize = 256 * 1024; // 256 KB per message
+    const NUM_MESSAGES: usize = 20; // Send multiple to let cwnd grow
+    const LATENCY_MS: u32 = 20; // 20ms one-way = 40ms RTT
+
+    const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
+    const TCP_WINDOW_SCALING: &str = "/proc/sys/net/ipv4/tcp_window_scaling";
+
+    /// Transfer multiple messages and measure throughput
+    async fn transfer(network: &Network, sender: usize, receiver: usize, addr: SocketAddr) -> f64 {
+        let server = network
+            .run_in_namespace(receiver, move |_| {
+                Box::pin(async move {
+                    let mut rep = RepSocket::new(Tcp::default());
+                    rep.bind(addr).await.unwrap();
+                    for _ in 0..NUM_MESSAGES {
+                        if let Some(req) = rep.next().await {
+                            req.respond("ok".into()).unwrap();
+                        }
+                    }
+                })
+            })
+            .await
+            .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let client = network
+            .run_in_namespace(sender, move |_| {
+                Box::pin(async move {
+                    let mut req = ReqSocket::new(Tcp::default());
+                    req.connect_sync(addr);
+                    let payload = vec![0u8; MSG_SIZE];
+                    let start = Instant::now();
+                    for _ in 0..NUM_MESSAGES {
+                        req.request(payload.clone().into()).await.unwrap();
+                    }
+                    start.elapsed()
+                })
+            })
+            .await
+            .unwrap();
+
+        let (elapsed, _) = tokio::try_join!(client, server).unwrap();
+        println!("Transfer elapsed: {elapsed:?}");
+
+        let total_bytes = MSG_SIZE * NUM_MESSAGES;
+        (total_bytes as f64 * 8.0) / (elapsed.as_secs_f64() * 1_000_000.0)
+    }
+
     tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).init();
 
     let rtt_ms = LATENCY_MS * 2;

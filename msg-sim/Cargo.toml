@@ -33,6 +33,12 @@ tokio = { version = "1", features = [
   "net",
 ] }
 
+
+[[example]]
+name = "bdp_throughput"
+
 [[example]]
 name = "sim_multi_region"
-path = "examples/sim_multi_region.rs"
+
+[[example]]
+name = "tcp_tuning"
