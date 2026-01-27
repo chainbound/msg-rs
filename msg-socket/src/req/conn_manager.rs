@@ -27,7 +27,9 @@ pub(crate) enum ConnectionError<T: std::error::Error> {
 
 impl<T: std::error::Error + From<std::io::Error>> ConnectionError<T> {
     /// Create a ConnectionError from an erased hook error, converting Io errors to Transport.
-    pub(crate) fn from_erased_hook(err: hooks::Error<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    pub(crate) fn from_erased_hook(
+        err: hooks::Error<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
         match err {
             hooks::Error::Io(io_err) => Self::Transport(T::from(io_err)),
             hooks::Error::Hook(e) => Self::Hook(e),

@@ -8,21 +8,22 @@
 //! # Example
 //!
 //! ```no_run
-//! use msg_socket::{RepSocket, ReqSocket};
-//! use msg_socket::hooks::token::{ServerHook, ClientHook};
-//! use msg_transport::tcp::Tcp;
 //! use bytes::Bytes;
+//! use msg_socket::{
+//!     RepSocket, ReqSocket,
+//!     hooks::token::{ClientHook, ServerHook},
+//! };
+//! use msg_transport::tcp::Tcp;
 //!
 //! // Server side - validates incoming tokens
-//! let rep = RepSocket::new(Tcp::default())
-//!     .with_connection_hook(ServerHook::new(|token| {
-//!         // Custom validation logic
-//!         token == b"secret"
-//!     }));
+//! let rep = RepSocket::new(Tcp::default()).with_connection_hook(ServerHook::new(|token| {
+//!     // Custom validation logic
+//!     token == b"secret"
+//! }));
 //!
 //! // Client side - sends token on connect
-//! let req = ReqSocket::new(Tcp::default())
-//!     .with_connection_hook(ClientHook::new(Bytes::from("secret")));
+//! let req =
+//!     ReqSocket::new(Tcp::default()).with_connection_hook(ClientHook::new(Bytes::from("secret")));
 //! ```
 
 use std::io;
@@ -147,8 +148,8 @@ where
 /// # Example
 ///
 /// ```no_run
-/// use msg_socket::hooks::token::ClientHook;
 /// use bytes::Bytes;
+/// use msg_socket::hooks::token::ClientHook;
 ///
 /// let hook = ClientHook::new(Bytes::from("my_secret_token"));
 /// ```

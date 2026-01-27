@@ -5,9 +5,9 @@ use std::{
 };
 
 use futures::{Future, StreamExt, stream::FuturesUnordered};
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
-use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use tracing::{debug, error, info, warn};
 
 use super::{
