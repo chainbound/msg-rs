@@ -21,6 +21,7 @@ tracing-subscriber = "0.3"
 futures.workspace = true
 tracing.workspace = true
 rand.workspace = true
+thiserror.workspace = true
 criterion.workspace = true
 pprof.workspace = true
 openssl.workspace = true
