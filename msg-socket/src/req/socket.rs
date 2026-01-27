@@ -114,12 +114,17 @@ where
 
     /// Sets the connection hook for this socket.
     ///
-    /// The hook is called after connecting to the server, before the connection
+    /// The connection hook is called after connecting to the server, before the connection
     /// is used for request/reply communication.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the driver has already been started (i.e., after calling `connect`).
     pub fn with_connection_hook<H>(mut self, hook: H) -> Self
     where
         H: ConnectionHook<T::Io>,
     {
+        assert!(self.transport.is_some(), "cannot set connection hook after driver has started");
         self.hook = Some(Arc::new(hook));
         self
     }

@@ -90,11 +90,41 @@ cargo flamegraph --bin example_name
 - **Book** - Comprehensive guide in `book/` directory, deployed to GitHub Pages
 - **Examples** - Rich example set covering all major usage patterns in `msg/examples/`
 
+### Doc Code Blocks
+- Prefer `no_run` over `rust,ignore` in documentation code blocks whenever possible
+- Use `rust,ignore` only when the code cannot compile (e.g., pseudo-code or incomplete examples)
+
 ## Important Implementation Notes
 
 ### Connection Hooks
 - Implement `ConnectionHook` trait for custom authentication, handshakes, or protocol negotiation
 - Built-in token-based auth via `hooks::token::ServerHook` and `hooks::token::ClientHook`
+
+### Tracing Pattern for Async Tasks
+When spawning async tasks that need tracing context, use the `WithSpan` pattern from `msg_common::span`:
+
+```rust
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
+
+// 1. Create a span with context
+let span = tracing::info_span!("connection_hook", ?addr);
+
+// 2. Wrap the future with the span
+let fut = async move { /* ... */ };
+self.tasks.spawn(fut.with_span(span));
+
+// 3. Poll with .enter() to re-enter the span, access result via .inner
+if let Poll::Ready(Some(Ok(result))) = self.tasks.poll_join_next(cx).enter() {
+    match result.inner {
+        Ok(value) => { /* ... */ }
+        Err(e) => { /* ... */ }
+    }
+}
+```
+
+- The `JoinSet` type becomes `JoinSet<WithSpan<T>>` instead of `JoinSet<T>`
+- Logs inside the span don't need to repeat span fields (e.g., no `?addr` needed)
+- Add `#[allow(clippy::type_complexity)]` to structs with complex `WithSpan` types
 
 ### Statistics Collection  
 - All socket types collect latency, throughput, and packet drop metrics

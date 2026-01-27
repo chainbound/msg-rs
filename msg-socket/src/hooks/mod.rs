@@ -1,7 +1,8 @@
-//! Connection hooks for customizing connection setup.
+//! Connection hooks for customizing connection establishment.
 //!
-//! The [`ConnectionHook`] trait provides a way to intercept connections during setup,
-//! enabling custom authentication, handshakes, or protocol negotiations.
+//! Connection hooks are attached when establishing connections and allow custom
+//! authentication, handshakes, or protocol negotiations. The [`ConnectionHook`] trait
+//! is called during connection setup, before the connection is used for messaging.
 //!
 //! # Built-in Hooks
 //!
@@ -13,31 +14,43 @@
 //!
 //! Implement [`ConnectionHook`] for custom authentication or protocol negotiation:
 //!
-//! ```rust,ignore
-//! use msg_socket::ConnectionHook;
-//! use std::io;
+//! ```no_run
+//! use msg_socket::hooks::{ConnectionHook, Error, HookResult};
 //! use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt};
 //!
 //! struct MyAuth;
+//!
+//! #[derive(Debug, thiserror::Error)]
+//! enum MyAuthError {
+//!     #[error("invalid token")]
+//!     InvalidToken,
+//! }
 //!
 //! impl<Io> ConnectionHook<Io> for MyAuth
 //! where
 //!     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 //! {
-//!     async fn on_connection(&self, mut io: Io) -> Result<Io, HookError> {
+//!     type Error = MyAuthError;
+//!
+//!     async fn on_connection(&self, mut io: Io) -> HookResult<Io, Self::Error> {
 //!         let mut buf = [0u8; 32];
 //!         io.read_exact(&mut buf).await?;
 //!         if &buf == b"expected_token_value_32_bytes!!!" {
 //!             io.write_all(b"OK").await?;
 //!             Ok(io)
 //!         } else {
-//!             Err(HookError::custom("invalid token"))
+//!             Err(Error::hook(MyAuthError::InvalidToken))
 //!         }
 //!     }
 //! }
 //! ```
+//!
+//! # Future Extensions
+//!
+//! TODO: Additional hooks may be added for different parts of the connection lifecycle
+//! (e.g., disconnection, reconnection, periodic health checks).
 
-use std::{error::Error as StdError, fmt, future::Future, io, pin::Pin, sync::Arc};
+use std::{error::Error as StdError, future::Future, io, pin::Pin, sync::Arc};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -45,85 +58,69 @@ pub mod token;
 
 /// Error type for connection hooks.
 ///
-/// This enum provides two variants:
-/// - `Io` for standard I/O errors
-/// - `Custom` for hook-specific errors (type-erased)
-#[derive(Debug)]
-pub enum HookError {
+/// Distinguishes between I/O errors and hook-specific errors.
+#[derive(Debug, thiserror::Error)]
+pub enum Error<E> {
     /// An I/O error occurred.
-    Io(io::Error),
-    /// A custom hook-specific error.
-    Custom(Box<dyn StdError + Send + Sync + 'static>),
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    /// A hook-specific error.
+    #[error("Hook error: {0}")]
+    Hook(#[source] E),
 }
 
-impl HookError {
-    /// Creates a custom error from any error type.
-    pub fn custom<E>(error: E) -> Self
-    where
-        E: StdError + Send + Sync + 'static,
-    {
-        Self::Custom(Box::new(error))
-    }
-
-    /// Creates a custom error from a string message.
-    pub fn message(msg: impl Into<String>) -> Self {
-        Self::Io(io::Error::other(msg.into()))
+impl<E> Error<E> {
+    /// Create a hook error from a hook-specific error.
+    pub fn hook(err: E) -> Self {
+        Error::Hook(err)
     }
 }
 
-impl fmt::Display for HookError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io(e) => write!(f, "IO error: {e}"),
-            Self::Custom(e) => write!(f, "Hook error: {e}"),
-        }
-    }
-}
+/// Result type for connection hooks.
+///
+/// This is intentionally named `HookResult` (not `Result`) to make it clear this is not
+/// `std::result::Result`. A `HookResult` can be:
+/// - `Ok(io)` - success, returns the IO stream
+/// - `Err(Error::Io(..))` - an I/O error occurred
+/// - `Err(Error::Hook(..))` - a hook-specific error occurred
+pub type HookResult<T, E> = std::result::Result<T, Error<E>>;
 
-impl StdError for HookError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            Self::Io(e) => Some(e),
-            Self::Custom(e) => Some(e.as_ref()),
-        }
-    }
-}
+/// Type-erased hook result used internally by drivers.
+pub(crate) type ErasedHookResult<T> = HookResult<T, Box<dyn StdError + Send + Sync>>;
 
-impl From<io::Error> for HookError {
-    fn from(error: io::Error) -> Self {
-        Self::Io(error)
-    }
-}
-
-/// Hook executed during connection setup.
+/// Connection hook executed during connection establishment.
 ///
 /// For server sockets (Rep, Pub): called when a connection is accepted.
 /// For client sockets (Req, Sub): called after connecting.
 ///
-/// The hook receives the raw IO stream and has full control over the handshake protocol.
+/// The connection hook receives the raw IO stream and has full control over the handshake protocol.
 pub trait ConnectionHook<Io>: Send + Sync + 'static
 where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
+    /// The hook-specific error type.
+    type Error: StdError + Send + Sync + 'static;
+
     /// Called when a connection is established.
     ///
     /// # Arguments
     /// * `io` - The raw IO stream for this connection
     ///
     /// # Returns
-    /// The IO stream on success (potentially wrapped/transformed), or an error to reject
-    /// the connection.
-    fn on_connection(&self, io: Io) -> impl Future<Output = Result<Io, HookError>> + Send;
+    /// - `Ok(io)` - The IO stream on success (potentially wrapped/transformed)
+    /// - `Err(Error::Io(..))` - An I/O error occurred
+    /// - `Err(Error::Hook(Self::Error))` - A hook-specific error to reject the connection
+    fn on_connection(&self, io: Io) -> impl Future<Output = HookResult<Io, Self::Error>> + Send;
 }
 
 // ============================================================================
-// Type-erased hook for internal use
+// Type-erased connection hook for internal use
 // ============================================================================
 
 /// Type-erased connection hook for internal use.
 ///
-/// This trait allows storing hooks with different concrete types behind a single
-/// `Arc<dyn ConnectionHookErased<Io>>`.
+/// This trait allows storing connection hooks with different concrete types behind a single
+/// `Arc<dyn ConnectionHookErased<Io>>`. The hook error type is erased to `Box<dyn Error>`.
 pub(crate) trait ConnectionHookErased<Io>: Send + Sync + 'static
 where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
@@ -131,7 +128,7 @@ where
     fn on_connection(
         self: Arc<Self>,
         io: Io,
-    ) -> Pin<Box<dyn Future<Output = Result<Io, HookError>> + Send + 'static>>;
+    ) -> Pin<Box<dyn Future<Output = ErasedHookResult<Io>> + Send + 'static>>;
 }
 
 impl<T, Io> ConnectionHookErased<Io> for T
@@ -142,19 +139,12 @@ where
     fn on_connection(
         self: Arc<Self>,
         io: Io,
-    ) -> Pin<Box<dyn Future<Output = Result<Io, HookError>> + Send + 'static>> {
-        Box::pin(async move { ConnectionHook::on_connection(&*self, io).await })
+    ) -> Pin<Box<dyn Future<Output = ErasedHookResult<Io>> + Send + 'static>> {
+        Box::pin(async move {
+            ConnectionHook::on_connection(&*self, io).await.map_err(|e| match e {
+                Error::Io(io_err) => Error::Io(io_err),
+                Error::Hook(hook_err) => Error::Hook(Box::new(hook_err) as Box<dyn StdError + Send + Sync>),
+            })
+        })
     }
-}
-
-// ============================================================================
-// Hook result type for driver tasks
-// ============================================================================
-
-/// The result of running a connection hook.
-///
-/// Contains the processed IO stream and associated address.
-pub(crate) struct HookResult<Io, A> {
-    pub(crate) stream: Io,
-    pub(crate) addr: A,
 }

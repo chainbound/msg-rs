@@ -1,15 +1,16 @@
-//! Token-based authentication hooks.
+//! Token-based authentication connection hooks.
 //!
 //! This module provides ready-to-use connection hooks for simple token-based authentication:
 //!
-//! - [`ServerHook`] - Server-side hook that validates client tokens
-//! - [`ClientHook`] - Client-side hook that sends a token to the server
+//! - [`ServerHook`] - Server-side connection hook that validates client tokens
+//! - [`ClientHook`] - Client-side connection hook that sends a token to the server
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use msg_socket::{RepSocket, ReqSocket, tcp::Tcp};
+//! ```no_run
+//! use msg_socket::{RepSocket, ReqSocket};
 //! use msg_socket::hooks::token::{ServerHook, ClientHook};
+//! use msg_transport::tcp::Tcp;
 //! use bytes::Bytes;
 //!
 //! // Server side - validates incoming tokens
@@ -24,25 +25,52 @@
 //!     .with_connection_hook(ClientHook::new(Bytes::from("secret")));
 //! ```
 
+use std::io;
+
 use bytes::Bytes;
 use futures::SinkExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_stream::StreamExt;
 use tokio_util::codec::Framed;
 
-use crate::hooks::{ConnectionHook, HookError};
+use crate::hooks::{ConnectionHook, Error, HookResult};
 use msg_wire::auth;
 
-/// Server-side authentication hook that validates incoming client tokens.
+/// Error type for server-side token authentication.
+#[derive(Debug, thiserror::Error)]
+pub enum ServerHookError {
+    /// The client's token was rejected by the validator.
+    #[error("authentication rejected")]
+    Rejected,
+    /// The connection was closed before authentication completed.
+    #[error("connection closed")]
+    ConnectionClosed,
+    /// Expected an auth message but received something else.
+    #[error("expected auth message")]
+    ExpectedAuthMessage,
+}
+
+/// Error type for client-side token authentication.
+#[derive(Debug, thiserror::Error)]
+pub enum ClientHookError {
+    /// The server denied the authentication.
+    #[error("authentication denied")]
+    Denied,
+    /// The connection was closed before authentication completed.
+    #[error("connection closed")]
+    ConnectionClosed,
+}
+
+/// Server-side authentication connection hook that validates incoming client tokens.
 ///
-/// When a client connects, this hook:
+/// When a client connects, this connection hook:
 /// 1. Waits for the client to send an auth token
 /// 2. Validates the token using the provided validator function
 /// 3. Sends an ACK on success, or rejects the connection on failure
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use msg_socket::hooks::token::ServerHook;
 ///
 /// // Accept all tokens
@@ -80,24 +108,26 @@ where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     F: Fn(&Bytes) -> bool + Send + Sync + 'static,
 {
-    async fn on_connection(&self, io: Io) -> Result<Io, HookError> {
+    type Error = ServerHookError;
+
+    async fn on_connection(&self, io: Io) -> HookResult<Io, Self::Error> {
         let mut conn = Framed::new(io, auth::Codec::new_server());
 
         // Wait for client authentication message
         let msg = conn
             .next()
             .await
-            .ok_or_else(|| HookError::message("connection closed"))?
-            .map_err(HookError::custom)?;
+            .ok_or(Error::hook(ServerHookError::ConnectionClosed))?
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         let auth::Message::Auth(token) = msg else {
-            return Err(HookError::message("expected auth message"));
+            return Err(Error::hook(ServerHookError::ExpectedAuthMessage));
         };
 
         // Validate the token
         if !(self.validator)(&token) {
             conn.send(auth::Message::Reject).await?;
-            return Err(HookError::message("authentication rejected"));
+            return Err(Error::hook(ServerHookError::Rejected));
         }
 
         // Send acknowledgment
@@ -107,16 +137,16 @@ where
     }
 }
 
-/// Client-side authentication hook that sends a token to the server.
+/// Client-side authentication connection hook that sends a token to the server.
 ///
-/// When connecting to a server, this hook:
+/// When connecting to a server, this connection hook:
 /// 1. Sends the configured token to the server
 /// 2. Waits for the server's ACK response
 /// 3. Returns an error if the server rejects the token
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```no_run
 /// use msg_socket::hooks::token::ClientHook;
 /// use bytes::Bytes;
 ///
@@ -137,7 +167,9 @@ impl<Io> ConnectionHook<Io> for ClientHook
 where
     Io: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    async fn on_connection(&self, io: Io) -> Result<Io, HookError> {
+    type Error = ClientHookError;
+
+    async fn on_connection(&self, io: Io) -> HookResult<Io, Self::Error> {
         let mut conn = Framed::new(io, auth::Codec::new_client());
 
         // Send authentication token
@@ -149,11 +181,11 @@ where
         let ack = conn
             .next()
             .await
-            .ok_or_else(|| HookError::message("connection closed"))?
-            .map_err(HookError::custom)?;
+            .ok_or(Error::hook(ClientHookError::ConnectionClosed))?
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         if !matches!(ack, auth::Message::Ack) {
-            return Err(HookError::message("authentication denied"));
+            return Err(Error::hook(ClientHookError::Denied));
         }
 
         Ok(conn.into_inner())

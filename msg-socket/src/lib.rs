@@ -14,10 +14,10 @@
 pub mod stats;
 
 pub mod hooks;
-pub use hooks::{ConnectionHook, HookError};
+pub use hooks::{ConnectionHook, Error as HookError, HookResult};
 
-// Re-export type-erased hook and HookResult for internal use
-pub(crate) use hooks::{ConnectionHookErased, HookResult};
+// Re-export type-erased connection hook for internal use
+pub(crate) use hooks::ConnectionHookErased;
 
 #[path = "pub/mod.rs"]
 mod pubs;

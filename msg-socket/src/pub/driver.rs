@@ -7,17 +7,19 @@ use std::{
 use futures::{Future, StreamExt, stream::FuturesUnordered};
 use tokio::{sync::broadcast, task::JoinSet};
 use tokio_util::codec::Framed;
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use tracing::{debug, error, info, warn};
 
 use super::{
     PubError, PubMessage, PubOptions, SocketState, session::SubscriberSession, trie::PrefixTrie,
 };
-use crate::{ConnectionHookErased, HookError, HookResult};
+use crate::{ConnectionHookErased, hooks};
 use msg_transport::{Address, PeerAddress, Transport};
 use msg_wire::pubsub;
 
 /// The driver for the publisher socket. This is responsible for accepting incoming connections,
 /// running connection hooks, and spawning new [`SubscriberSession`]s for each connection.
+#[allow(clippy::type_complexity)]
 pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// Session ID counter.
     pub(super) id_counter: u32,
@@ -31,8 +33,8 @@ pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     pub(super) hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
     pub(super) conn_tasks: FuturesUnordered<T::Accept>,
-    /// A joinset of hook tasks.
-    pub(super) hook_tasks: JoinSet<Result<HookResult<T::Io, A>, HookError>>,
+    /// A joinset of connection hook tasks.
+    pub(super) hook_tasks: JoinSet<WithSpan<hooks::ErasedHookResult<(T::Io, A)>>>,
     /// The receiver end of the message broadcast channel. The sender half is stored by
     /// [`PubSocket`](super::PubSocket).
     pub(super) from_socket_bcast: broadcast::Receiver<PubMessage>,
@@ -51,12 +53,12 @@ where
         loop {
             // First, poll the joinset of hook tasks. If a new connection has been handled
             // we spawn a new session for it.
-            if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx) {
-                match hook_result {
-                    Ok(result) => {
-                        debug!("Connection hook passed for {:?}", result.addr);
+            if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx).enter() {
+                match hook_result.inner {
+                    Ok((stream, _addr)) => {
+                        info!("connection hook passed");
 
-                        let framed = Framed::new(result.stream, pubsub::Codec::new());
+                        let framed = Framed::new(stream, pubsub::Codec::new());
 
                         let session = SubscriberSession {
                             seq: 0,
@@ -147,11 +149,14 @@ where
         // If a connection hook is configured, run it
         if let Some(ref hook) = self.hook {
             let hook = Arc::clone(hook);
-            debug!("New connection from {:?}, running hook", addr);
-            self.hook_tasks.spawn(async move {
+            let span = tracing::info_span!("connection_hook", ?addr);
+
+            let fut = async move {
                 let stream = hook.on_connection(io).await?;
-                Ok(HookResult { addr, stream })
-            });
+                Ok((stream, addr))
+            };
+
+            self.hook_tasks.spawn(fut.with_span(span));
         } else {
             let framed = Framed::new(io, pubsub::Codec::new());
 

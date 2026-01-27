@@ -7,8 +7,9 @@ use std::{
 
 use futures::{Future, StreamExt};
 use rustc_hash::FxHashMap;
-use tokio::sync::mpsc::{self, error::TrySendError};
+use tokio::{sync::mpsc::{self, error::TrySendError}, task::JoinSet};
 use tokio_util::codec::Framed;
+use msg_common::span::{EnterSpan as _, SpanExt as _, WithSpan};
 use tracing::{debug, error, info, warn};
 
 use super::{
@@ -16,7 +17,7 @@ use super::{
     session::{PublisherSession, SessionCommand},
     stream::{PublisherStream, TopicMessage},
 };
-use crate::{ConnectionHookErased, ConnectionState, ExponentialBackoff, HookError};
+use crate::{ConnectionHookErased, ConnectionState, ExponentialBackoff, hooks};
 
 use msg_common::{Channel, JoinMap, channel};
 use msg_transport::{Address, Transport};
@@ -26,6 +27,7 @@ use msg_wire::{compression::try_decompress_payload, pubsub};
 /// and receive messages to forward to the socket frontend.
 type PubChannel = Channel<SessionCommand, TopicMessage>;
 
+#[allow(clippy::type_complexity)]
 pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     /// Options shared with the socket.
     pub(super) options: Arc<SubOptions>,
@@ -35,8 +37,10 @@ pub(crate) struct SubDriver<T: Transport<A>, A: Address> {
     pub(super) from_socket: mpsc::Receiver<Command<A>>,
     /// Messages to the socket.
     pub(super) to_socket: mpsc::Sender<PubMessage<A>>,
-    /// A joinset of connection tasks.
-    pub(super) connection_tasks: JoinMap<A, Result<T::Io, HookError>>,
+    /// A joinmap of transport connection tasks.
+    pub(super) conn_tasks: JoinMap<A, Result<T::Io, T::Error>>,
+    /// A joinset of connection hook tasks.
+    pub(super) hook_tasks: JoinSet<WithSpan<hooks::ErasedHookResult<(T::Io, A)>>>,
     /// The set of subscribed topics.
     pub(super) subscribed_topics: HashSet<String>,
     /// All publisher sessions for this subscriber socket, keyed by address.
@@ -74,15 +78,29 @@ where
                 continue;
             }
 
-            // Finally, poll the connection tasks for new connections.
-            if let Poll::Ready(Some(Ok((addr, result)))) = this.connection_tasks.poll_join_next(cx)
-            {
-                match result {
-                    Ok(io) => {
+            // Poll connection hook tasks
+            if let Poll::Ready(Some(Ok(hook_result))) = this.hook_tasks.poll_join_next(cx).enter() {
+                match hook_result.inner {
+                    Ok((io, addr)) => {
+                        info!("connection hook passed");
                         this.on_connection(addr, io);
                     }
                     Err(e) => {
-                        error!(err = ?e, ?addr, "Error connecting to publisher");
+                        error!(err = ?e, "connection hook failed");
+                    }
+                }
+
+                continue;
+            }
+
+            // Poll the transport connection tasks
+            if let Poll::Ready(Some(Ok((addr, result)))) = this.conn_tasks.poll_join_next(cx) {
+                match result {
+                    Ok(io) => {
+                        this.on_transport_connected(addr, io);
+                    }
+                    Err(e) => {
+                        error!(err = ?e, ?addr, "transport connection failed");
                     }
                 }
 
@@ -235,28 +253,32 @@ where
 
     fn connect(&mut self, addr: A) {
         let connect = self.transport.connect(addr.clone());
-        let hook = self.hook.clone();
 
-        self.connection_tasks.spawn(addr.clone(), async move {
-            let io = match connect.await {
-                Ok(io) => io,
-                Err(e) => {
-                    return (addr, Err(HookError::message(e.to_string())));
-                }
-            };
-
-            // Run the connection hook if configured
-            let io = if let Some(hook) = hook {
-                match hook.on_connection(io).await {
-                    Ok(io) => io,
-                    Err(e) => return (addr, Err(e)),
-                }
-            } else {
-                io
-            };
-
-            (addr, Ok(io))
+        self.conn_tasks.spawn(addr.clone(), async move {
+            let io = connect.await;
+            (addr, io)
         });
+    }
+
+    /// Called when a transport connection is established (before hook).
+    ///
+    /// Spawns a task with the configured hook, or a task that returns immediately if no hook
+    /// is configured.
+    fn on_transport_connected(&mut self, addr: A, io: T::Io) {
+        if let Some(ref hook) = self.hook {
+            let hook = Arc::clone(hook);
+            let span = tracing::info_span!("connection_hook", ?addr);
+
+            let fut = async move {
+                let stream = hook.on_connection(io).await?;
+                Ok((stream, addr))
+            };
+
+            self.hook_tasks.spawn(fut.with_span(span));
+        } else {
+            let span = tracing::trace_span!("connection_hook", ?addr, noop_hook = true);
+            self.hook_tasks.spawn(async move { Ok((io, addr)) }.with_span(span));
+        }
     }
 
     fn on_connection(&mut self, addr: A, io: T::Io) {
@@ -363,7 +385,7 @@ where
                             progress = true;
 
                             // Only retry if there are no active connection tasks
-                            if !self.connection_tasks.contains_key(addr) {
+                            if !self.conn_tasks.contains_key(addr) {
                                 debug!(backoff = ?duration, "Retrying connection to {:?}", addr);
                                 to_retry.push(addr.clone());
                             } else {

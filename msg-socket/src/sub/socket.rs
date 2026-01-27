@@ -12,6 +12,7 @@ use rustc_hash::FxHashMap;
 use tokio::{
     net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
+    task::JoinSet,
 };
 
 use msg_common::{IpAddrExt, JoinMap};
@@ -145,9 +146,10 @@ where
             transport,
             from_socket,
             to_socket,
-            connection_tasks: JoinMap::new(),
-            publishers,
+            conn_tasks: JoinMap::new(),
+            hook_tasks: JoinSet::new(),
             subscribed_topics: HashSet::with_capacity(32),
+            publishers,
             state: Arc::clone(&state),
             hook: None,
         };
@@ -165,19 +167,22 @@ where
 
     /// Sets the connection hook for this socket.
     ///
-    /// The hook is called after connecting to each publisher, before the connection
+    /// The connection hook is called after connecting to each publisher, before the connection
     /// is used for pub/sub communication.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the driver has already been started (i.e., after calling `connect`).
     pub fn with_connection_hook<H>(mut self, hook: H) -> Self
     where
         H: ConnectionHook<T::Io>,
     {
         let hook_arc: Arc<dyn ConnectionHookErased<T::Io>> = Arc::new(hook);
 
-        // Take the transport from the existing driver and rebuild with the hook
-        if let Some(mut driver) = self.driver.take() {
-            driver.hook = Some(hook_arc.clone());
-            self.driver = Some(driver);
-        }
+        // The driver must exist (not yet spawned) to set the connection hook
+        let driver =
+            self.driver.as_mut().expect("cannot set connection hook after driver has started");
+        driver.hook = Some(hook_arc.clone());
 
         self.hook = Some(hook_arc);
         self
