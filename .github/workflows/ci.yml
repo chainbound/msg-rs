@@ -21,8 +21,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v6
 
+      # Installs the toolchain specified in rust-toolchain.toml
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -46,8 +47,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v6
 
+      # Installs the toolchain specified in rust-toolchain.toml
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -92,8 +94,9 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v6
 
+      # Installs the toolchain specified in rust-toolchain.toml
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
         with:
