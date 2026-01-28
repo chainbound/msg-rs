@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     use msg_sim::{
         ip::Subnet,
-        network::{Link, Network, PeerIdExt},
+        network::{HubOptions, Link, Network, PeerIdExt, PeerOptions},
     };
     use tracing_subscriber::EnvFilter;
 
@@ -161,13 +161,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create network
     let subnet = Subnet::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 24);
-    let mut network = Network::new(subnet).await?;
+    let mut network = Network::new(subnet, HubOptions::default()).await?;
 
     // Add peers
-    let eu = network.add_peer().await?;
-    let us1 = network.add_peer().await?;
-    let us2 = network.add_peer().await?;
-    let tokyo = network.add_peer().await?;
+    let eu = network.add_peer(PeerOptions::default()).await?;
+    let us1 = network.add_peer(PeerOptions::default()).await?;
+    let us2 = network.add_peer(PeerOptions::default()).await?;
+    let tokyo = network.add_peer(PeerOptions::default()).await?;
 
     println!("Peers:");
     for id in [eu, us1, us2, tokyo] {
