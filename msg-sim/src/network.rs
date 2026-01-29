@@ -216,7 +216,7 @@ impl Peer {
     }
 }
 
-pub(crate) type RuntimeMakerFn = Box<dyn FnOnce() -> tokio::runtime::Runtime + Send>;
+pub(crate) type RuntimeFactory = Box<dyn FnOnce() -> tokio::runtime::Runtime + Send>;
 
 /// Common context provided to all namespaces.
 ///
@@ -230,13 +230,13 @@ pub struct CommonContext {
 }
 
 pub struct HubOptions {
-    make_runtime: RuntimeMakerFn,
+    runtime_factory: RuntimeFactory,
 }
 
 impl Default for HubOptions {
     fn default() -> Self {
         Self {
-            make_runtime: Box::new(|| {
+            runtime_factory: Box::new(|| {
                 tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
@@ -264,13 +264,13 @@ pub struct PeerContext {
 
 /// Options for configuring a peer.
 pub struct PeerOptions {
-    make_runtime: RuntimeMakerFn,
+    runtime_factory: RuntimeFactory,
 }
 
 impl Default for PeerOptions {
     fn default() -> Self {
         Self {
-            make_runtime: Box::new(|| {
+            runtime_factory: Box::new(|| {
                 tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
@@ -283,9 +283,9 @@ impl Default for PeerOptions {
 impl PeerOptions {
     /// Create new peer options with a custom runtime factory.
     pub fn with_runtime(
-        make_runtime: impl FnOnce() -> tokio::runtime::Runtime + Send + 'static,
+        runtime_factory: impl FnOnce() -> tokio::runtime::Runtime + Send + 'static,
     ) -> Self {
-        Self { make_runtime: Box::new(make_runtime) }
+        Self { runtime_factory: Box::new(runtime_factory) }
     }
 }
 
@@ -439,7 +439,7 @@ impl Network {
 
         // Create the hub namespace that will host the bridge.
         let namespace_hub =
-            NetworkNamespace::new(Self::hub_namespace_name(), options.make_runtime, make_ctx)
+            NetworkNamespace::new(Self::hub_namespace_name(), options.runtime_factory, make_ctx)
                 .await?;
         let fd = namespace_hub.fd();
 
@@ -496,7 +496,8 @@ impl Network {
         };
 
         let network_namespace =
-            NetworkNamespace::new(namespace_name.clone(), options.make_runtime, make_ctx).await?;
+            NetworkNamespace::new(namespace_name.clone(), options.runtime_factory, make_ctx)
+                .await?;
 
         // Step 1: Create the veth pair in the host namespace.
         // One end (veth_name) will go to the peer, the other (veth_br_name) to the bridge.

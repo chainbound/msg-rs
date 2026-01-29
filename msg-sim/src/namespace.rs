@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 
 use crate::dynch::{DynCh, DynRequestSender};
 use crate::namespace::helpers::current_netns;
-use crate::network::RuntimeMakerFn;
+use crate::network::RuntimeFactory;
 
 /// Base directory for named network namespaces.
 ///
@@ -231,7 +231,7 @@ impl NetworkNamespaceInner {
     /// `setns(2)`, which is thread-local.
     pub fn spawn<Ctx: 'static>(
         self,
-        make_runtime: RuntimeMakerFn,
+        runtime_factory: RuntimeFactory,
         make_ctx: impl FnOnce() -> Ctx + Send + 'static,
     ) -> (std::thread::JoinHandle<Result<()>>, DynRequestSender<Ctx>) {
         let (tx, mut rx) = DynCh::<Ctx>::channel(8);
@@ -247,7 +247,7 @@ impl NetworkNamespaceInner {
             // Create mount namespace and remount /proc for namespace-specific sysctl access
             helpers::setup_mount_namespace()?;
 
-            let rt = make_runtime();
+            let rt = runtime_factory();
 
             tracing::debug!("started runtime");
             drop(_span);
@@ -288,7 +288,7 @@ pub struct NetworkNamespace<Ctx = ()> {
 impl NetworkNamespace {
     pub async fn new<Ctx: 'static>(
         name: impl Into<String>,
-        make_runtime: RuntimeMakerFn,
+        runtime_factory: RuntimeFactory,
         make_ctx: impl FnOnce() -> Ctx + Send + 'static,
     ) -> Result<NetworkNamespace<Ctx>> {
         let name = name.into();
@@ -299,7 +299,7 @@ impl NetworkNamespace {
         let file = tokio::fs::File::open(path).await?.into_std().await;
 
         let inner = NetworkNamespaceInner { name, file };
-        let (_receiver_task, task_sender) = inner.try_clone()?.spawn(make_runtime, make_ctx);
+        let (_receiver_task, task_sender) = inner.try_clone()?.spawn(runtime_factory, make_ctx);
 
         Ok(NetworkNamespace::<Ctx> { inner, task_sender, _receiver_task })
     }
@@ -353,17 +353,18 @@ mod tests {
     const TCP_SLOW_START_AFTER_IDLE: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
 
     fn default_runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("to create runtime")
+        tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("to create runtime")
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_namespace_isolates_proc() {
         // Create two namespaces
-        let ns1 = NetworkNamespace::new("test-ns-mount-1", Box::new(default_runtime), || ()).await.unwrap();
-        let ns2 = NetworkNamespace::new("test-ns-mount-2", Box::new(default_runtime), || ()).await.unwrap();
+        let ns1 = NetworkNamespace::new("test-ns-mount-1", Box::new(default_runtime), || ())
+            .await
+            .unwrap();
+        let ns2 = NetworkNamespace::new("test-ns-mount-2", Box::new(default_runtime), || ())
+            .await
+            .unwrap();
 
         // Verify /proc is mounted in ns1 by checking /proc/self/ns/net exists
         let proc_mounted_ns1: bool = ns1
@@ -395,8 +396,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn sysctl_values_are_namespace_specific() {
         // Create two namespaces
-        let ns1 = NetworkNamespace::new("test-ns-sysctl-1", Box::new(default_runtime), || ()).await.unwrap();
-        let ns2 = NetworkNamespace::new("test-ns-sysctl-2", Box::new(default_runtime), || ()).await.unwrap();
+        let ns1 = NetworkNamespace::new("test-ns-sysctl-1", Box::new(default_runtime), || ())
+            .await
+            .unwrap();
+        let ns2 = NetworkNamespace::new("test-ns-sysctl-2", Box::new(default_runtime), || ())
+            .await
+            .unwrap();
 
         // Set different values in each namespace
         let write_result_ns1: std::io::Result<()> = ns1
@@ -462,7 +467,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn namespace_has_isolated_network_identity() {
         // Create a namespace
-        let ns = NetworkNamespace::new("test-ns-identity", Box::new(default_runtime), || ()).await.unwrap();
+        let ns = NetworkNamespace::new("test-ns-identity", Box::new(default_runtime), || ())
+            .await
+            .unwrap();
 
         // Get the network namespace inode from inside the namespace
         let ns_inode_inside: u64 = ns
