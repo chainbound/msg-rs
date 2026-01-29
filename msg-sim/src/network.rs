@@ -218,6 +218,12 @@ impl Peer {
 
 pub(crate) type RuntimeFactory = Box<dyn FnOnce() -> tokio::runtime::Runtime + Send>;
 
+pub fn default_runtime_factory() -> RuntimeFactory {
+    Box::new(|| {
+        tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("to create runtime")
+    })
+}
+
 /// Common context provided to all namespaces.
 ///
 /// This context gives access to rtnetlink for network configuration.
@@ -227,23 +233,6 @@ pub struct CommonContext {
     handle: rtnetlink::Handle,
     /// Background task processing rtnetlink responses.
     _connection_task: tokio::task::JoinHandle<()>,
-}
-
-pub struct HubOptions {
-    runtime_factory: RuntimeFactory,
-}
-
-impl Default for HubOptions {
-    fn default() -> Self {
-        Self {
-            runtime_factory: Box::new(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("to create runtime")
-            }),
-        }
-    }
 }
 
 /// Context provided to tasks running within a peer's namespace.
@@ -353,7 +342,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// async fn main() {
 ///     // Create a network with a /16 subnet
 ///     let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
-///     let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+///     let mut network = Network::new(subnet).await.unwrap();
 ///
 ///     // Add some peers
 ///     let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -421,7 +410,7 @@ impl Network {
     /// 2. A bridge device (`msg-sim-br0`) in the hub namespace
     ///
     /// Peers can then be added with [`add_peer`](Self::add_peer).
-    pub async fn new(subnet: Subnet, options: HubOptions) -> Result<Self> {
+    pub async fn new(subnet: Subnet) -> Result<Self> {
         // Create rtnetlink connection in the host namespace.
         // This is used for creating veth pairs and moving devices.
         let (connection, handle, _) = rtnetlink::new_connection()?;
@@ -439,7 +428,7 @@ impl Network {
 
         // Create the hub namespace that will host the bridge.
         let namespace_hub =
-            NetworkNamespace::new(Self::hub_namespace_name(), options.runtime_factory, make_ctx)
+            NetworkNamespace::new(Self::hub_namespace_name(), default_runtime_factory(), make_ctx)
                 .await?;
         let fd = namespace_hub.fd();
 
@@ -626,7 +615,7 @@ impl Network {
     /// #[tokio::main]
     /// async fn main() {
     ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
-    ///     let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+    ///     let mut network = Network::new(subnet).await.unwrap();
     ///
     ///     let peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
     ///     network
@@ -698,7 +687,7 @@ impl Network {
     /// #[tokio::main]
     /// async fn main() {
     ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
-    ///     let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+    ///     let mut network = Network::new(subnet).await.unwrap();
     ///
     ///     let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
     ///     let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -824,7 +813,7 @@ mod msg_sim_network {
 
     use crate::{
         ip::Subnet,
-        network::{HubOptions, Link, Network, PeerIdExt, PeerOptions},
+        network::{Link, Network, PeerIdExt, PeerOptions},
         tc::impairment::LinkImpairment,
     };
 
@@ -833,7 +822,7 @@ mod msg_sim_network {
     async fn create_network_works() {
         let _ = tracing_subscriber::fmt::try_init();
         let subnet = Subnet::new(Ipv4Addr::new(11, 0, 0, 0).into(), 16);
-        let _network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let _network = Network::new(subnet).await.unwrap();
 
         let path = format!("/run/netns/{}", Network::hub_namespace_name());
         let exists = std::fs::exists(path.clone()).unwrap();
@@ -846,7 +835,7 @@ mod msg_sim_network {
     async fn add_peer_works() {
         let _ = tracing_subscriber::fmt::try_init();
         let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let _peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
         let _peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -858,7 +847,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(13, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -904,7 +893,7 @@ mod msg_sim_network {
     async fn apply_impairment_works() {
         let _ = tracing_subscriber::fmt::try_init();
         let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -926,7 +915,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(14, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -986,7 +975,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(15, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1094,7 +1083,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(16, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1168,7 +1157,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(17, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1239,7 +1228,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(18, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1270,7 +1259,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(19, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1295,7 +1284,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(20, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1329,7 +1318,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(24, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
@@ -1360,7 +1349,7 @@ mod msg_sim_network {
         let _ = tracing_subscriber::fmt::try_init();
 
         let subnet = Subnet::new(Ipv4Addr::new(21, 0, 0, 0).into(), 16);
-        let mut network = Network::new(subnet, HubOptions::default()).await.unwrap();
+        let mut network = Network::new(subnet).await.unwrap();
 
         let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
         let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();

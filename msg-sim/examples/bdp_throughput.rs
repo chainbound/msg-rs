@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use futures::StreamExt;
     use msg_sim::{
         ip::Subnet,
-        network::{HubOptions, Link, Network, PeerIdExt, PeerOptions},
+        network::{Link, Network, PeerIdExt, PeerOptions},
         tc::impairment::LinkImpairment,
     };
     use msg_socket::{RepSocket, ReqSocket};
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Transfer: {} messages × {} KB = {} MB\n", NUM_MESSAGES, MSG_SIZE / 1024, total_mb);
 
     let subnet = Subnet::new(IpAddr::V4(Ipv4Addr::new(10, 100, 0, 0)), 16);
-    let mut network = Network::new(subnet, HubOptions::default()).await?;
+    let mut network = Network::new(subnet).await?;
     let sender = network.add_peer(PeerOptions::default()).await?;
     let receiver = network.add_peer(PeerOptions::default()).await?;
 
