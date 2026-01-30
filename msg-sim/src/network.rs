@@ -333,7 +333,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Example
 ///
 /// ```no_run
-/// use msg_sim::network::{Network, Link, HubOptions, PeerOptions};
+/// use msg_sim::network::{Network, Link, PeerOptions};
 /// use msg_sim::tc::impairment::LinkImpairment;
 /// use msg_sim::ip::Subnet;
 /// use std::net::Ipv4Addr;
@@ -345,9 +345,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///     let mut network = Network::new(subnet).await.unwrap();
 ///
 ///     // Add some peers
-///     let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-///     let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
-///     let peer_3 = network.add_peer(PeerOptions::default()).await.unwrap();
+///     let peer_1 = network.add_peer().await.unwrap();
+///     let peer_2 = network.add_peer().await.unwrap();
+///     let peer_3 = network.add_peer().await.unwrap();
 ///
 ///     // Configure different impairments for different paths
 ///     network.apply_impairment(
@@ -464,7 +464,7 @@ impl Network {
     /// 1. A new network namespace for the peer
     /// 2. A veth pair connecting the peer to the hub bridge
     /// 3. IP address assignment based on the subnet and peer ID
-    pub async fn add_peer(&mut self, options: PeerOptions) -> Result<PeerId> {
+    pub async fn add_peer_with_options(&mut self, options: PeerOptions) -> Result<PeerId> {
         let peer_id = PEER_ID_NEXT.load(Ordering::Relaxed);
         let namespace_name = peer_id.namespace_name();
         let veth_name = Arc::new(peer_id.veth_name());
@@ -589,6 +589,11 @@ impl Network {
         Ok(peer_id)
     }
 
+    /// See [`Self::add_peer_with_options`].
+    pub async fn add_peer(&mut self) -> Result<PeerId> {
+        self.add_peer_with_options(PeerOptions::default()).await
+    }
+
     /// Run a task in a peer's network namespace.
     ///
     /// The provided closure receives a mutable reference to the namespace's context,
@@ -608,7 +613,7 @@ impl Network {
     ///
     /// ```no_run
     /// use msg_sim::ip::Subnet;
-    /// use msg_sim::network::{Network, HubOptions, PeerOptions};
+    /// use msg_sim::network::{Network, PeerOptions};
     /// use std::net::Ipv4Addr;
     /// use tokio::net::TcpListener;
     ///
@@ -617,7 +622,7 @@ impl Network {
     ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
     ///     let mut network = Network::new(subnet).await.unwrap();
     ///
-    ///     let peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
+    ///     let peer_id = network.add_peer().await.unwrap();
     ///     network
     ///         .run_in_namespace(peer_id, |_ctx| {
     ///             Box::pin(async move {
@@ -678,7 +683,7 @@ impl Network {
     /// ```no_run
     /// use msg_sim::{
     ///     ip::Subnet,
-    ///     network::{Link, Network, HubOptions, PeerOptions},
+    ///     network::{Link, Network, PeerOptions},
     ///     tc::impairment::LinkImpairment
     /// };
     ///
@@ -689,8 +694,8 @@ impl Network {
     ///     let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
     ///     let mut network = Network::new(subnet).await.unwrap();
     ///
-    ///     let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-    ///     let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+    ///     let peer_1 = network.add_peer().await.unwrap();
+    ///     let peer_2 = network.add_peer().await.unwrap();
     ///
     ///     // Simulate a slow, lossy link from peer 1 to peer 2
     ///     network.apply_impairment(
@@ -813,7 +818,7 @@ mod msg_sim_network {
 
     use crate::{
         ip::Subnet,
-        network::{Link, Network, PeerIdExt, PeerOptions},
+        network::{Link, Network, PeerIdExt},
         tc::impairment::LinkImpairment,
     };
 
@@ -837,8 +842,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let _peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
-        let _peer_id = network.add_peer(PeerOptions::default()).await.unwrap();
+        let _peer_id = network.add_peer().await.unwrap();
+        let _peer_id = network.add_peer().await.unwrap();
     }
 
     /// Test basic request/reply communication between two peers.
@@ -849,8 +854,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(13, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         let address_2 = peer_2.veth_address(subnet);
         let port_2 = 12345;
@@ -895,9 +900,9 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(12, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let _peer_3 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+        let _peer_3 = network.add_peer().await.unwrap();
 
         let impairment = LinkImpairment {
             loss: 50.0,
@@ -917,8 +922,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(14, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Apply 1 second latency from peer 1 to peer 2
         let sec_in_us = 1_000_000;
@@ -977,9 +982,9 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(15, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_3 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+        let peer_3 = network.add_peer().await.unwrap();
 
         // Peer 1 → Peer 2: 100ms latency
         let fast_latency_us = 100_000;
@@ -1085,8 +1090,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(16, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Apply bandwidth limit: 1 Mbit/s from peer 1 to peer 2
         let bandwidth_mbit = 1.0;
@@ -1159,8 +1164,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(17, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Apply both bandwidth limit and latency
         let latency_us = 100_000; // 100ms
@@ -1230,8 +1235,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(18, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // First application: 100ms latency
         let impairment_1 = LinkImpairment { latency: 100_000, ..Default::default() };
@@ -1261,8 +1266,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(19, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Different impairments in each direction
         let impairment_1_to_2 = LinkImpairment { latency: 50_000, ..Default::default() };
@@ -1286,8 +1291,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(20, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Apply bandwidth limit with custom burst
         network
@@ -1320,9 +1325,9 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(24, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_3 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
+        let peer_3 = network.add_peer().await.unwrap();
 
         // First netem WITH duplicate - works
         let with_dup = LinkImpairment { latency: 20_000, duplicate: 0.02, ..Default::default() };
@@ -1351,8 +1356,8 @@ mod msg_sim_network {
         let subnet = Subnet::new(Ipv4Addr::new(21, 0, 0, 0).into(), 16);
         let mut network = Network::new(subnet).await.unwrap();
 
-        let peer_1 = network.add_peer(PeerOptions::default()).await.unwrap();
-        let peer_2 = network.add_peer(PeerOptions::default()).await.unwrap();
+        let peer_1 = network.add_peer().await.unwrap();
+        let peer_2 = network.add_peer().await.unwrap();
 
         // Apply 100% packet duplication from peer 1 to peer 2
         // This should cause every packet to be sent twice

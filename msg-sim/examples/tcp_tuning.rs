@@ -14,10 +14,7 @@ fn main() {}
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use msg_sim::{
-        ip::Subnet,
-        network::{Network, PeerOptions},
-    };
+    use msg_sim::{ip::Subnet, network::Network};
     use tracing_subscriber::EnvFilter;
 
     const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";
@@ -45,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create network with one peer
     let subnet = Subnet::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 0)), 24);
     let mut network = Network::new(subnet).await?;
-    let peer = network.add_peer(PeerOptions::default()).await?;
+    let peer = network.add_peer().await?;
 
     // Tune TCP buffers in peer's namespace (min, default, max)
     let tuned_buffers = "4096 1048576 16777216"; // 4KB / 1MB / 16MB

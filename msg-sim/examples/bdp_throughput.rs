@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use futures::StreamExt;
     use msg_sim::{
         ip::Subnet,
-        network::{Link, Network, PeerIdExt, PeerOptions},
+        network::{Link, Network, PeerIdExt},
         tc::impairment::LinkImpairment,
     };
     use msg_socket::{RepSocket, ReqSocket};
@@ -93,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let subnet = Subnet::new(IpAddr::V4(Ipv4Addr::new(10, 100, 0, 0)), 16);
     let mut network = Network::new(subnet).await?;
-    let sender = network.add_peer(PeerOptions::default()).await?;
-    let receiver = network.add_peer(PeerOptions::default()).await?;
+    let sender = network.add_peer().await?;
+    let receiver = network.add_peer().await?;
 
     let impairment =
         LinkImpairment::default().with_latency_ms(LATENCY_MS).with_bandwidth_mbit_s(BANDWIDTH_MBIT);
