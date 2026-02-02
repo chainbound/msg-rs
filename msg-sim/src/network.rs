@@ -88,6 +88,17 @@ use crate::{
 /// Peer IDs start at 1 (not 0) to ensure valid IP addresses when added to the subnet.
 static PEER_ID_NEXT: AtomicUsize = AtomicUsize::new(1);
 
+/// Returns the next peer ID that will be assigned.
+///
+/// This is useful for creating custom runtime factories that need to know
+/// the peer ID for thread naming or other purposes.
+///
+/// Note: This value may change if another peer is added concurrently.
+#[inline]
+pub fn next_peer_id() -> PeerId {
+    PEER_ID_NEXT.load(Ordering::Relaxed)
+}
+
 /// The type used to identify peers within the network.
 ///
 /// Peer IDs are monotonically increasing integers starting from 1.
@@ -219,8 +230,24 @@ impl Peer {
 pub(crate) type RuntimeFactory = Box<dyn FnOnce() -> tokio::runtime::Runtime + Send>;
 
 pub fn default_runtime_factory() -> RuntimeFactory {
-    Box::new(|| {
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("to create runtime")
+    // Capture the peer ID at factory creation time.
+    let peer_id = next_peer_id();
+
+    Box::new(move || {
+        // Counter for naming individual worker threads within this peer's runtime.
+        static WORKER_ID: AtomicUsize = AtomicUsize::new(0);
+
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            // thread_name_fn is called for each worker thread.
+            .thread_name_fn(move || {
+                let id = WORKER_ID.fetch_add(1, Ordering::Relaxed);
+                // NOTE: A thread name is a C string of 16 bytes, including null-terminator. This
+                // leaves 15 bytes to name, hence we need a short format.
+                format!("peer-{peer_id}-w{id}")
+            })
+            .build()
+            .expect("to create runtime")
     })
 }
 
@@ -258,14 +285,7 @@ pub struct PeerOptions {
 
 impl Default for PeerOptions {
     fn default() -> Self {
-        Self {
-            runtime_factory: Box::new(|| {
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .expect("to create runtime")
-            }),
-        }
+        Self { runtime_factory: default_runtime_factory() }
     }
 }
 
