@@ -349,20 +349,17 @@ impl<Ctx> Drop for NetworkNamespace<Ctx> {
 mod tests {
     use super::*;
     use crate::dynch::DynFuture;
+    use crate::network::default_runtime_factory;
 
     const TCP_SLOW_START_AFTER_IDLE: &str = "/proc/sys/net/ipv4/tcp_slow_start_after_idle";
-
-    fn default_runtime() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("to create runtime")
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_namespace_isolates_proc() {
         // Create two namespaces
-        let ns1 = NetworkNamespace::new("test-ns-mount-1", Box::new(default_runtime), || ())
+        let ns1 = NetworkNamespace::new("test-ns-mount-1", default_runtime_factory(), || ())
             .await
             .unwrap();
-        let ns2 = NetworkNamespace::new("test-ns-mount-2", Box::new(default_runtime), || ())
+        let ns2 = NetworkNamespace::new("test-ns-mount-2", default_runtime_factory(), || ())
             .await
             .unwrap();
 
@@ -396,10 +393,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn sysctl_values_are_namespace_specific() {
         // Create two namespaces
-        let ns1 = NetworkNamespace::new("test-ns-sysctl-1", Box::new(default_runtime), || ())
+        let ns1 = NetworkNamespace::new("test-ns-sysctl-1", default_runtime_factory(), || ())
             .await
             .unwrap();
-        let ns2 = NetworkNamespace::new("test-ns-sysctl-2", Box::new(default_runtime), || ())
+        let ns2 = NetworkNamespace::new("test-ns-sysctl-2", default_runtime_factory(), || ())
             .await
             .unwrap();
 
@@ -467,7 +464,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn namespace_has_isolated_network_identity() {
         // Create a namespace
-        let ns = NetworkNamespace::new("test-ns-identity", Box::new(default_runtime), || ())
+        let ns = NetworkNamespace::new("test-ns-identity", default_runtime_factory(), || ())
             .await
             .unwrap();
 
