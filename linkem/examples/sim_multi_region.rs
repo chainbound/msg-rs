@@ -16,7 +16,7 @@
 //! # Running
 //!
 //! ```bash
-//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example multi_region -p msg-sim
+//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example multi_region -p linkem
 //! ```
 
 #[cfg(not(target_os = "linux"))]
@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         time::{Duration, Instant},
     };
 
-    use msg_sim::{
+    use linkem::{
         ip::Subnet,
         network::{Link, Network, PeerIdExt},
     };
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     /// Network impairment profiles based on typical cloud latencies.
     mod profiles {
-        use msg_sim::tc::impairment::LinkImpairment;
+        use linkem::tc::impairment::LinkImpairment;
 
         // US-East-1 <-> US-East-2: Same region, very fast
         pub fn same_region() -> LinkImpairment {

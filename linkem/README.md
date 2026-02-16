@@ -1,4 +1,4 @@
-# `msg-sim`
+# `linkem`
 
 In-process network emulation for Linux, powered by `rtnetlink`.
 
@@ -11,9 +11,9 @@ traffic control.
 Each peer runs in an isolated network namespace, connected through a central hub:
 
 ```text
-                      Hub Namespace (msg-sim-hub)
+                      Hub Namespace (linkem-hub)
 ┌─────────────────────────────────────────────────────────────┐
-│                    Bridge (msg-sim-br0)                     │
+│                    Bridge (linkem-br0)                     │
 └─────────┬───────────────────┬───────────────────┬───────────┘
           │                   │                   │
      veth pair           veth pair           veth pair
@@ -38,7 +38,7 @@ See [`src/network.rs`](src/network.rs) for detailed architecture documentation.
 ## Quick Example
 
 ```rust
-use msg_sim::{network::{Network, Link}, tc::impairment::LinkImpairment, ip::Subnet};
+use linkem::{network::{Network, Link}, tc::impairment::LinkImpairment, ip::Subnet};
 use std::net::Ipv4Addr;
 
 #[tokio::main]
@@ -99,7 +99,7 @@ See [`LinkImpairment::duplicate`](src/tc/impairment.rs) for details.
 Tests require root privileges to create network namespaces:
 
 ```bash
-sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p msg-sim --all-features -- --test-threads=1
+sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p linkem --all-features -- --test-threads=1
 ```
 
 The `--test-threads=1` flag is recommended to avoid conflicts between concurrent namespace operations.

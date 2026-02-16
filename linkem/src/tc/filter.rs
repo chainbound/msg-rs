@@ -59,8 +59,8 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
 ///
 /// ```
 /// use std::net::{IpAddr, Ipv4Addr};
-/// use msg_sim::tc::filter::FlowerFilterRequest;
-/// use msg_sim::tc::handle::QdiscRequestInner;
+/// use linkem::tc::filter::FlowerFilterRequest;
+/// use linkem::tc::handle::QdiscRequestInner;
 /// use rtnetlink::packet_route::tc::TcHandle;
 ///
 /// let if_index = 1; // Network interface index
@@ -273,8 +273,8 @@ impl TcU32Key {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::filter::U32CatchallFilterRequest;
-/// use msg_sim::tc::handle::QdiscRequestInner;
+/// use linkem::tc::filter::U32CatchallFilterRequest;
+/// use linkem::tc::handle::QdiscRequestInner;
 /// use rtnetlink::packet_route::tc::TcHandle;
 ///
 /// let if_index = 1; // Network interface index

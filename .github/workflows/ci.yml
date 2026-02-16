@@ -33,14 +33,14 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run tests (all features, excluding msg-sim)
-        run: cargo nextest run --all --all-features --no-fail-fast --exclude msg-sim
+      - name: Run tests (all features, excluding linkem)
+        run: cargo nextest run --all --all-features --no-fail-fast --exclude linkem
 
-      - name: Run doc tests (excluding msg-sim)
+      - name: Run doc tests (excluding linkem)
         run: cargo test --doc --all --all-features
 
-  # msg-sim tests require root privileges to create network namespaces
-  cargo-tests-msg-sim:
+  # linkem tests require root privileges to create network namespaces
+  cargo-tests-linkem:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -59,8 +59,8 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
-      - name: Run msg-sim tests (requires root for network namespaces)
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo nextest run -p msg-sim --all-features --no-fail-fast --test-threads=1
+      - name: Run linkem tests (requires root for network namespaces)
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo nextest run -p linkem --all-features --no-fail-fast --test-threads=1
 
   cargo-lint:
     runs-on: ubuntu-latest

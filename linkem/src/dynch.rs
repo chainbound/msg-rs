@@ -69,7 +69,7 @@ pub trait Cast: Send + 'static {
 /// # Example
 ///
 /// ```
-/// use msg_sim::dynch::{Cast, AnyCast};
+/// use linkem::dynch::{Cast, AnyCast};
 ///
 /// let original: i32 = 42;
 /// let erased = AnyCast::erase(original);
@@ -179,7 +179,7 @@ impl<Ctx, C: Cast> DynRequestSender<Ctx, C> {
     /// # Example
     ///
     /// ```
-    /// use msg_sim::dynch::DynCh;
+    /// use linkem::dynch::DynCh;
     ///
     /// #[derive(Default)]
     /// struct Ctx {
@@ -249,7 +249,7 @@ impl<Ctx, C: Cast> DynRequestSender<Ctx, C> {
 /// Using the default [`AnyCast`] strategy (most common):
 ///
 /// ```
-/// use msg_sim::dynch::DynCh;
+/// use linkem::dynch::DynCh;
 ///
 /// struct MyContext {
 ///     data: Vec<u8>,
@@ -277,7 +277,7 @@ impl<Ctx, C: Cast> DynCh<Ctx, C> {
     /// # Example
     ///
     /// ```
-    /// use msg_sim::dynch::DynCh;
+    /// use linkem::dynch::DynCh;
     ///
     /// #[derive(Default)]
     /// struct Ctx {

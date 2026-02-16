@@ -3,7 +3,7 @@
 //! Shows that each network namespace has isolated TCP sysctl parameters.
 //!
 //! ```bash
-//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example tcp_tuning -p msg-sim
+//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example tcp_tuning -p linkem
 //! ```
 
 #[cfg(not(target_os = "linux"))]
@@ -14,7 +14,7 @@ fn main() {}
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::net::{IpAddr, Ipv4Addr};
 
-    use msg_sim::{ip::Subnet, network::Network};
+    use linkem::{ip::Subnet, network::Network};
     use tracing_subscriber::EnvFilter;
 
     const TCP_RMEM: &str = "/proc/sys/net/ipv4/tcp_rmem";

@@ -10,10 +10,10 @@
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                           Hub Namespace (msg-sim-hub)                       │
+//! │                           Hub Namespace (linkem-hub)                       │
 //! │                                                                             │
 //! │   ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │   │                      Bridge (msg-sim-br0)                           │   │
+//! │   │                      Bridge (linkem-br0)                           │   │
 //! │   │                                                                     │   │
 //! │   │   Acts as a virtual switch connecting all peer veth endpoints       │   │
 //! │   └─────────────────────────────────────────────────────────────────────┘   │
@@ -29,7 +29,7 @@
 //! │    msg-veth1       │ │  msg-veth2       │ │  msg-veth3       │
 //! │                    │ │                  │ │                  │
 //! │  Peer 1 Namespace  │ │ Peer 2 Namespace │ │ Peer 3 Namespace │
-//! │  (msg-sim-1)       │ │ (msg-sim-2)      │ │ (msg-sim-3)      │
+//! │  (linkem-1)       │ │ (linkem-2)      │ │ (linkem-3)      │
 //! │                    │ │                  │ │                  │
 //! │  IP: 10.0.0.1      │ │ IP: 10.0.0.2     │ │ IP: 10.0.0.3     │
 //! │                    │ │                  │ │                  │
@@ -105,16 +105,16 @@ pub fn next_peer_id() -> PeerId {
 pub type PeerId = usize;
 
 /// Prefix for all network namespace names created by this crate.
-pub const MSG_SIM_NAMESPACE_PREFIX: &str = "msg-sim";
+pub const NAMESPACE_PREFIX: &str = "linkem";
 
 /// Prefix for all virtual ethernet device names created by this crate.
-pub const MSG_SIM_LINK_PREFIX: &str = "msg-veth";
+pub const LINK_PREFIX: &str = "msg-veth";
 
 /// Extension trait for peer IDs providing namespace and device naming utilities.
 pub trait PeerIdExt: Display + Copy {
     /// Get the network namespace name for this peer.
     fn namespace_name(self) -> String {
-        format!("{MSG_SIM_NAMESPACE_PREFIX}-{self}")
+        format!("{NAMESPACE_PREFIX}-{self}")
     }
 
     /// Compute the IP address for this peer's veth device within the given subnet.
@@ -122,7 +122,7 @@ pub trait PeerIdExt: Display + Copy {
 
     /// Get the name of the veth device inside the peer's namespace.
     fn veth_name(self) -> String {
-        format!("{MSG_SIM_LINK_PREFIX}{self}")
+        format!("{LINK_PREFIX}{self}")
     }
 
     /// Get the name of the veth device endpoint attached to the hub bridge.
@@ -353,9 +353,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// # Example
 ///
 /// ```no_run
-/// use msg_sim::network::{Network, Link, PeerOptions};
-/// use msg_sim::tc::impairment::LinkImpairment;
-/// use msg_sim::ip::Subnet;
+/// use linkem::network::{Network, Link, PeerOptions};
+/// use linkem::tc::impairment::LinkImpairment;
+/// use linkem::ip::Subnet;
 /// use std::net::Ipv4Addr;
 ///
 /// #[tokio::main]
@@ -421,13 +421,13 @@ pub struct Network {
 
 impl Network {
     /// Name of the bridge device in the hub namespace.
-    const BRIDGE_NAME: &str = "msg-sim-br0";
+    const BRIDGE_NAME: &str = "linkem-br0";
 
     /// Create a new simulated network with the given IP subnet.
     ///
     /// This creates:
-    /// 1. A hub network namespace (`msg-sim-hub`)
-    /// 2. A bridge device (`msg-sim-br0`) in the hub namespace
+    /// 1. A hub network namespace (`linkem-hub`)
+    /// 2. A bridge device (`linkem-br0`) in the hub namespace
     ///
     /// Peers can then be added with [`add_peer`](Self::add_peer).
     pub async fn new(subnet: Subnet) -> Result<Self> {
@@ -475,7 +475,7 @@ impl Network {
 
     /// Get the name of the hub namespace.
     fn hub_namespace_name() -> String {
-        format!("{MSG_SIM_NAMESPACE_PREFIX}-hub")
+        format!("{NAMESPACE_PREFIX}-hub")
     }
 
     /// Add a new peer to the network.
@@ -632,8 +632,8 @@ impl Network {
     /// # Example
     ///
     /// ```no_run
-    /// use msg_sim::ip::Subnet;
-    /// use msg_sim::network::{Network, PeerOptions};
+    /// use linkem::ip::Subnet;
+    /// use linkem::network::{Network, PeerOptions};
     /// use std::net::Ipv4Addr;
     /// use tokio::net::TcpListener;
     ///
@@ -701,7 +701,7 @@ impl Network {
     /// # Example
     ///
     /// ```no_run
-    /// use msg_sim::{
+    /// use linkem::{
     ///     ip::Subnet,
     ///     network::{Link, Network, PeerOptions},
     ///     tc::impairment::LinkImpairment
@@ -826,7 +826,7 @@ impl Network {
 }
 
 #[cfg(test)]
-mod msg_sim_network {
+mod linkem_network {
     use std::{
         net::{Ipv4Addr, SocketAddr},
         time::{Duration, Instant},

@@ -16,4 +16,4 @@ fmt:
 #     cargo nextest run --workspace --all-features --retries 3 
 
 test:
-    cargo nextest run --workspace --all-features --retries 3 -E 'not (package(msg-sim))'
+    cargo nextest run --workspace --all-features --retries 3 -E 'not (package(linkem))'

@@ -47,7 +47,7 @@ cargo flamegraph --bin example_name
 - **`msg-transport/`** - Transport layer (TCP, QUIC, IPC with pluggable trait design)
 - **`msg-wire/`** - Wire protocol (authentication, compression: gzip/lz4/snappy/zstd)
 - **`msg-common/`** - Shared utilities (channels, task management, time utils)
-- **`msg-sim/`** - Network simulation on Linux, powered by rtnetlink.
+- **`linkem/`** - Network emulation on Linux, powered by rtnetlink.
 
 ### Key Design Patterns
 - **Trait-based extensibility** - Transport, ConnectionHook traits for pluggability
@@ -69,7 +69,7 @@ cargo flamegraph --bin example_name
 - **debug-maxperf** - Performance with debug symbols
 
 ### Platform-Specific Features
-- **Linux**: JeMalloc integration for memory performance and `msg-sim` support
+- **Linux**: JeMalloc integration for memory performance and `linkem` support
 - **MSRV**: Rust 1.86
 
 ## Testing Architecture
@@ -81,7 +81,7 @@ cargo flamegraph --bin example_name
 - **Benchmarks** - Criterion-based in `msg/benches/`
 
 ### Network Simulation Testing
-- Use `msg-sim` crate for chaos testing under various network conditions
+- Use `linkem` crate for chaos testing under various network conditions
 - Supports latency injection, bandwidth limiting, packet loss simulation
 
 ## Documentation Structure

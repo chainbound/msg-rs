@@ -13,7 +13,7 @@ use super::core::MTU_ETHERNET;
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::impairment::LinkImpairment;
+/// use linkem::tc::impairment::LinkImpairment;
 ///
 /// // Using method chaining (recommended)
 /// let satellite_link = LinkImpairment::default()
