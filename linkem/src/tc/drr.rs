@@ -84,8 +84,8 @@ impl QdiscDrrRequest {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::handle::{ID_OFFSET, QdiscRequestInner};
-/// use msg_sim::tc::drr::DrrClassRequest;
+/// use linkem::tc::handle::{ID_OFFSET, QdiscRequestInner};
+/// use linkem::tc::drr::DrrClassRequest;
 /// use rtnetlink::packet_route::tc::TcHandle;
 ///
 /// let if_index = 1; // Network interface index

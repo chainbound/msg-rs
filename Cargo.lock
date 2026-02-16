@@ -816,6 +816,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
+name = "linkem"
+version = "0.1.5"
+dependencies = [
+ "futures",
+ "msg-socket",
+ "msg-transport",
+ "nix 0.30.1",
+ "rtnetlink",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -932,21 +947,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
-]
-
-[[package]]
-name = "msg-sim"
-version = "0.1.5"
-dependencies = [
- "futures",
- "msg-socket",
- "msg-transport",
- "nix 0.30.1",
- "rtnetlink",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

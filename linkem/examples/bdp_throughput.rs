@@ -7,7 +7,7 @@
 //!   - Window scaling allows rwnd > 64KB (required for high-BDP links)
 //!
 //! ```bash
-//! sudo HOME=$HOME $(which cargo) run --example bdp_throughput -p msg-sim
+//! sudo HOME=$HOME $(which cargo) run --example bdp_throughput -p linkem
 //! ```
 
 #[cfg(not(target_os = "linux"))]
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     use futures::StreamExt;
-    use msg_sim::{
+    use linkem::{
         ip::Subnet,
         network::{Link, Network, PeerIdExt},
         tc::impairment::LinkImpairment,

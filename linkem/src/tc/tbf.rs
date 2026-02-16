@@ -265,9 +265,9 @@ impl TbfQopt {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::impairment::LinkImpairment;
-/// use msg_sim::tc::handle::QdiscRequestInner;
-/// use msg_sim::tc::tbf::QdiscTbfRequest;
+/// use linkem::tc::impairment::LinkImpairment;
+/// use linkem::tc::handle::QdiscRequestInner;
+/// use linkem::tc::tbf::QdiscTbfRequest;
 /// use rtnetlink::packet_route::tc::TcHandle;
 ///
 /// let if_index = 1; // Network interface index

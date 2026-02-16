@@ -56,7 +56,7 @@ impl QdiscRequestInner {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::handle::drr_class_handle;
+/// use linkem::tc::handle::drr_class_handle;
 /// assert_eq!(drr_class_handle(2), 0x0001_000C); // 1:12
 /// ```
 pub fn drr_class_handle(dest_peer_id: usize) -> u32 {
@@ -74,7 +74,7 @@ pub fn drr_class_handle(dest_peer_id: usize) -> u32 {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::handle::tbf_handle;
+/// use linkem::tc::handle::tbf_handle;
 /// assert_eq!(tbf_handle(2), 0x000C_0000); // 12:0
 /// ```
 pub fn tbf_handle(dest_peer_id: usize) -> u32 {
@@ -93,7 +93,7 @@ pub fn tbf_handle(dest_peer_id: usize) -> u32 {
 /// # Example
 ///
 /// ```
-/// use msg_sim::tc::handle::netem_handle;
+/// use linkem::tc::handle::netem_handle;
 /// assert_eq!(netem_handle(2), 0x0016_0000); // 22:0
 /// ```
 pub fn netem_handle(dest_peer_id: usize) -> u32 {

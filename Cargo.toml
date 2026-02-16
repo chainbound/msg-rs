@@ -5,7 +5,7 @@ members = [
   "msg-wire",
   "msg-transport",
   "msg-common",
-  "msg-sim",
+  "linkem",
 ]
 resolver = "2"
 
@@ -39,7 +39,7 @@ msg-wire = { path = "./msg-wire" }
 msg-socket = { path = "./msg-socket" }
 msg-transport = { path = "./msg-transport" }
 msg-common = { path = "./msg-common" }
-# msg-sim = { path = "./msg-sim" }
+# linkem = { path = "./linkem" }
 
 # async
 async-trait = "0.1"
