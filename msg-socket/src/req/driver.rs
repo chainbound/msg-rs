@@ -112,8 +112,8 @@ where
 
         // Compress the message if it's larger than the minimum size
         let size_before = message.payload().len();
-        if size_before > self.options.min_compress_size {
-            if let Some(ref compressor) = self.compressor {
+        if size_before > self.options.min_compress_size
+            && let Some(ref compressor) = self.compressor {
                 let start = Instant::now();
                 if let Err(e) = message.compress(compressor.as_ref()) {
                     tracing::error!(?e, "failed to compress message");
@@ -126,7 +126,6 @@ where
                     "compressed message",
                 );
             }
-        }
 
         let msg = message.inner.into_wire(self.id_counter);
         let msg_id = msg.id();
@@ -248,14 +247,12 @@ where
             }
 
             // Flush if we have some data and `linger_timer` is ready
-            if let Some(ref mut linger_timer) = this.linger_timer {
-                if !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
-                    if let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
+            if let Some(ref mut linger_timer) = this.linger_timer
+                && !channel.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready()
+                    && let Poll::Ready(Err(e)) = channel.poll_flush_unpin(cx) {
                         tracing::error!(err = ?e, "Failed to flush connection");
                         this.conn_manager.reset_connection();
                     }
-                }
-            }
 
             // Check for request timeouts
             while this.timeout_check_interval.poll_tick(cx).is_ready() {

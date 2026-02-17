@@ -175,16 +175,14 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
                 }
             }
 
-            if let Some(ref mut linger_timer) = this.linger_timer {
-                if !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
-                    if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+            if let Some(ref mut linger_timer) = this.linger_timer
+                && !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready()
+                    && let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
                         tracing::error!(err = ?e, "Failed to flush connection");
                         let _ = this.conn.poll_close_unpin(cx);
                         // End this stream as we can't send any more messages
                         return Poll::Ready(());
                     }
-                }
-            }
 
             // Handle incoming messages from the socket
             if let Poll::Ready(item) = this.conn.poll_next_unpin(cx) {

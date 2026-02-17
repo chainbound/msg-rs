@@ -68,11 +68,10 @@ impl Stream for ExponentialBackoff {
                 this.retry_count += 1;
 
                 // Close the stream
-                if let Some(max_retries) = this.max_retries {
-                    if this.retry_count >= max_retries {
+                if let Some(max_retries) = this.max_retries
+                    && this.retry_count >= max_retries {
                         return Poll::Ready(None);
                     }
-                }
 
                 this.reset_timeout();
 
