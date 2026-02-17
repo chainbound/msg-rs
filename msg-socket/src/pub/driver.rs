@@ -113,12 +113,11 @@ where
             // Finally, poll the transport for new incoming connection futures and push them to the
             // incoming connection tasks.
             if let Poll::Ready(accept) = Pin::new(&mut this.transport).poll_accept(cx) {
-                if let Some(max) = this.options.max_clients {
-                    if this.state.stats.specific.active_clients() >= max {
+                if let Some(max) = this.options.max_clients
+                    && this.state.stats.specific.active_clients() >= max {
                         warn!("Max connections reached ({}), rejecting incoming connection", max);
                         continue;
                     }
-                }
 
                 // Increment the active clients counter. If the hook fails,
                 // this counter will be decremented.

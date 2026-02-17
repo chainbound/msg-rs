@@ -344,12 +344,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address> PeerState<T, A> {
 
         debug!(has_pending = ?pending_msg.is_some(), write_buffer_size = ?buffer_size, "found data to send");
 
-        if let Some(msg) = pending_msg {
-            if let Err(e) = self.conn.start_send_unpin(msg.inner) {
+        if let Some(msg) = pending_msg
+            && let Err(e) = self.conn.start_send_unpin(msg.inner) {
                 error!(?e, "failed to send final message to socket, closing");
                 return Poll::Ready(());
             }
-        }
 
         if let Err(e) = ready!(self.conn.poll_flush_unpin(cx)) {
             error!(?e, "failed to flush on shutdown, giving up");
@@ -399,18 +398,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            if let Some(ref mut linger_timer) = this.linger_timer {
-                if !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready() {
-                    if let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
+            if let Some(ref mut linger_timer) = this.linger_timer
+                && !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready()
+                    && let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
                         error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
                         return Poll::Ready(None);
                     }
-                }
-            }
 
             // Check for completed requests, and set pending_egress (only if empty).
-            if this.pending_egress.is_none() {
-                if let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
+            if this.pending_egress.is_none()
+                && let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
                 {
                     match result.inner {
                         Err(_) => tracing::error!("response channel closed unexpectedly"),
@@ -446,7 +443,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                         }
                     }
                 }
-            }
 
             // Accept incoming requests from the peer.
             // Only accept new requests if we're under the HWM for pending responses.
