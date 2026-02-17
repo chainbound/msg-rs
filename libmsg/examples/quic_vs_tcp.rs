@@ -4,7 +4,7 @@ use msg_transport::{Transport, quic::Quic};
 use std::time::{Duration, Instant};
 use tracing::info;
 
-use msg::{Address, PubOptions, PubSocket, SubOptions, SubSocket, tcp::Tcp};
+use libmsg::{Address, PubOptions, PubSocket, SubOptions, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
