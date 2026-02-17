@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "msg",
+  "libmsg",
   "msg-socket",
   "msg-wire",
   "msg-transport",
@@ -10,9 +10,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.89"
 license = "MIT"
 description = "A flexible and lightweight messaging library for distributed systems"
 authors = ["Chainbound Developers <dev@chainbound.io>"]
@@ -39,7 +39,6 @@ msg-wire = { path = "./msg-wire" }
 msg-socket = { path = "./msg-socket" }
 msg-transport = { path = "./msg-transport" }
 msg-common = { path = "./msg-common" }
-# linkem = { path = "./linkem" }
 
 # async
 async-trait = "0.1"
