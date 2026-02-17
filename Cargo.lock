@@ -816,6 +816,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
+name = "libmsg"
+version = "0.1.5"
+dependencies = [
+ "bytes",
+ "criterion",
+ "futures",
+ "msg-socket",
+ "msg-transport",
+ "msg-wire",
+ "openssl",
+ "pprof",
+ "rand",
+ "thiserror 2.0.18",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "linkem"
 version = "0.1.5"
 dependencies = [
@@ -915,27 +936,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "msg"
-version = "0.1.5"
-dependencies = [
- "bytes",
- "criterion",
- "futures",
- "msg-socket",
- "msg-transport",
- "msg-wire",
- "openssl",
- "pprof",
- "rand",
- "thiserror 2.0.18",
- "tikv-jemallocator",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

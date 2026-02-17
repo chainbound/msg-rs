@@ -1,10 +1,10 @@
 [package]
 name = "linkem"
-version.workspace = true
+version = "0.2.0"
+description = "A realistic network emulation library"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description.workspace = true
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
