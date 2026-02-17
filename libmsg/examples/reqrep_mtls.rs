@@ -2,7 +2,7 @@
 //! mutual TLS (mTLS).
 
 use bytes::Bytes;
-use msg::{
+use libmsg::{
     RepSocket, ReqSocket,
     tcp_tls::{self, TcpTls},
 };
