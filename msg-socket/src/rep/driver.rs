@@ -344,11 +344,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address> PeerState<T, A> {
 
         debug!(has_pending = ?pending_msg.is_some(), write_buffer_size = ?buffer_size, "found data to send");
 
-        if let Some(msg) = pending_msg
-            && let Err(e) = self.conn.start_send_unpin(msg.inner) {
-                error!(?e, "failed to send final message to socket, closing");
-                return Poll::Ready(());
-            }
+        if let Some(msg) = pending_msg &&
+            let Err(e) = self.conn.start_send_unpin(msg.inner)
+        {
+            error!(?e, "failed to send final message to socket, closing");
+            return Poll::Ready(());
+        }
 
         if let Err(e) = ready!(self.conn.poll_flush_unpin(cx)) {
             error!(?e, "failed to flush on shutdown, giving up");
@@ -398,51 +399,53 @@ impl<T: AsyncRead + AsyncWrite + Unpin, A: Address + Unpin> Stream for PeerState
                 }
             }
 
-            if let Some(ref mut linger_timer) = this.linger_timer
-                && !this.conn.write_buffer().is_empty() && linger_timer.poll_tick(cx).is_ready()
-                    && let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx) {
-                        error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
-                        return Poll::Ready(None);
-                    }
+            if let Some(ref mut linger_timer) = this.linger_timer &&
+                !this.conn.write_buffer().is_empty() &&
+                linger_timer.poll_tick(cx).is_ready() &&
+                let Poll::Ready(Err(e)) = this.conn.poll_flush_unpin(cx)
+            {
+                error!(err = ?e, peer = ?this.addr, "failed to flush connection, closing...");
+                return Poll::Ready(None);
+            }
 
             // Check for completed requests, and set pending_egress (only if empty).
-            if this.pending_egress.is_none()
-                && let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
-                {
-                    match result.inner {
-                        Err(_) => tracing::error!("response channel closed unexpectedly"),
-                        Ok(Response { msg_id, mut response }) => {
-                            let mut compression_type = 0;
-                            let len_before = response.len();
-                            if let Some(ref compressor) = this.compressor {
-                                match compressor.compress(&response) {
-                                    Ok(compressed) => {
-                                        response = compressed;
-                                        compression_type = compressor.compression_type() as u8;
-                                    }
-                                    Err(e) => {
-                                        error!(?e, "failed to compress message");
-                                        continue;
-                                    }
+            if this.pending_egress.is_none() &&
+                let Poll::Ready(Some(result)) = this.pending_requests.poll_next_unpin(cx).enter()
+            {
+                match result.inner {
+                    Err(_) => tracing::error!("response channel closed unexpectedly"),
+                    Ok(Response { msg_id, mut response }) => {
+                        let mut compression_type = 0;
+                        let len_before = response.len();
+                        if let Some(ref compressor) = this.compressor {
+                            match compressor.compress(&response) {
+                                Ok(compressed) => {
+                                    response = compressed;
+                                    compression_type = compressor.compression_type() as u8;
                                 }
-
-                                debug!(
-                                    msg_id,
-                                    len_before,
-                                    len_after = response.len(),
-                                    "compressed message"
-                                )
+                                Err(e) => {
+                                    error!(?e, "failed to compress message");
+                                    continue;
+                                }
                             }
 
-                            debug!(msg_id, "received response to send");
-
-                            let msg = reqrep::Message::new(msg_id, compression_type, response);
-                            this.pending_egress = Some(msg.with_span(result.span));
-
-                            continue;
+                            debug!(
+                                msg_id,
+                                len_before,
+                                len_after = response.len(),
+                                "compressed message"
+                            )
                         }
+
+                        debug!(msg_id, "received response to send");
+
+                        let msg = reqrep::Message::new(msg_id, compression_type, response);
+                        this.pending_egress = Some(msg.with_span(result.span));
+
+                        continue;
                     }
                 }
+            }
 
             // Accept incoming requests from the peer.
             // Only accept new requests if we're under the HWM for pending responses.
