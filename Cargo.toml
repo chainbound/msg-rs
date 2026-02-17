@@ -71,7 +71,7 @@ derive_more = { version = "2.1.1", features = [
   "deref_mut",
 ] }
 arc-swap = "1.8.1"
-nix = { version = "0.30.1" }
+nix = { version = "0.31.1" }
 
 # networking
 quinn = "0.11.9"
