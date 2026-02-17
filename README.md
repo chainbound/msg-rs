@@ -52,7 +52,7 @@ The 📖 [MSG-RS Book][book] contains detailed information on how to use the lib
 
 ## MSRV
 
-The minimum supported Rust version is 1.88 (see [rust-toolchain.toml](./rust-toolchain.toml)).
+The minimum supported Rust version is 1.89.0 (see [rust-toolchain.toml](./rust-toolchain.toml)).
 
 ## Contributions & Bug Reports
 
