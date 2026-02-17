@@ -4,7 +4,6 @@ use criterion::{
     measurement::WallTime,
 };
 use futures::StreamExt;
-use msg::{Address, ipc::Ipc};
 use pprof::criterion::{Output, PProfProfiler};
 use rand::Rng;
 use std::{
@@ -13,6 +12,7 @@ use std::{
 };
 use tokio::runtime::Runtime;
 
+use libmsg::{Address, ipc::Ipc};
 use msg_socket::{PubOptions, PubSocket, SubOptions, SubSocket};
 use msg_transport::{Transport, quic::Quic, tcp::Tcp};
 
