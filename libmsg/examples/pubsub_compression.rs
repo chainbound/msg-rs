@@ -4,7 +4,7 @@ use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, info, info_span, warn};
 
-use msg::{PubSocket, SubSocket, compression::GzipCompressor, tcp::Tcp};
+use libmsg::{PubSocket, SubSocket, compression::GzipCompressor, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {

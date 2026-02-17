@@ -9,7 +9,7 @@ use tokio::time::timeout;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, info, info_span, warn};
 
-use msg::{PubSocket, SubSocket, hooks, tcp::Tcp};
+use libmsg::{PubSocket, SubSocket, hooks, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {

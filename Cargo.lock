@@ -817,7 +817,7 @@ checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
 name = "libmsg"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "bytes",
  "criterion",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "linkem"
-version = "0.1.5"
+version = "0.2.0"
 dependencies = [
  "futures",
  "msg-socket",
@@ -940,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "derive_more",
  "futures",
@@ -951,7 +951,7 @@ dependencies = [
 
 [[package]]
 name = "msg-socket"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "msg-wire"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "bytes",
  "flate2",

@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 use tokio_stream::StreamExt;
 use tracing::{Instrument, error, info, info_span, instrument, warn};
 
-use msg::{RepSocket, ReqOptions, ReqSocket, hooks, tcp::Tcp};
+use libmsg::{RepSocket, ReqOptions, ReqSocket, hooks, tcp::Tcp};
 
 #[instrument(name = "RepSocket")]
 async fn start_rep() {

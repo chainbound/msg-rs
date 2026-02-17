@@ -9,7 +9,7 @@ use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_stream::StreamExt;
 
-use msg::{
+use libmsg::{
     RepSocket, ReqSocket,
     hooks::{ConnectionHook, Error, HookResult},
     tcp::Tcp,
