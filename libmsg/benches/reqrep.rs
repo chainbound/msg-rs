@@ -8,15 +8,15 @@ use criterion::{
 use futures::StreamExt;
 use pprof::criterion::Output;
 use rand::Rng;
+use tokio::runtime::Runtime;
 
-use msg::{
+use libmsg::{
     Address, Profile, RepOptions, Transport,
     ipc::Ipc,
     tcp_tls::{TcpTls, config},
 };
 use msg_socket::{RepSocket, ReqOptions, ReqSocket};
 use msg_transport::tcp::Tcp;
-use tokio::runtime::Runtime;
 
 const N_REQS: usize = 10_000;
 const PAR_FACTOR: usize = 2048;
