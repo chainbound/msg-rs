@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{Instrument, info, info_span, warn};
 
-use msg::{PubOptions, PubSocket, SubOptions, SubSocket, tcp::Tcp};
+use libmsg::{PubOptions, PubSocket, SubOptions, SubSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {

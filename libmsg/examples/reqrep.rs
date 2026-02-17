@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqOptions, ReqSocket, tcp::Tcp};
+use libmsg::{RepSocket, ReqOptions, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {

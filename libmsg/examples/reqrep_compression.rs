@@ -3,7 +3,7 @@ use msg_socket::{RepOptions, ReqOptions};
 use msg_wire::compression::GzipCompressor;
 use tokio_stream::StreamExt;
 
-use msg::{RepSocket, ReqSocket, tcp::Tcp};
+use libmsg::{RepSocket, ReqSocket, tcp::Tcp};
 
 #[tokio::main]
 async fn main() {
