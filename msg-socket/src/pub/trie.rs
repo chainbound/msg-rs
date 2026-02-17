@@ -63,11 +63,12 @@ impl PrefixTrie {
         }
 
         let token = tokens.remove(0);
-        if let Entry::Occupied(mut entry) = current.children.entry(token.to_string())
-            && Self::inner_remove(entry.get_mut(), tokens) {
-                entry.remove_entry();
-                return current.children.is_empty() && !current.topic_end;
-            }
+        if let Entry::Occupied(mut entry) = current.children.entry(token.to_string()) &&
+            Self::inner_remove(entry.get_mut(), tokens)
+        {
+            entry.remove_entry();
+            return current.children.is_empty() && !current.topic_end;
+        }
 
         false
     }

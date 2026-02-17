@@ -170,11 +170,12 @@ where
         // Compression is only done if the message is larger than the
         // configured minimum payload size.
         let len_before = msg.payload().len();
-        if len_before > self.options.min_compress_size
-            && let Some(ref compressor) = self.compressor {
-                msg.compress(compressor.as_ref())?;
-                trace!("Compressed message from {} to {} bytes", len_before, msg.payload().len());
-            }
+        if len_before > self.options.min_compress_size &&
+            let Some(ref compressor) = self.compressor
+        {
+            msg.compress(compressor.as_ref())?;
+            trace!("Compressed message from {} to {} bytes", len_before, msg.payload().len());
+        }
 
         // Broadcast the message directly to all active sessions.
         if self.to_sessions_bcast.as_ref().ok_or(PubError::SocketClosed)?.send(msg).is_err() {

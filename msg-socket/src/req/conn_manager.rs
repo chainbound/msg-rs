@@ -152,26 +152,27 @@ where
     ) -> Poll<Option<&mut Conn<T::Io, T::Stats, A>>> {
         loop {
             // Poll the active connection task, if any
-            if let Some(ref mut conn_task) = self.conn_task
-                && let Poll::Ready(result) = conn_task.poll_unpin(cx).enter() {
-                    // As soon as the connection task finishes, set it to `None`.
-                    // - If it was successful, set the connection to active
-                    // - If it failed, it will be re-tried until the backoff limit is reached.
-                    self.conn_task = None;
+            if let Some(ref mut conn_task) = self.conn_task &&
+                let Poll::Ready(result) = conn_task.poll_unpin(cx).enter()
+            {
+                // As soon as the connection task finishes, set it to `None`.
+                // - If it was successful, set the connection to active
+                // - If it failed, it will be re-tried until the backoff limit is reached.
+                self.conn_task = None;
 
-                    match result.inner {
-                        Ok(io) => {
-                            tracing::info!("connected");
+                match result.inner {
+                    Ok(io) => {
+                        tracing::info!("connected");
 
-                            let metered = MeteredIo::new(io, self.transport_stats.clone());
-                            let framed = Framed::new(metered, reqrep::Codec::new());
-                            self.conn_ctl = ConnectionState::Active { channel: framed };
-                        }
-                        Err(e) => {
-                            tracing::error!(?e, "failed to connect");
-                        }
+                        let metered = MeteredIo::new(io, self.transport_stats.clone());
+                        let framed = Framed::new(metered, reqrep::Codec::new());
+                        self.conn_ctl = ConnectionState::Active { channel: framed };
+                    }
+                    Err(e) => {
+                        tracing::error!(?e, "failed to connect");
                     }
                 }
+            }
 
             // If the connection is inactive, try to connect to the server or poll the backoff
             // timer if we're already trying to connect.
