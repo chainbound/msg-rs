@@ -46,11 +46,11 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
 ///
 /// Flower filters classify packets based on various criteria. We use them to
 /// match packets by destination IP address and route them to the appropriate
-/// DRR class for impairment.
+/// HTB class for impairment.
 ///
 /// # How Classification Works
 ///
-/// 1. Packet enters DRR root qdisc
+/// 1. Packet enters HTB root qdisc
 /// 2. Flower filter examines destination IP
 /// 3. If IP matches → packet goes to the specified class (e.g., 1:12)
 /// 4. If no match → packet goes to default class (1:1)
@@ -67,7 +67,7 @@ fn ipv6_mask(prefix_len: u8) -> Ipv6Addr {
 /// // Route traffic to 10.0.0.2 into class 1:12
 /// let request = FlowerFilterRequest::new(
 ///     QdiscRequestInner::new(if_index)
-///         .with_parent(TcHandle::from(0x0001_0000)), // Attach to DRR root
+///         .with_parent(TcHandle::from(0x0001_0000)), // Attach to HTB root
 ///     IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
 /// )
 /// .with_class_id(0x0001_000C)  // Route to class 1:12
@@ -251,10 +251,10 @@ impl TcU32Key {
 ///
 /// # Why This Is Needed
 ///
-/// DRR (unlike HTB) doesn't have a built-in default class mechanism. Packets that
-/// don't match any filter are dropped. To handle unclassified traffic (like ARP
-/// packets, which don't have IP headers), we need a catch-all filter with a low
-/// priority (high number) that catches everything and sends it to class 1:1.
+/// While HTB has a built-in `defcls` default class mechanism, we add an explicit
+/// catch-all filter as a safety net. This ensures unclassified traffic (like ARP
+/// packets, which don't have IP headers) is reliably routed to class 1:1 regardless
+/// of the root qdisc's default class handling.
 ///
 /// # Why u32 Instead of matchall
 ///
@@ -281,7 +281,7 @@ impl TcU32Key {
 /// // Create a catch-all filter that sends unmatched traffic to class 1:1
 /// let request = U32CatchallFilterRequest::new(
 ///     QdiscRequestInner::new(if_index)
-///         .with_parent(TcHandle::from(0x0001_0000)), // Attach to DRR root
+///         .with_parent(TcHandle::from(0x0001_0000)), // Attach to HTB root
 /// )
 /// .with_class_id(0x0001_0001)  // Route to class 1:1
 /// .build();

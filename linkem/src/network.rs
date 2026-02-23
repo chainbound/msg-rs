@@ -48,7 +48,7 @@
 //! - 10ms latency + 100 Mbit/s to peer 2
 //! - 200ms latency + 5% loss to peer 3
 //!
-//! This is achieved using a DRR (Deficit Round Robin) qdisc with per-destination
+//! This is achieved using an HTB (Hierarchical Token Bucket) qdisc with per-destination
 //! classes. See the [`crate::tc`] module for details on the qdisc hierarchy.
 
 use std::{
@@ -72,9 +72,9 @@ use tokio::{
 };
 use tracing::Instrument as _;
 
-use crate::tc::requests::configure_drr_class;
+use crate::tc::requests::configure_htb_class;
 use crate::tc::requests::configure_tbf;
-use crate::tc::requests::{configure_flower_filter, configure_netem, install_drr_root};
+use crate::tc::requests::{configure_flower_filter, configure_netem, install_htb_root};
 use crate::{
     dynch::DynFuture,
     ip::{IpAddrExt as _, Subnet},
@@ -171,15 +171,15 @@ impl Display for Link {
 /// outgoing interface, enabling us to add/remove per-destination impairments.
 #[derive(Debug, Default)]
 struct PeerTcState {
-    /// Whether the drr root qdisc has been installed on this peer's veth.
+    /// Whether the HTB root qdisc has been installed on this peer's veth.
     ///
-    /// The drr qdisc is installed lazily on first `apply_impairment()` call.
-    drr_installed: bool,
+    /// The HTB qdisc is installed lazily on first `apply_impairment()` call.
+    htb_installed: bool,
 
     /// Set of destination peer IDs that have impairments configured.
     ///
     /// For each destination in this set, we have created:
-    /// - An drr class (for traffic classification)
+    /// - An HTB class (for traffic classification)
     /// - Optionally a TBF qdisc (for bandwidth limiting)
     /// - A netem qdisc (for delay, loss, etc.)
     /// - A flower filter (to match destination IP)
@@ -692,12 +692,12 @@ impl Network {
     ///
     /// # Traffic Control Hierarchy
     ///
-    /// On first call for a peer, this installs an drr root qdisc. Then for each
+    /// On first call for a peer, this installs an HTB root qdisc. Then for each
     /// destination, it creates:
     ///
     /// ```text
-    /// drr root (1:0)
-    ///   └── drr class (1:10+X) for destination peer X
+    /// HTB root (1:0)
+    ///   └── HTB class (1:10+X) for destination peer X
     ///         └── TBF (10+X:1) [if bandwidth limiting enabled]
     ///               └── netem (10+X:0) [delay, loss, jitter]
     ///
@@ -758,7 +758,7 @@ impl Network {
         let is_replacement = tc_state.has_impairment_to(link.destination());
 
         let dst_peer_id = dst_peer.id;
-        let drr_already_installed = tc_state.drr_installed;
+        let htb_already_installed = tc_state.htb_installed;
         let subnet = self.subnet;
 
         // Execute the TC configuration in the source peer's namespace.
@@ -780,13 +780,13 @@ impl Network {
                             .expect("to find dev")
                             .get() as i32;
 
-                        // Step 1: Install DRR root qdisc if not already present.
-                        if !drr_already_installed {
-                            install_drr_root(&mut ctx.handle, if_index).await?;
+                        // Step 1: Install HTB root qdisc if not already present.
+                        if !htb_already_installed {
+                            install_htb_root(&mut ctx.handle, if_index).await?;
                         }
 
-                        // Step 2: Create or replace DRR class for this destination.
-                        configure_drr_class(&mut ctx.handle, if_index, dst_peer_id, is_replacement)
+                        // Step 2: Create or replace HTB class for this destination.
+                        configure_htb_class(&mut ctx.handle, if_index, dst_peer_id, is_replacement)
                             .await?;
 
                         // Step 3: Create or replace TBF qdisc if bandwidth limiting is enabled.
@@ -829,7 +829,7 @@ impl Network {
 
         // Update state tracking after successful configuration.
         let tc_state = self.tc_state.get_mut(&link.source()).unwrap();
-        tc_state.drr_installed = true;
+        tc_state.htb_installed = true;
         tc_state.mark_configured(link.destination());
 
         Ok(())

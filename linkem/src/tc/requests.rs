@@ -10,39 +10,39 @@ use rtnetlink::packet_core::NetlinkPayload;
 use rtnetlink::packet_route::tc::TcHandle;
 
 use crate::network::PeerId;
-use crate::tc::drr::{DrrClassRequest, QdiscDrrRequest};
 use crate::tc::filter::{FlowerFilterRequest, U32CatchallFilterRequest};
-use crate::tc::handle::{QdiscRequestInner, drr_class_handle, netem_handle, tbf_handle};
+use crate::tc::handle::{QdiscRequestInner, htb_class_handle, netem_handle, tbf_handle};
+use crate::tc::htb::{HtbClassRequest, QdiscHtbRequest};
 use crate::tc::impairment::LinkImpairment;
 use crate::tc::netem::QdiscNetemRequest;
 use crate::tc::tbf::QdiscTbfRequest;
 
-/// Install DRR root qdisc with default class and catch-all filter.
+/// Install HTB root qdisc with default class and catch-all filter.
 ///
 /// This sets up the root qdisc hierarchy on a peer's veth interface:
-/// - DRR root qdisc (1:0)
+/// - HTB root qdisc (1:0) with `defcls=1`
 /// - Default class (1:1) for unimpaired traffic
 /// - U32 catch-all filter to route unclassified packets to 1:1
-pub async fn install_drr_root(
+pub async fn install_htb_root(
     handle: &mut rtnetlink::Handle,
     if_index: i32,
 ) -> std::result::Result<(), rtnetlink::Error> {
-    tracing::debug!("installing drr root qdisc");
+    tracing::debug!("installing htb root qdisc");
 
-    let drr_request = QdiscDrrRequest::new(QdiscRequestInner::new(if_index)).build();
+    let htb_request = QdiscHtbRequest::new(QdiscRequestInner::new(if_index)).build();
 
-    let mut res = handle.request(drr_request)?;
+    let mut res = handle.request(htb_request)?;
     while let Some(res) = res.next().await {
         if let NetlinkPayload::Error(e) = res.payload {
-            tracing::debug!(?e, "failed to create drr root qdisc");
+            tracing::debug!(?e, "failed to create htb root qdisc");
             return Err(rtnetlink::Error::NetlinkError(e));
         }
     }
 
     // Create the default class (1:1) for unimpaired traffic.
-    let default_class_request = DrrClassRequest::new(
+    let default_class_request = HtbClassRequest::new(
         QdiscRequestInner::new(if_index)
-            .with_parent(TcHandle::from(0x0001_0000)) // Parent: drr root
+            .with_parent(TcHandle::from(0x0001_0000)) // Parent: HTB root
             .with_handle(TcHandle::from(0x0001_0001)), // Handle: 1:1
     )
     .build();
@@ -50,7 +50,7 @@ pub async fn install_drr_root(
     let mut res = handle.request(default_class_request)?;
     while let Some(res) = res.next().await {
         if let NetlinkPayload::Error(e) = res.payload {
-            tracing::debug!(?e, "failed to create default drr class");
+            tracing::debug!(?e, "failed to create default htb class");
             return Err(rtnetlink::Error::NetlinkError(e));
         }
     }
@@ -71,30 +71,30 @@ pub async fn install_drr_root(
         }
     }
 
-    tracing::debug!("drr root qdisc, default class, and catch-all filter installed");
+    tracing::debug!("htb root qdisc, default class, and catch-all filter installed");
     Ok(())
 }
 
-/// Create or replace a DRR class for a destination peer.
+/// Create or replace an HTB class for a destination peer.
 ///
 /// Each destination peer gets its own class with handle 1:(10 + peer_id).
-pub async fn configure_drr_class(
+pub async fn configure_htb_class(
     handle: &mut rtnetlink::Handle,
     if_index: i32,
     dst_peer_id: PeerId,
     is_replacement: bool,
 ) -> std::result::Result<(), rtnetlink::Error> {
-    let class_handle = drr_class_handle(dst_peer_id);
+    let class_handle = htb_class_handle(dst_peer_id);
     tracing::debug!(
         dst_peer_id,
         class_handle = format!("{:x}", class_handle),
         is_replacement,
-        "creating drr class for destination"
+        "creating htb class for destination"
     );
 
-    let class_request = DrrClassRequest::new(
+    let class_request = HtbClassRequest::new(
         QdiscRequestInner::new(if_index)
-            .with_parent(TcHandle::from(0x0001_0000)) // Parent: drr root (1:0)
+            .with_parent(TcHandle::from(0x0001_0000)) // Parent: HTB root (1:0)
             .with_handle(TcHandle::from(class_handle)),
     )
     .with_replace(is_replacement)
@@ -103,7 +103,7 @@ pub async fn configure_drr_class(
     let mut res = handle.request(class_request)?;
     while let Some(res) = res.next().await {
         if let NetlinkPayload::Error(e) = res.payload {
-            tracing::debug!(?e, "failed to create drr class");
+            tracing::debug!(?e, "failed to create htb class");
             return Err(rtnetlink::Error::NetlinkError(e));
         }
     }
@@ -115,7 +115,7 @@ pub async fn configure_drr_class(
 ///
 /// Returns the parent handle that netem should attach to:
 /// - If TBF is created: returns the TBF handle
-/// - If no bandwidth limit: returns the DRR class handle
+/// - If no bandwidth limit: returns the HTB class handle
 pub async fn configure_tbf(
     handle: &mut rtnetlink::Handle,
     if_index: i32,
@@ -123,7 +123,7 @@ pub async fn configure_tbf(
     impairment: &LinkImpairment,
     is_replacement: bool,
 ) -> std::result::Result<TcHandle, rtnetlink::Error> {
-    let class_handle = drr_class_handle(dst_peer_id);
+    let class_handle = htb_class_handle(dst_peer_id);
 
     let Some(mut tbf_request) = QdiscTbfRequest::try_new(
         QdiscRequestInner::new(if_index)
@@ -131,7 +131,7 @@ pub async fn configure_tbf(
             .with_handle(TcHandle::from(tbf_handle(dst_peer_id))),
         impairment,
     ) else {
-        // No bandwidth limiting - netem attaches directly to DRR class
+        // No bandwidth limiting - netem attaches directly to HTB class
         return Ok(TcHandle::from(class_handle));
     };
 
@@ -207,7 +207,7 @@ pub async fn configure_flower_filter(
     dst_peer_id: PeerId,
     dst_ip: IpAddr,
 ) -> std::result::Result<(), rtnetlink::Error> {
-    let class_handle = drr_class_handle(dst_peer_id);
+    let class_handle = htb_class_handle(dst_peer_id);
     tracing::debug!(
         dst_ip = %dst_ip,
         class_id = format!("1:{}", class_handle & 0xFFFF),

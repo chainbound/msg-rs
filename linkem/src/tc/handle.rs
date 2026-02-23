@@ -5,7 +5,7 @@
 
 use rtnetlink::packet_route::tc::TcHandle;
 
-/// The offset added to peer IDs to compute DRR class minor numbers.
+/// The offset added to peer IDs to compute HTB class minor numbers.
 ///
 /// For peer ID `N`, the class minor/major (depending on the qdisc level) is `ID_OFFSET + N`. This
 /// keeps class 1:1 reserved as the default (unimpaired) class.
@@ -47,7 +47,7 @@ impl QdiscRequestInner {
     }
 }
 
-/// Compute the DRR class handle for a destination peer.
+/// Compute the HTB class handle for a destination peer.
 ///
 /// # Handle Format
 ///
@@ -56,10 +56,10 @@ impl QdiscRequestInner {
 /// # Example
 ///
 /// ```
-/// use linkem::tc::handle::drr_class_handle;
-/// assert_eq!(drr_class_handle(2), 0x0001_000C); // 1:12
+/// use linkem::tc::handle::htb_class_handle;
+/// assert_eq!(htb_class_handle(2), 0x0001_000C); // 1:12
 /// ```
-pub fn drr_class_handle(dest_peer_id: usize) -> u32 {
+pub fn htb_class_handle(dest_peer_id: usize) -> u32 {
     let minor = ID_OFFSET + dest_peer_id as u32;
     (1 << 16) | minor
 }
