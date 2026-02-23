@@ -110,7 +110,7 @@ impl From<LinkImpairment> for NetemQopt {
 ///
 /// For destination peer ID `N`:
 /// - Netem handle: `(20 + N):0` (e.g., peer 2 → handle 22:0)
-/// - Parent: TBF `(10 + N):0` if bandwidth limited, else DRR class `1:(10 + N)`
+/// - Parent: TBF `(10 + N):0` if bandwidth limited, else HTB class `1:(10 + N)`
 ///
 /// # Example
 ///

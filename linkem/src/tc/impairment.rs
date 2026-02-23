@@ -41,7 +41,7 @@ use super::core::MTU_ETHERNET;
 /// 4. When tokens are exhausted, packets queue (up to `tbf_limit_bytes`)
 /// 5. If the queue overflows, packets are dropped
 ///
-/// The hierarchy becomes: `DRR class -> TBF -> netem` instead of `DRR class -> netem`.
+/// The hierarchy becomes: `HTB class -> TBF -> netem` instead of `HTB class -> netem`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinkImpairment {
     // ---------------------------------------------------------------------------------

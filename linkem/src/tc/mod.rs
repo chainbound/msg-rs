@@ -11,14 +11,19 @@
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                        DRR Root Qdisc (1:0)                                 │
+//! │                        HTB Root Qdisc (1:0)                                │
 //! │                                                                             │
-//! │   Deficit Round Robin (DRR) serves as our root classifier. It allows us     │
-//! │   to create an arbitrary number of classes, one per destination peer.       │
-//! │   Each class can have its own chain of qdiscs for traffic shaping.          │
+//! │   Hierarchical Token Bucket (HTB) serves as our root classifier. It        │
+//! │   allows us to create an arbitrary number of classes, one per destination   │
+//! │   peer. Each class can have its own chain of qdiscs for traffic shaping.   │
 //! │                                                                             │
-//! │   DRR is used purely for classification, not bandwidth shaping. With a      │
-//! │   large quantum (4GiB), it acts as a simple packet router to child qdiscs.  │
+//! │   HTB is used purely for classification, not bandwidth shaping. All         │
+//! │   classes have effectively unlimited rate (~10 Gbit/s) and same priority,  │
+//! │   so HTB fairly round-robins between child qdiscs.                         │
+//! │                                                                             │
+//! │   HTB was chosen over DRR because it correctly handles non-work-conserving │
+//! │   children (netem with delay). When netem returns NULL, HTB tries the next │
+//! │   class instead of blocking—preventing head-of-line blocking.              │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!                                    │
 //!            ┌───────────────────────┼───────────────────────┐
@@ -27,7 +32,7 @@
 //! ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
 //! │  Class 1:1       │    │  Class 1:11      │    │  Class 1:12      │
 //! │  (default)       │    │  (dest=peer 1)   │    │  (dest=peer 2)   │
-//! │  quantum=4GiB    │    │  quantum=4GiB    │    │  quantum=4GiB    │
+//! │  rate=unlimited  │    │  rate=unlimited  │    │  rate=unlimited  │
 //! │                  │    │                  │    │                  │
 //! │  Unimpaired      │    │  Impaired path   │    │  Impaired path   │
 //! │  traffic         │    │  to peer 1       │    │  to peer 2       │
@@ -58,7 +63,7 @@
 //!
 //! | Component        | Handle          | Example (peer_id=2) |
 //! |------------------|-----------------|---------------------|
-//! | DRR root         | `1:0`           | `N/A`               |
+//! | HTB root         | `1:0`           | `N/A`               |
 //! | Default class    | `1:1`           | `N/A`               |
 //! | Per-dest class   | `1:(10+id)`     | `1:12`              |
 //! | TBF qdisc        | `(10+id):0`     | `12:0`              |
@@ -66,31 +71,37 @@
 //!
 //! ## Packet Flow
 //!
-//! 1. Packet enters DRR root qdisc
+//! 1. Packet enters HTB root qdisc
 //! 2. Flower filter examines destination IP
-//! 3. If destination matches a configured peer → route to that peer's class
-//! 4. Otherwise → route to default class (1:1, no impairment)
+//! 3. If destination matches a configured peer -> route to that peer's class
+//! 4. Otherwise -> route to default class (1:1, no impairment)
 //! 5. In the peer's class: TBF applies rate limiting (if configured)
 //! 6. Then netem applies delay, loss, jitter, etc.
 //!
-//! ## Why DRR?
+//! ## Why HTB?
 //!
-//! DRR (Deficit Round Robin) is the simplest classful qdisc that supports dynamic class
-//! creation. Unlike HTB (Hierarchical Token Bucket), it doesn't impose bandwidth shaping
-//! semantics at the classification layer.
+//! HTB (Hierarchical Token Bucket) was chosen over DRR (Deficit Round Robin) because
+//! of a fundamental head-of-line blocking interaction between DRR and netem:
 //!
-//! With a large quantum (4GiB), DRR acts as a pure packet router—when a class's turn comes,
-//! it drains its queue entirely before moving on. Since TBF is the actual bottleneck,
-//! DRR's round-robin scheduling rarely activates; packets flow directly to their
-//! destination's TBF/netem chain.
+//! DRR's `dequeue()` peeks at the first active class. When netem's peek returns NULL
+//! (delay hasn't elapsed), DRR immediately returns without trying other classes. This
+//! causes high-delay destinations to block low-delay destinations.
+//!
+//! HTB's `dequeue()` correctly handles this: when a child qdisc returns NULL, HTB
+//! advances to the next class via `htb_next_rb_node()`. This prevents head-of-line
+//! blocking entirely.
+//!
+//! With all classes at the same priority and effectively unlimited rate (~10 Gbit/s),
+//! HTB acts as a fair classifier that correctly interleaves traffic across destinations
+//! with different delays.
 //!
 //! This clean separation of concerns means:
-//! - **DRR**: Classification only (route packets to the right child qdisc)
+//! - **HTB**: Fair classification (route packets to the right child qdisc)
 //! - **TBF**: Rate limiting (enforce bandwidth caps)
 //! - **Netem**: Network emulation (add delay, loss, jitter)
 
 pub mod core;
-pub mod drr;
+pub mod htb;
 pub mod filter;
 pub mod handle;
 pub mod impairment;

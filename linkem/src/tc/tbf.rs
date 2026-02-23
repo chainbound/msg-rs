@@ -1,7 +1,7 @@
 //! Token Bucket Filter (TBF) qdisc support.
 //!
 //! TBF provides rate limiting by implementing a token bucket algorithm.
-//! It's inserted between the DRR class and netem when bandwidth limiting is configured.
+//! It's inserted between the HTB class and netem when bandwidth limiting is configured.
 
 use rtnetlink::packet_core::{
     NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REPLACE, NLM_F_REQUEST, NetlinkMessage,
@@ -244,7 +244,7 @@ impl TbfQopt {
 /// Builder for creating a TBF (Token Bucket Filter) qdisc.
 ///
 /// TBF provides rate limiting by implementing a token bucket algorithm.
-/// It's inserted between the DRR class and netem when bandwidth limiting
+/// It's inserted between the HTB class and netem when bandwidth limiting
 /// is configured.
 ///
 /// # How Token Bucket Works
@@ -260,7 +260,7 @@ impl TbfQopt {
 ///
 /// For destination peer ID `N`:
 /// - TBF handle: `(10 + N):0` (e.g., peer 2 → handle 12:0)
-/// - Parent: DRR class `1:(10 + N)`
+/// - Parent: HTB class `1:(10 + N)`
 ///
 /// # Example
 ///
