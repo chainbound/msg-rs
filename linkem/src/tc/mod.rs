@@ -18,7 +18,7 @@
 //! │   Each class can have its own chain of qdiscs for traffic shaping.          │
 //! │                                                                             │
 //! │   DRR is used purely for classification, not bandwidth shaping. With a      │
-//! │   large quantum (4GiB), it acts as a simple packet router to child qdiscs.  │
+//! │   quantum equal to the MTU, it fairly round-robins between child qdiscs.   │
 //! └─────────────────────────────────────────────────────────────────────────────┘
 //!                                    │
 //!            ┌───────────────────────┼───────────────────────┐
@@ -27,7 +27,7 @@
 //! ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
 //! │  Class 1:1       │    │  Class 1:11      │    │  Class 1:12      │
 //! │  (default)       │    │  (dest=peer 1)   │    │  (dest=peer 2)   │
-//! │  quantum=4GiB    │    │  quantum=4GiB    │    │  quantum=4GiB    │
+//! │  quantum=MTU     │    │  quantum=MTU     │    │  quantum=MTU     │
 //! │                  │    │                  │    │                  │
 //! │  Unimpaired      │    │  Impaired path   │    │  Impaired path   │
 //! │  traffic         │    │  to peer 1       │    │  to peer 2       │
@@ -79,13 +79,12 @@
 //! creation. Unlike HTB (Hierarchical Token Bucket), it doesn't impose bandwidth shaping
 //! semantics at the classification layer.
 //!
-//! With a large quantum (4GiB), DRR acts as a pure packet router—when a class's turn comes,
-//! it drains its queue entirely before moving on. Since TBF is the actual bottleneck,
-//! DRR's round-robin scheduling rarely activates; packets flow directly to their
-//! destination's TBF/netem chain.
+//! With a quantum equal to the MTU (1500 bytes), DRR fairly round-robins between
+//! destination classes—each class dequeues one packet per round. This prevents a bursty
+//! flow to one peer from starving traffic to other peers.
 //!
 //! This clean separation of concerns means:
-//! - **DRR**: Classification only (route packets to the right child qdisc)
+//! - **DRR**: Fair classification (round-robin packets to the right child qdisc)
 //! - **TBF**: Rate limiting (enforce bandwidth caps)
 //! - **Netem**: Network emulation (add delay, loss, jitter)
 

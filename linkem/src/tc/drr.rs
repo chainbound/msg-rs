@@ -17,14 +17,14 @@ const TCA_DRR_QUANTUM: u16 = 1;
 
 /// The default quantum for DRR classes, in bytes.
 ///
-/// With a large quantum (4GiB of [`u32::MAX`]), DRR effectively becomes a pure packet router—when
-/// a class's turn comes, it drains its queue entirely before moving to the next class. This is
-/// desirable because we use DRR only for classification; actual rate limiting is done by TBF.
+/// The quantum controls how many bytes a class can send per scheduling round before DRR
+/// moves to the next class. Setting this to the MTU (1500 bytes) gives fair round-robin
+/// behavior: each destination class dequeues one packet per round, preventing a bursty
+/// flow to one peer from starving other peers.
 ///
 /// The quantum must be at least as large as the maximum packet size (MTU) to ensure packets
-/// can always be dequeued. 1MB is large enough to handle any reasonable packet while still
-/// being well within safe bounds.
-pub const DRR_DEFAULT_QUANTUM: u32 = u32::MAX; // 4GiB
+/// can always be dequeued.
+pub const DRR_DEFAULT_QUANTUM: u32 = 1500;
 
 /// Builder for creating a DRR (Deficit Round Robin) root qdisc.
 ///
@@ -72,9 +72,9 @@ impl QdiscDrrRequest {
 /// point for the TBF and netem qdiscs that implement the actual impairments.
 ///
 /// DRR classes are simple—they only have a `quantum` parameter that controls how
-/// many bytes can be sent per scheduling round. With a large quantum (default 1MB),
-/// the class effectively drains its entire queue each time it's scheduled, making
-/// DRR act as a pure classifier rather than a fair scheduler.
+/// many bytes can be sent per scheduling round. With the default quantum set to
+/// the MTU (1500 bytes), each class dequeues one packet per round, giving fair
+/// round-robin behavior across destinations.
 ///
 /// # Handle Scheme
 ///
@@ -103,8 +103,8 @@ pub struct DrrClassRequest {
     /// The quantum for this class in bytes.
     ///
     /// This determines how many bytes can be sent per scheduling round.
-    /// With a large value (default [`DRR_DEFAULT_QUANTUM`]), the class
-    /// drains its entire queue each time it's scheduled.
+    /// Defaults to [`DRR_DEFAULT_QUANTUM`] (MTU, 1500 bytes) for fair
+    /// round-robin: one packet per class per round.
     pub quantum: u32,
     /// If true, replace an existing class instead of failing if it exists.
     pub replace: bool,
