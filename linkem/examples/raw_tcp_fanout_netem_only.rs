@@ -1,17 +1,32 @@
-//! Raw TCP Fan-out Latency Probe
+//! Raw TCP Fan-out Latency Probe - Netem Only (No DRR)
 //!
-//! Creates four network namespaces: one sender and three receivers, each with
-//! different network impairments. The sender accepts raw TCP connections from
-//! all receivers, then broadcasts fixed-size timestamped messages at a fixed rate.
-//! Each receiver logs the one-way delay for every message.
+//! Diagnostic variant of `raw_tcp_fanout_probe` that applies netem directly on
+//! the hub's bridge ports instead of using the DRR-based `apply_impairment()`.
+//! This eliminates DRR from the qdisc hierarchy, isolating whether the
+//! DRR + netem interaction causes the latency inflation seen in the original.
 //!
-//! This is like `pubsub_latency_probe` but uses raw `TcpListener`/`TcpStream`
-//! instead of the msg-rs Pub/Sub sockets.
+//! # Architecture difference
+//!
+//! Original (`apply_impairment`):
+//!
+//! ```text
+//!   sender veth -> [DRR root -> per-dest class -> netem] -> bridge -> receiver
+//! ```
+//!
+//! This variant:
+//!
+//! ```text
+//!   sender veth -> bridge -> [netem root on bridge port] -> receiver veth
+//! ```
+//!
+//! Each receiver's bridge port (`msg-vethN-br` in the hub namespace) gets its
+//! own standalone netem as root qdisc. No classification needed - each bridge
+//! port only carries traffic for one destination.
 //!
 //! # Running
 //!
 //! ```bash
-//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example raw_tcp_fanout_probe -p linkem
+//! sudo HOME=$HOME RUST_LOG=info $(which cargo) run --example raw_tcp_fanout_netem_only -p linkem
 //! ```
 
 #[cfg(not(target_os = "linux"))]
@@ -27,39 +42,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     use linkem::{
         ip::Subnet,
-        network::{Link, NAMESPACE_PREFIX, Network, PeerIdExt},
+        network::{NAMESPACE_PREFIX, Network, PeerIdExt},
         tc::impairment::LinkImpairment,
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tracing_subscriber::EnvFilter;
 
-    /// Latency and stream-level stats collected by each receiver.
     struct Stats {
         name: &'static str,
         count: u64,
         total: Duration,
         min: Duration,
         max: Duration,
-        bytes_read: u64,
-        read_calls: u64,
-        reads_with_messages: u64,
-        max_read_size_bytes: u64,
-        max_messages_per_read: u64,
-        max_pending_bytes: u64,
-        trailing_bytes: u64,
-        ss_mid: String,
-        ss_end: String,
     }
 
-    /// Execute a command and capture its output as UTF-8 text.
     fn capture_command(command: &str, args: &[&str]) -> String {
         let rendered = format!("{} {}", command, args.join(" "));
-
         match std::process::Command::new(command).args(args).output() {
             Ok(output) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-
                 if output.status.success() {
                     let trimmed = stdout.trim_end();
                     if trimmed.is_empty() {
@@ -80,15 +82,59 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    /// Spawn a receiver in the given namespace. It connects to the sender via raw TCP,
-    /// reads fixed-size payloads, and measures one-way delay from the first 16 bytes
-    /// (timestamp fields) of each payload.
+    /// Apply netem as root qdisc on a bridge port in the hub namespace.
+    ///
+    /// This bypasses the DRR hierarchy entirely. Each bridge port only carries
+    /// traffic to one specific peer, so no per-destination classification is needed.
+    fn apply_netem_on_bridge_port(
+        hub_namespace: &str,
+        bridge_port: &str,
+        impairment: &LinkImpairment,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let delay = format!("{}us", impairment.latency);
+        let jitter = format!("{}us", impairment.jitter);
+
+        let mut args = vec![
+            "netns",
+            "exec",
+            hub_namespace,
+            "tc",
+            "qdisc",
+            "add",
+            "dev",
+            bridge_port,
+            "root",
+            "netem",
+            "delay",
+            &delay,
+            &jitter,
+        ];
+
+        let loss_str;
+        if impairment.loss > 0.0 {
+            loss_str = format!("{}%", impairment.loss);
+            args.push("loss");
+            args.push(&loss_str);
+        }
+
+        let output = std::process::Command::new("ip").args(&args).output()?;
+
+        if !output.status.success() {
+            return Err(std::io::Error::other(format!(
+                "tc netem on {bridge_port} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))
+            .into());
+        }
+
+        Ok(())
+    }
+
     async fn spawn_receiver(
         network: &Network,
         recv_id: usize,
         sender_addr: IpAddr,
         port: u16,
-        payload_size: usize,
         total_messages: u64,
         epoch: Instant,
         name: &'static str,
@@ -101,7 +147,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Box::pin(async move {
                     let dest = SocketAddr::new(sender_addr, port);
 
-                    // Retry connecting until the sender is listening
                     let mut stream = loop {
                         match tokio::net::TcpStream::connect(dest).await {
                             Ok(s) => break s,
@@ -155,7 +200,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 tracing::error!(name, %e, "read error");
                                 break;
                             }
-                            Err(_) => break, // timeout — sender is done
+                            Err(_) => break,
                         }
                     }
 
@@ -171,7 +216,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    // --- Configuration ---
+    // --- Configuration (same as original) ---
     const MESSAGES_PER_SECOND: u64 = 1000;
     const TOTAL_MESSAGES: u64 = 1000;
     const NUM_RECEIVERS: usize = 3;
@@ -205,7 +250,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     ];
 
-    println!("\n=== Raw TCP Fan-out Latency Probe (1 sender, 3 receivers) ===\n");
+    println!("\n=== Raw TCP Fan-out Latency Probe - NETEM ONLY (no DRR) ===\n");
+    println!("  Impairments applied as standalone netem on hub bridge ports.");
+    println!("  No DRR classifier in the qdisc hierarchy.\n");
     println!("  Rate:  {} msg/s", MESSAGES_PER_SECOND);
     println!("  Count: {} messages\n", TOTAL_MESSAGES);
     println!("  Receivers:");
@@ -228,16 +275,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sender_addr = sender_id.veth_address(subnet);
     println!("  Sender: peer {} @ {}", sender_id, sender_addr);
 
+    let hub_namespace = format!("{NAMESPACE_PREFIX}-hub");
+
+    // Add peers WITHOUT apply_impairment. Instead, apply netem directly on each
+    // receiver's bridge port in the hub namespace.
     let mut recv_ids: Vec<(usize, &str)> = Vec::new();
     for (name, imp) in &impairments {
         let recv_id = network.add_peer().await?;
-        network.apply_impairment(Link::new(sender_id, recv_id), *imp).await?;
-        println!("  Recv [{}]: peer {} @ {}", name, recv_id, recv_id.veth_address(subnet));
+
+        let bridge_port = recv_id.veth_br_name();
+        apply_netem_on_bridge_port(&hub_namespace, &bridge_port, imp)?;
+
+        println!(
+            "  Recv [{}]: peer {} @ {}  (netem on {})",
+            name,
+            recv_id,
+            recv_id.veth_address(subnet),
+            bridge_port,
+        );
         recv_ids.push((recv_id, name));
     }
 
-    // Disable offloads on peer and hub veth endpoints to prevent large software-
-    // aggregated segments from bypassing per-packet scheduling expectations.
+    // Disable TSO/GSO/GRO on all peer veth devices.
     let all_peer_ids: Vec<usize> =
         std::iter::once(sender_id).chain(recv_ids.iter().map(|(id, _)| *id)).collect();
 
@@ -262,8 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
     }
 
-    // Also disable offloads on the hub-side veth endpoints.
-    let hub_namespace = format!("{NAMESPACE_PREFIX}-hub");
+    // Disable offloads on hub-side veth endpoints and bridge.
     for peer_id in &all_peer_ids {
         let hub_veth = peer_id.veth_br_name();
         let output = std::process::Command::new("ip")
@@ -292,8 +350,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Best effort only: bridge devices may not expose these toggles on every kernel.
-    let bridge_output = std::process::Command::new("ip")
+    let _ = std::process::Command::new("ip")
         .args([
             "netns",
             "exec",
@@ -308,24 +365,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "gro",
             "off",
         ])
-        .output()?;
-    if !bridge_output.status.success() {
-        tracing::warn!(
-            namespace = %hub_namespace,
-            dev = "linkem-br0",
-            stderr = %String::from_utf8_lossy(&bridge_output.stderr),
-            "could not disable offloads on hub bridge (continuing)"
-        );
-    }
+        .output();
 
     println!("  Disabled offloads: tso/gso/gro on peer + hub veth devices");
     println!();
 
+    // Show the netem qdiscs we configured in the hub.
+    println!("  Hub bridge port qdiscs:");
+    for (recv_id, name) in &recv_ids {
+        let bridge_port = recv_id.veth_br_name();
+        let tc_out = capture_command(
+            "ip",
+            &["netns", "exec", &hub_namespace, "tc", "qdisc", "show", "dev", &bridge_port],
+        );
+        println!("    [{name}] {bridge_port}:");
+        for line in tc_out.lines().skip(1) {
+            println!("      {line}");
+        }
+    }
+    println!();
+
     let epoch = Instant::now();
 
-    // --- Sender ---
-    // Binds a TCP listener, waits for all receivers to connect, then broadcasts
-    // timestamped 16-byte payloads to each connection.
+    // --- Sender (identical to original) ---
     let sender = network
         .run_in_namespace(sender_id, move |_| {
             Box::pin(async move {
@@ -335,7 +397,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 tracing::info!("sender listening, waiting for {} receivers", NUM_RECEIVERS);
 
-                // Accept all receiver connections
                 let mut streams = Vec::with_capacity(NUM_RECEIVERS);
                 for i in 0..NUM_RECEIVERS {
                     let (stream, peer) = listener.accept().await.unwrap();
@@ -367,7 +428,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
-                // Shut down writes so receivers see EOF
                 for mut stream in streams {
                     let _ = stream.shutdown().await;
                 }
@@ -375,10 +435,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
-    // Small delay so the sender can bind before receivers connect
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // --- Receivers ---
+    // --- Receivers (identical to original) ---
     let (recv_1_id, recv_1_name) = recv_ids[0];
     let (recv_2_id, recv_2_name) = recv_ids[1];
     let (recv_3_id, recv_3_name) = recv_ids[2];
@@ -393,29 +452,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         spawn_receiver(&network, recv_3_id, sender_addr, PORT, TOTAL_MESSAGES, epoch, recv_3_name)
             .await?;
 
-    // Wait for sender to finish, then collect receiver results.
     sender.await?;
     let (r1, r2, r3) = tokio::join!(recv_1, recv_2, recv_3);
 
-    // Capture sender-side queue and link counters for troubleshooting.
-    let (sender_veth, sender_link_stats, sender_tc_qdisc, sender_tc_class, sender_tc_filter) =
-        network
-            .run_in_namespace(sender_id, |ctx| {
-                let veth = ctx.peer_id.veth_name();
-                Box::pin(async move {
-                    let link_stats = capture_command("ip", &["-s", "link", "show", "dev", &veth]);
-                    let tc_qdisc = capture_command("tc", &["-s", "qdisc", "show", "dev", &veth]);
-                    let tc_class = capture_command("tc", &["-s", "class", "show", "dev", &veth]);
-                    let tc_filter = capture_command("tc", &["-s", "filter", "show", "dev", &veth]);
+    // Capture hub-side diagnostics (netem stats on bridge ports).
+    println!("\n=== Hub Bridge Port Diagnostics ===\n");
+    for (recv_id, name) in &recv_ids {
+        let bridge_port = recv_id.veth_br_name();
+        let tc_out = capture_command(
+            "ip",
+            &["netns", "exec", &hub_namespace, "tc", "-s", "qdisc", "show", "dev", &bridge_port],
+        );
+        println!("  [{name}] {bridge_port}:\n{tc_out}\n");
+    }
 
-                    (veth, link_stats, tc_qdisc, tc_class, tc_filter)
-                })
+    // Also capture sender-side diagnostics (should be default qdisc, no DRR).
+    let (sender_veth, sender_tc) = network
+        .run_in_namespace(sender_id, |ctx| {
+            let veth = ctx.peer_id.veth_name();
+            Box::pin(async move {
+                let tc = capture_command("tc", &["-s", "qdisc", "show", "dev", &veth]);
+                (veth, tc)
             })
-            .await?
-            .await?;
+        })
+        .await?
+        .await?;
+
+    println!("  Sender ({sender_veth}):\n{sender_tc}\n");
 
     // --- Summary ---
-    println!("\n=== Results ===\n");
+    println!("=== Results ===\n");
     for stats in [r1?, r2?, r3?] {
         println!("  [{}]", stats.name);
         println!("    Received: {}/{} messages", stats.count, TOTAL_MESSAGES);
@@ -429,12 +495,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     }
-
-    println!("\n=== Sender Diagnostics ({sender_veth}) ===\n");
-    println!("-- ip -s link --\n{}\n", sender_link_stats);
-    println!("-- tc -s qdisc --\n{}\n", sender_tc_qdisc);
-    println!("-- tc -s class --\n{}\n", sender_tc_class);
-    println!("-- tc -s filter --\n{}\n", sender_tc_filter);
+    println!();
 
     Ok(())
 }

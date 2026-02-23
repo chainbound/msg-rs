@@ -49,6 +49,9 @@ name = "pubsub_latency_probe"
 name = "raw_tcp_fanout_probe"
 
 [[example]]
+name = "raw_tcp_fanout_netem_only"
+
+[[example]]
 name = "bdp_throughput"
 
 [[example]]
