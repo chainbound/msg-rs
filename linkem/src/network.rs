@@ -10,10 +10,10 @@
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────────┐
-//! │                           Hub Namespace (linkem-hub)                       │
+//! │                        Hub Namespace (lem-{id}-hub)                         │
 //! │                                                                             │
 //! │   ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │   │                      Bridge (linkem-br0)                           │   │
+//! │   │                      Bridge (linkem-br0)                            │   │
 //! │   │                                                                     │   │
 //! │   │   Acts as a virtual switch connecting all peer veth endpoints       │   │
 //! │   └─────────────────────────────────────────────────────────────────────┘   │
@@ -29,7 +29,7 @@
 //! │    msg-veth1       │ │  msg-veth2       │ │  msg-veth3       │
 //! │                    │ │                  │ │                  │
 //! │  Peer 1 Namespace  │ │ Peer 2 Namespace │ │ Peer 3 Namespace │
-//! │  (linkem-1)       │ │ (linkem-2)      │ │ (linkem-3)      │
+//! │  (lem-{id}-1)      │ │ (lem-{id}-2)     │ │ (lem-{id}-3)     │
 //! │                    │ │                  │ │                  │
 //! │  IP: 10.0.0.1      │ │ IP: 10.0.0.2     │ │ IP: 10.0.0.3     │
 //! │                    │ │                  │ │                  │
@@ -105,18 +105,13 @@ pub fn next_peer_id() -> PeerId {
 pub type PeerId = usize;
 
 /// Prefix for all network namespace names created by this crate.
-pub const NAMESPACE_PREFIX: &str = "linkem";
+pub const NAMESPACE_PREFIX: &str = "lem";
 
 /// Prefix for all virtual ethernet device names created by this crate.
 pub const LINK_PREFIX: &str = "msg-veth";
 
 /// Extension trait for peer IDs providing namespace and device naming utilities.
 pub trait PeerIdExt: Display + Copy {
-    /// Get the network namespace name for this peer.
-    fn namespace_name(self) -> String {
-        format!("{NAMESPACE_PREFIX}-{self}")
-    }
-
     /// Compute the IP address for this peer's veth device within the given subnet.
     fn veth_address(self, subnet: Subnet) -> IpAddr;
 
@@ -398,6 +393,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 #[derive(Debug)]
 pub struct Network {
+    /// Random simulation ID used to uniquely prefix namespace names.
+    ///
+    /// This allows multiple concurrent simulations without name collisions.
+    sim_id: u16,
+
     /// All peers in this network, keyed by peer ID.
     peers: PeerMap,
 
@@ -426,11 +426,13 @@ impl Network {
     /// Create a new simulated network with the given IP subnet.
     ///
     /// This creates:
-    /// 1. A hub network namespace (`linkem-hub`)
+    /// 1. A hub network namespace (e.g. `lem-{sim_id}-hub`)
     /// 2. A bridge device (`linkem-br0`) in the hub namespace
     ///
     /// Peers can then be added with [`add_peer`](Self::add_peer).
     pub async fn new(subnet: Subnet) -> Result<Self> {
+        let sim_id = std::process::id() as u16;
+
         // Create rtnetlink connection in the host namespace.
         // This is used for creating veth pairs and moving devices.
         let (connection, handle, _) = rtnetlink::new_connection()?;
@@ -447,12 +449,16 @@ impl Network {
         };
 
         // Create the hub namespace that will host the bridge.
-        let namespace_hub =
-            NetworkNamespace::new(Self::hub_namespace_name(), default_runtime_factory(), make_ctx)
-                .await?;
+        let namespace_hub = NetworkNamespace::new(
+            Self::hub_namespace_name(sim_id),
+            default_runtime_factory(),
+            make_ctx,
+        )
+        .await?;
         let fd = namespace_hub.fd();
 
         let network = Self {
+            sim_id,
             peers: PeerMap::default(),
             tc_state: TcStateMap::default(),
             subnet,
@@ -473,9 +479,14 @@ impl Network {
         Ok(network)
     }
 
-    /// Get the name of the hub namespace.
-    fn hub_namespace_name() -> String {
-        format!("{NAMESPACE_PREFIX}-hub")
+    /// Get the name of the hub namespace for a given simulation ID.
+    fn hub_namespace_name(sim_id: u16) -> String {
+        format!("{NAMESPACE_PREFIX}-{sim_id:04x}-hub")
+    }
+
+    /// Get the network namespace name for a peer in this simulation.
+    fn peer_namespace_name(&self, peer_id: PeerId) -> String {
+        format!("{NAMESPACE_PREFIX}-{:04x}-{peer_id}", self.sim_id)
     }
 
     /// Add a new peer to the network.
@@ -486,7 +497,7 @@ impl Network {
     /// 3. IP address assignment based on the subnet and peer ID
     pub async fn add_peer_with_options(&mut self, options: PeerOptions) -> Result<PeerId> {
         let peer_id = PEER_ID_NEXT.load(Ordering::Relaxed);
-        let namespace_name = peer_id.namespace_name();
+        let namespace_name = self.peer_namespace_name(peer_id);
         let veth_name = Arc::new(peer_id.veth_name());
         let veth_br_name = Arc::new(peer_id.veth_br_name());
 
@@ -847,9 +858,9 @@ mod linkem_network {
     async fn create_network_works() {
         let _ = tracing_subscriber::fmt::try_init();
         let subnet = Subnet::new(Ipv4Addr::new(11, 0, 0, 0).into(), 16);
-        let _network = Network::new(subnet).await.unwrap();
+        let network = Network::new(subnet).await.unwrap();
 
-        let path = format!("/run/netns/{}", Network::hub_namespace_name());
+        let path = format!("/run/netns/{}", Network::hub_namespace_name(network.sim_id));
         let exists = std::fs::exists(path.clone()).unwrap();
 
         assert!(exists, "netns file doesn't exists at path {path}");
