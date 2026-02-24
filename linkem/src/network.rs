@@ -1473,4 +1473,63 @@ mod linkem_network {
             received_count
         );
     }
+
+    /// Test that two processes can create networks concurrently without name conflicts.
+    ///
+    /// Uses `fork()` so each child has a different PID (and therefore a different `sim_id`).
+    /// Both children create a network with peers; the parent waits for both to exit
+    /// successfully.
+    #[test]
+    fn concurrent_simulations_no_conflicts() {
+        use nix::sys::wait::{WaitStatus, waitpid};
+        use nix::unistd::{ForkResult, fork};
+
+        let _ = tracing_subscriber::fmt::try_init();
+
+        /// Spawn a child process that creates a network with 3 peers.
+        /// Returns the child PID.
+        fn spawn_simulation() -> nix::unistd::Pid {
+            // SAFETY: we are single-threaded at this point in the test (no tokio
+            // runtime yet), so fork is safe.
+            match unsafe { fork() }.expect("fork failed") {
+                ForkResult::Child => {
+                    let rt =
+                        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+
+                    let code = rt.block_on(async {
+                        let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
+                        let mut network = match Network::new(subnet).await {
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("Network::new failed: {e}");
+                                return 1;
+                            }
+                        };
+
+                        for _ in 0..3 {
+                            if let Err(e) = network.add_peer().await {
+                                eprintln!("add_peer failed: {e}");
+                                return 1;
+                            }
+                        }
+
+                        0
+                    });
+
+                    std::process::exit(code);
+                }
+                ForkResult::Parent { child } => child,
+            }
+        }
+
+        let child_a = spawn_simulation();
+        let child_b = spawn_simulation();
+
+        for (label, pid) in [("A", child_a), ("B", child_b)] {
+            match waitpid(pid, None).expect("waitpid failed") {
+                WaitStatus::Exited(_, 0) => {}
+                status => panic!("child {label} (pid {pid}) failed: {status:?}"),
+            }
+        }
+    }
 }
