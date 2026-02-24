@@ -393,7 +393,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// ```
 #[derive(Debug)]
 pub struct Network {
-    /// Random simulation ID used to uniquely prefix namespace names.
+    /// Simulation ID used to uniquely prefix namespace names, derived from PID.
     ///
     /// This allows multiple concurrent simulations without name collisions.
     sim_id: u16,
