@@ -11,19 +11,23 @@ traffic control.
 Each peer runs in an isolated network namespace, connected through a central hub:
 
 ```text
-                      Hub Namespace (linkem-hub)
+                    Hub Namespace (lem-{id}-hub)
 ┌─────────────────────────────────────────────────────────────┐
-│                    Bridge (linkem-br0)                     │
+│                    Bridge (lem-br{id})                      │
 └─────────┬───────────────────┬───────────────────┬───────────┘
           │                   │                   │
      veth pair           veth pair           veth pair
           │                   │                   │
 ┌─────────┴─────────┐ ┌───────┴──────────┐ ┌──────┴───────────┐
 │  Peer 1 Namespace │ │ Peer 2 Namespace │ │ Peer 3 Namespace │
+│  (lem-{id}-1)     │ │ (lem-{id}-2)     │ │ (lem-{id}-3)     │
 │  IP: 10.0.0.1     │ │ IP: 10.0.0.2     │ │ IP: 10.0.0.3     │
 │  TC: per-dest     │ │ TC: per-dest     │ │ TC: per-dest     │
 └───────────────────┘ └──────────────────┘ └──────────────────┘
 ```
+
+Where `{id}` is a 4-digit hex identifier derived from the process ID, ensuring
+multiple concurrent simulations don't clash.
 
 See [`src/network.rs`](src/network.rs) for detailed architecture documentation.
 
