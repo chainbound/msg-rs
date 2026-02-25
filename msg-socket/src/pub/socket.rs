@@ -1,5 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
+use arc_swap::Guard;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use tokio::{
@@ -28,7 +29,7 @@ pub struct PubSocket<T: Transport<A>, A: Address> {
     /// The reply socket options, shared with the driver.
     options: Arc<PubOptions>,
     /// The reply socket state, shared with the driver.
-    state: Arc<SocketState>,
+    state: Arc<SocketState<T::Stats>>,
     /// The transport used by this socket. This value is temporary and will be moved
     /// to the driver task once the socket is bound.
     transport: Option<T>,
@@ -89,7 +90,7 @@ where
             to_sessions_bcast: None,
             options: Arc::new(options),
             transport: Some(transport),
-            state: Arc::new(SocketState::default()),
+            state: Arc::new(SocketState::<T::Stats>::default()),
             hook: None,
             compressor: None,
         }
@@ -210,6 +211,11 @@ where
 
     pub fn stats(&self) -> &PubStats {
         &self.state.stats.specific
+    }
+
+    /// Get the latest transport-level stats snapshot.
+    pub fn transport_stats(&self) -> Guard<Arc<T::Stats>> {
+        self.state.transport_stats.load()
     }
 
     /// Returns the local address this socket is bound to. `None` if the socket is not bound.

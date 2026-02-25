@@ -14,7 +14,7 @@ use super::{
     PubError, PubMessage, PubOptions, SocketState, session::SubscriberSession, trie::PrefixTrie,
 };
 use crate::{ConnectionHookErased, hooks};
-use msg_transport::{Address, PeerAddress, Transport};
+use msg_transport::{Address, MeteredIo, PeerAddress, Transport};
 use msg_wire::pubsub;
 
 /// The driver for the publisher socket. This is responsible for accepting incoming connections,
@@ -28,7 +28,7 @@ pub(crate) struct PubDriver<T: Transport<A>, A: Address> {
     /// The publisher options (shared with the socket)
     pub(super) options: Arc<PubOptions>,
     /// The publisher socket state, shared with the socket front-end.
-    pub(crate) state: Arc<SocketState>,
+    pub(crate) state: Arc<SocketState<T::Stats>>,
     /// Optional connection hook.
     pub(super) hook: Option<Arc<dyn ConnectionHookErased<T::Io>>>,
     /// A set of pending incoming connections, represented by [`Transport::Accept`].
@@ -58,13 +58,15 @@ where
                     Ok((stream, _addr)) => {
                         info!("connection hook passed");
 
-                        let framed = Framed::new(stream, pubsub::Codec::new());
+                        let metered =
+                            MeteredIo::new(stream, Arc::clone(&this.state.transport_stats));
+                        let framed = Framed::new(metered, pubsub::Codec::new());
 
                         let session = SubscriberSession {
                             seq: 0,
                             session_id: this.id_counter,
                             from_socket_bcast: this.from_socket_bcast.resubscribe().into(),
-                            state: Arc::clone(&this.state),
+                            stats: this.state.stats.clone(),
                             pending_egress: None,
                             conn: framed,
                             topic_filter: PrefixTrie::new(),
@@ -158,13 +160,14 @@ where
 
             self.hook_tasks.spawn(fut.with_span(span));
         } else {
-            let framed = Framed::new(io, pubsub::Codec::new());
+            let metered = MeteredIo::new(io, Arc::clone(&self.state.transport_stats));
+            let framed = Framed::new(metered, pubsub::Codec::new());
 
             let session = SubscriberSession {
                 seq: 0,
                 session_id: self.id_counter,
                 from_socket_bcast: self.from_socket_bcast.resubscribe().into(),
-                state: Arc::clone(&self.state),
+                stats: self.state.stats.clone(),
                 pending_egress: None,
                 conn: framed,
                 topic_filter: PrefixTrie::new(),

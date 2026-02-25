@@ -11,8 +11,11 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_util::codec::Framed;
 use tracing::{debug, error, trace, warn};
 
-use super::{PubMessage, SocketState, trie::PrefixTrie};
+use super::{PubMessage, trie::PrefixTrie};
 use msg_wire::pubsub;
+
+use super::stats::PubStats;
+use crate::stats::SocketStats;
 
 /// A subscriber session. This struct represents a single subscriber session, which is a
 /// connection to a subscriber. This struct is responsible for handling incoming and outgoing
@@ -26,8 +29,8 @@ pub(super) struct SubscriberSession<Io> {
     pub(super) from_socket_bcast: BroadcastStream<PubMessage>,
     /// Messages queued to be sent on the connection
     pub(super) pending_egress: Option<pubsub::Message>,
-    /// The socket state, shared between the backend task and the socket.
-    pub(super) state: Arc<SocketState>,
+    /// The socket stats.
+    pub(super) stats: Arc<SocketStats<PubStats>>,
     /// The framed connection.
     pub(super) conn: Framed<Io, pubsub::Codec>,
     /// The topic filter (a prefix trie that works with strings)
@@ -76,7 +79,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> SubscriberSession<Io> {
 
 impl<Io> Drop for SubscriberSession<Io> {
     fn drop(&mut self) {
-        self.state.stats.specific.decrement_active_clients();
+        self.stats.specific.decrement_active_clients();
     }
 }
 
@@ -130,7 +133,7 @@ impl<Io: AsyncRead + AsyncWrite + Unpin> Future for SubscriberSession<Io> {
 
                 match this.conn.start_send_unpin(msg) {
                     Ok(_) => {
-                        this.state.stats.specific.increment_tx(msg_len);
+                        this.stats.specific.increment_tx(msg_len);
                     }
                     Err(e) => {
                         error!(err = ?e, "Failed to send message to socket");
