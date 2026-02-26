@@ -13,12 +13,12 @@
 //! │                        Hub Namespace (lem-{id}-hub)                         │
 //! │                                                                             │
 //! │   ┌─────────────────────────────────────────────────────────────────────┐   │
-//! │   │                      Bridge (linkem-br0)                            │   │
+//! │   │                    Bridge (lem-br{id})                              │   │
 //! │   │                                                                     │   │
 //! │   │   Acts as a virtual switch connecting all peer veth endpoints       │   │
 //! │   └─────────────────────────────────────────────────────────────────────┘   │
 //! │          │                    │                    │                        │
-//! │    msg-veth1-br         msg-veth2-br         msg-veth3-br                   │
+//! │    lv{id}-1-br          lv{id}-2-br          lv{id}-3-br                    │
 //! └──────────┼────────────────────┼────────────────────┼────────────────────────┘
 //!            │                    │                    │
 //!   ═══════════════      ═══════════════      ═══════════════
@@ -26,7 +26,7 @@
 //!   ═══════════════      ═══════════════      ═══════════════
 //!            │                    │                    │
 //! ┌──────────┼─────────┐ ┌────────┼─────────┐ ┌────────┼─────────┐
-//! │    msg-veth1       │ │  msg-veth2       │ │  msg-veth3       │
+//! │    lv{id}-1        │ │  lv{id}-2        │ │  lv{id}-3        │
 //! │                    │ │                  │ │                  │
 //! │  Peer 1 Namespace  │ │ Peer 2 Namespace │ │ Peer 3 Namespace │
 //! │  (lem-{id}-1)      │ │ (lem-{id}-2)     │ │ (lem-{id}-3)     │
@@ -108,7 +108,11 @@ pub type PeerId = usize;
 pub const NAMESPACE_PREFIX: &str = "lem";
 
 /// Prefix for all virtual ethernet device names created by this crate.
-pub const LINK_PREFIX: &str = "msg-veth";
+///
+/// Kept short because Linux interface names are limited to 15 characters (IFNAMSIZ - 1),
+/// and the full name is `{LINK_PREFIX}{sim_id:04x}-{peer_id}` with a `-br` suffix
+/// for the bridge endpoint.
+pub const LINK_PREFIX: &str = "lv";
 
 /// Extension trait for peer IDs providing namespace and device naming utilities.
 pub trait PeerIdExt: Display + Copy {
@@ -116,13 +120,17 @@ pub trait PeerIdExt: Display + Copy {
     fn veth_address(self, subnet: Subnet) -> IpAddr;
 
     /// Get the name of the veth device inside the peer's namespace.
-    fn veth_name(self) -> String {
-        format!("{LINK_PREFIX}{self}")
+    ///
+    /// Format: `lv{sim_id:04x}-{peer_id}` (e.g. `lva3f1-1`).
+    fn veth_name(self, sim_id: u16) -> String {
+        format!("{LINK_PREFIX}{sim_id:04x}-{self}")
     }
 
     /// Get the name of the veth device endpoint attached to the hub bridge.
-    fn veth_br_name(self) -> String {
-        format!("{}-br", self.veth_name())
+    ///
+    /// Format: `lv{sim_id:04x}-{peer_id}-br` (e.g. `lva3f1-1-br`).
+    fn veth_br_name(self, sim_id: u16) -> String {
+        format!("{}-br", self.veth_name(sim_id))
     }
 }
 
@@ -244,6 +252,11 @@ pub fn default_runtime_factory() -> RuntimeFactory {
             .build()
             .expect("to create runtime")
     })
+}
+
+/// Return the name to use for a bridge device based on the simulation id.
+fn bridge_name(sim_id: u16) -> String {
+    format!("lem-br{sim_id:04x}")
 }
 
 /// Common context provided to all namespaces.
@@ -420,14 +433,11 @@ pub struct Network {
 }
 
 impl Network {
-    /// Name of the bridge device in the hub namespace.
-    const BRIDGE_NAME: &str = "linkem-br0";
-
     /// Create a new simulated network with the given IP subnet.
     ///
     /// This creates:
-    /// 1. A hub network namespace (e.g. `lem-{sim_id}-hub`)
-    /// 2. A bridge device (`linkem-br0`) in the hub namespace
+    /// 1. A hub network namespace (e.g. `lem-a3f1-hub`)
+    /// 2. A bridge device (e.g. `lem-bra3f1`) in the hub namespace
     ///
     /// Peers can then be added with [`add_peer`](Self::add_peer).
     pub async fn new(subnet: Subnet) -> Result<Self> {
@@ -472,7 +482,7 @@ impl Network {
         network
             .rtnetlink_handle
             .link()
-            .add(LinkBridge::new(Self::BRIDGE_NAME).up().setns_by_fd(fd).build())
+            .add(LinkBridge::new(&bridge_name(sim_id)).up().setns_by_fd(fd).build())
             .execute()
             .await?;
 
@@ -498,8 +508,8 @@ impl Network {
     pub async fn add_peer_with_options(&mut self, options: PeerOptions) -> Result<PeerId> {
         let peer_id = PEER_ID_NEXT.load(Ordering::Relaxed);
         let namespace_name = self.peer_namespace_name(peer_id);
-        let veth_name = Arc::new(peer_id.veth_name());
-        let veth_br_name = Arc::new(peer_id.veth_br_name());
+        let veth_name = Arc::new(peer_id.veth_name(self.sim_id));
+        let veth_br_name = Arc::new(peer_id.veth_br_name(self.sim_id));
 
         let _span =
             tracing::debug_span!("add_peer", ?peer_id, %namespace_name, %veth_name, %veth_br_name)
@@ -584,13 +594,15 @@ impl Network {
             .receive()
             .await??;
 
+        let bridge_name = bridge_name(self.sim_id);
+
         // Step 4: Attach the bridge endpoint to the hub's bridge device.
         self.network_hub_namespace
             .task_sender
             .submit(|ctx| {
                 Box::pin(async move {
                     let index =
-                        wrappers::if_nametoindex(Self::BRIDGE_NAME).expect("to find bridge").get();
+                        wrappers::if_nametoindex(&bridge_name).expect("to find bridge").get();
 
                     // Set the bridge as the controller for this veth endpoint
                     ctx.handle
@@ -762,6 +774,7 @@ impl Network {
         let subnet = self.subnet;
 
         // Execute the TC configuration in the source peer's namespace.
+        let sim_id = self.sim_id;
         src_peer
             .namespace
             .task_sender
@@ -776,7 +789,7 @@ impl Network {
                 Box::pin(
                     async move {
                         // Get the interface index for the peer's veth device.
-                        let if_index = wrappers::if_nametoindex(&ctx.peer_id.veth_name())
+                        let if_index = wrappers::if_nametoindex(&ctx.peer_id.veth_name(sim_id))
                             .expect("to find dev")
                             .get() as i32;
 
@@ -1459,5 +1472,64 @@ mod linkem_network {
             "Expected 2 packets (original + duplicate) but received {}",
             received_count
         );
+    }
+
+    /// Test that two processes can create networks concurrently without name conflicts.
+    ///
+    /// Uses `fork()` so each child has a different PID (and therefore a different `sim_id`).
+    /// Both children create a network with peers; the parent waits for both to exit
+    /// successfully.
+    #[test]
+    fn concurrent_simulations_no_conflicts() {
+        use nix::sys::wait::{WaitStatus, waitpid};
+        use nix::unistd::{ForkResult, fork};
+
+        let _ = tracing_subscriber::fmt::try_init();
+
+        /// Spawn a child process that creates a network with 3 peers.
+        /// Returns the child PID.
+        fn spawn_simulation() -> nix::unistd::Pid {
+            // SAFETY: we are single-threaded at this point in the test (no tokio
+            // runtime yet), so fork is safe.
+            match unsafe { fork() }.expect("fork failed") {
+                ForkResult::Child => {
+                    let rt =
+                        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+
+                    let code = rt.block_on(async {
+                        let subnet = Subnet::new(Ipv4Addr::new(10, 0, 0, 0).into(), 16);
+                        let mut network = match Network::new(subnet).await {
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("Network::new failed: {e}");
+                                return 1;
+                            }
+                        };
+
+                        for _ in 0..3 {
+                            if let Err(e) = network.add_peer().await {
+                                eprintln!("add_peer failed: {e}");
+                                return 1;
+                            }
+                        }
+
+                        0
+                    });
+
+                    std::process::exit(code);
+                }
+                ForkResult::Parent { child } => child,
+            }
+        }
+
+        let child_a = spawn_simulation();
+        let child_b = spawn_simulation();
+
+        for (label, pid) in [("A", child_a), ("B", child_b)] {
+            match waitpid(pid, None).expect("waitpid failed") {
+                WaitStatus::Exited(_, 0) => {}
+                status => panic!("child {label} (pid {pid}) failed: {status:?}"),
+            }
+        }
     }
 }
