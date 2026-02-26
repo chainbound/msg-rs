@@ -139,7 +139,14 @@ where
         self.state.transport_stats.load()
     }
 
-    pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
+    /// Send a request, return the oneshot channel to receive the response.
+    ///
+    /// It may fail if the underlying socket driver has been closed, or if high water mark is
+    /// reached.
+    pub async fn send_request(
+        &self,
+        message: Bytes,
+    ) -> Result<oneshot::Receiver<Result<Bytes, ReqError>>, ReqError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         let msg = ReqMessage::new(message);
@@ -153,7 +160,13 @@ where
                 TrySendError::Closed(_) => ReqError::SocketClosed,
             })?;
 
-        response_rx.await.map_err(|_| ReqError::SocketClosed)?
+        Ok(response_rx)
+    }
+
+    /// Send a request and await for the response.
+    pub async fn request(&self, message: Bytes) -> Result<Bytes, ReqError> {
+        let rx = self.send_request(message).await?;
+        rx.await.map_err(|_| ReqError::SocketClosed)?
     }
 
     /// Tries to connect to the target endpoint with the default options.
