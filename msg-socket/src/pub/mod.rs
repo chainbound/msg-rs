@@ -1,4 +1,4 @@
-use std::{io, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use msg_common::constants::KiB;
@@ -13,6 +13,7 @@ pub use socket::*;
 
 mod stats;
 use crate::{Profile, stats::SocketStats};
+use arc_swap::ArcSwap;
 use stats::PubStats;
 
 mod trie;
@@ -208,9 +209,22 @@ impl PubMessage {
 }
 
 /// The publisher socket state, shared between the backend task and the socket.
-#[derive(Debug, Default)]
-pub(crate) struct SocketState {
-    pub(crate) stats: SocketStats<PubStats>,
+/// Generic over the transport-level stats type.
+#[derive(Debug)]
+pub(crate) struct SocketState<S: Default> {
+    pub(crate) stats: Arc<SocketStats<PubStats>>,
+    /// The transport-level stats. We wrap the inner stats in an `Arc`
+    /// for cheap clone on read.
+    pub(crate) transport_stats: Arc<ArcSwap<S>>,
+}
+
+impl<S: Default> Default for SocketState<S> {
+    fn default() -> Self {
+        Self {
+            stats: Arc::new(SocketStats::default()),
+            transport_stats: Arc::new(ArcSwap::from_pointee(S::default())),
+        }
+    }
 }
 
 #[cfg(test)]
