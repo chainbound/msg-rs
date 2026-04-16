@@ -33,6 +33,9 @@ derive_more = { workspace = true, features = [
 quinn = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 
+# Turmoil simulation
+turmoil = { workspace = true, optional = true }
+
 # TLS
 openssl = { workspace = true, optional = true }
 tokio-openssl = { workspace = true, optional = true }
@@ -49,3 +52,4 @@ tcp-tls = [
     "dep:thiserror",
     "dep:tokio-openssl",
 ]
+turmoil = ["dep:turmoil"]

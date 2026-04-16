@@ -2,6 +2,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// Suppress unused crate warning for libc - it's used conditionally in tcp/stats.rs
+#[cfg(all(not(feature = "turmoil"), any(target_os = "macos", target_os = "linux")))]
+extern crate libc;
+
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -26,6 +30,9 @@ pub mod quic;
 pub mod tcp;
 #[cfg(feature = "tcp-tls")]
 pub mod tcp_tls;
+
+/// Network type aliases for feature-gated turmoil integration.
+pub mod net;
 
 /// A trait for address types that can be used by any transport.
 pub trait Address: Clone + Debug + Send + Sync + Unpin + Hash + Eq + 'static {}
