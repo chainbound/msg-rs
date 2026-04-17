@@ -17,8 +17,11 @@ use msg_common::async_error;
 
 #[cfg(feature = "turmoil")]
 use crate::SyncBoxFuture;
-use crate::net::{TcpListener, TcpStream};
-use crate::{Acceptor, PeerAddress, Transport, TransportExt, tcp::TcpStats};
+use crate::{
+    Acceptor, PeerAddress, Transport, TransportExt,
+    net::{TcpListener, TcpStream},
+    tcp::TcpStats,
+};
 
 pub mod config;
 
@@ -78,7 +81,7 @@ pub struct Server {
     /// `turmoil::net::TcpListener` only exposes `async fn accept(&self)`, so we
     /// drive it by holding a pinned future here and polling it from `poll_accept`.
     /// This mirrors the tokio `poll_accept` back-pressure behavior exactly; the
-    /// TLS handshake itself runs in the [`Self::Accept`] future returned afterwards.
+    /// TLS handshake itself runs in the transport accept future returned afterwards.
     #[cfg(feature = "turmoil")]
     accept_fut: Option<SyncBoxFuture<'static, io::Result<(TcpStream, SocketAddr)>>>,
     /// The OpenSSL acceptor for TLS handshake requests.
@@ -295,9 +298,9 @@ impl Transport<SocketAddr> for TcpTls {
             };
             let tls_session_state = connector.configure()?.into_ssl(&config.domain)?;
 
-            // 2. Establish the TCP connection. `set_nodelay` is skipped under turmoil
-            //    since its `TcpStream` stub returns Ok without effect, and tokio's real
-            //    TCP call is unnecessary in the simulator (Nagle doesn't apply).
+            // 2. Establish the TCP connection. `set_nodelay` is skipped under turmoil since its
+            //    `TcpStream` stub returns Ok without effect, and tokio's real TCP call is
+            //    unnecessary in the simulator (Nagle doesn't apply).
             let stream = TcpStream::connect(addr).await?;
             #[cfg(not(feature = "turmoil"))]
             stream.set_nodelay(true)?;

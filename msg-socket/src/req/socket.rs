@@ -3,7 +3,7 @@ use std::{marker::PhantomData, net::SocketAddr, path::PathBuf, sync::Arc};
 use arc_swap::Guard;
 use bytes::Bytes;
 use rustc_hash::FxHashMap;
-use tokio::{sync::{mpsc, mpsc::error::TrySendError, oneshot}};
+use tokio::sync::{mpsc, mpsc::error::TrySendError, oneshot};
 use tokio_util::codec::Framed;
 
 use msg_common::span::WithSpan;

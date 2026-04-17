@@ -7,9 +7,9 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 use msg_socket::{PubSocket, SubSocket};
-use msg_transport::{Address, Transport, tcp::Tcp};
 #[cfg(feature = "quic")]
 use msg_transport::quic::Quic;
+use msg_transport::{Address, Transport, tcp::Tcp};
 
 const TOPIC: &str = "test";
 

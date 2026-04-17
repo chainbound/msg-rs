@@ -13,8 +13,10 @@ use msg_common::async_error;
 
 #[cfg(feature = "turmoil")]
 use crate::SyncBoxFuture;
-use crate::net::{TcpListener, TcpStream};
-use crate::{Acceptor, PeerAddress, Transport, TransportExt};
+use crate::{
+    Acceptor, PeerAddress, Transport, TransportExt,
+    net::{TcpListener, TcpStream},
+};
 
 mod stats;
 pub use stats::TcpStats;

@@ -7,7 +7,10 @@ use tokio::{sync::broadcast, task::JoinSet};
 use tracing::{debug, trace, warn};
 
 use super::{PubError, PubMessage, PubOptions, SocketState, driver::PubDriver, stats::PubStats};
-use crate::{ConnectionHook, ConnectionHookErased, resolve::{ToSocketAddrs, lookup_host}};
+use crate::{
+    ConnectionHook, ConnectionHookErased,
+    resolve::{ToSocketAddrs, lookup_host},
+};
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;

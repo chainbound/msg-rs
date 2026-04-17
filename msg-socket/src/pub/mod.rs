@@ -232,9 +232,9 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::tcp::Tcp;
     #[cfg(feature = "quic")]
     use msg_transport::quic::Quic;
+    use msg_transport::tcp::Tcp;
     use msg_wire::compression::GzipCompressor;
     use tracing::info;
 
