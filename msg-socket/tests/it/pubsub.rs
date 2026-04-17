@@ -7,7 +7,9 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 use msg_socket::{PubSocket, SubSocket};
-use msg_transport::{Address, Transport, quic::Quic, tcp::Tcp};
+#[cfg(feature = "quic")]
+use msg_transport::quic::Quic;
+use msg_transport::{Address, Transport, tcp::Tcp};
 
 const TOPIC: &str = "test";
 
@@ -20,9 +22,12 @@ async fn pubsub_channel() {
 
     assert!(result.is_ok());
 
-    let result = pubsub_channel_transport(build_quic, "127.0.0.1:9879".parse().unwrap()).await;
+    #[cfg(feature = "quic")]
+    {
+        let result = pubsub_channel_transport(build_quic, "127.0.0.1:9879".parse().unwrap()).await;
 
-    assert!(result.is_ok());
+        assert!(result.is_ok());
+    }
 }
 
 async fn pubsub_channel_transport<F, T, A>(
@@ -70,9 +75,13 @@ async fn pubsub_fan_out() {
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_out_transport(build_quic, 10, "127.0.0.1:9880".parse().unwrap()).await;
+    #[cfg(feature = "quic")]
+    {
+        let result =
+            pubsub_fan_out_transport(build_quic, 10, "127.0.0.1:9880".parse().unwrap()).await;
 
-    assert!(result.is_ok());
+        assert!(result.is_ok());
+    }
 }
 
 async fn pubsub_fan_out_transport<
@@ -135,9 +144,13 @@ async fn pubsub_fan_in() {
 
     assert!(result.is_ok());
 
-    let result = pubsub_fan_in_transport(build_quic, 20, "127.0.0.1:9881".parse().unwrap()).await;
+    #[cfg(feature = "quic")]
+    {
+        let result =
+            pubsub_fan_in_transport(build_quic, 20, "127.0.0.1:9881".parse().unwrap()).await;
 
-    assert!(result.is_ok());
+        assert!(result.is_ok());
+    }
 }
 
 async fn pubsub_fan_in_transport<
@@ -216,6 +229,7 @@ fn build_tcp() -> Tcp {
     Tcp::default()
 }
 
+#[cfg(feature = "quic")]
 fn build_quic() -> Quic {
     Quic::default()
 }

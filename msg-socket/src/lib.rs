@@ -35,6 +35,8 @@ pub use sub::*;
 mod connection;
 pub use connection::*;
 
+mod resolve;
+
 /// The default buffer size for a socket.
 pub const DEFAULT_BUFFER_SIZE: usize = 8192;
 

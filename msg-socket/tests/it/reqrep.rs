@@ -2,14 +2,15 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use msg_socket::{DEFAULT_QUEUE_SIZE, RepSocket, ReqOptions, ReqSocket};
-use msg_transport::{
-    tcp::Tcp,
-    tcp_tls::{self, TcpTls},
-};
+use msg_transport::tcp::Tcp;
+#[cfg(feature = "tcp-tls")]
+use msg_transport::tcp_tls::{self, TcpTls};
+#[cfg(feature = "tcp-tls")]
 use openssl::ssl::{SslAcceptor, SslMethod};
 use tokio_stream::StreamExt;
 
 /// Helper functions.
+#[cfg(feature = "tcp-tls")]
 mod helpers {
     use std::{path::PathBuf, str::FromStr as _};
 
@@ -83,6 +84,7 @@ async fn reqrep_works() {
     assert_eq!(hello, response, "expected {hello:?}, got {response:?}");
 }
 
+#[cfg(feature = "tcp-tls")]
 #[tokio::test]
 async fn reqrep_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
@@ -116,6 +118,7 @@ async fn reqrep_tls_works() {
 
 /// Test that changing the [`SslAcceptor`] at runtime works and results in not accepting the
 /// connection after modification.
+#[cfg(feature = "tcp-tls")]
 #[tokio::test]
 async fn reqrep_tls_control_works() {
     let _ = tracing_subscriber::fmt::try_init();
@@ -176,6 +179,7 @@ async fn reqrep_tls_control_works() {
     tokio::time::timeout(Duration::from_secs(1), req.request(hello.clone())).await.unwrap_err();
 }
 
+#[cfg(feature = "tcp-tls")]
 #[tokio::test]
 async fn reqrep_mutual_tls_works() {
     let _ = tracing_subscriber::fmt::try_init();
