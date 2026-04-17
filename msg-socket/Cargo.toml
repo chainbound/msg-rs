@@ -26,6 +26,7 @@ tracing.workspace = true
 tokio-stream.workspace = true
 parking_lot.workspace = true
 arc-swap.workspace = true
+turmoil = { workspace = true, optional = true }
 
 derive_more = { workspace = true, features = ["deref"] }
 
@@ -46,4 +47,4 @@ default = []
 # directly. `turmoil` composes with `tcp-tls` and `quic`.
 tcp-tls = ["msg-transport/tcp-tls"]
 quic = ["msg-transport/quic"]
-turmoil = ["msg-transport/turmoil"]
+turmoil = ["dep:turmoil", "msg-transport/turmoil"]

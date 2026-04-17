@@ -29,10 +29,6 @@ fn bind_addr(port: u16) -> SocketAddr {
     SocketAddr::from((Ipv4Addr::UNSPECIFIED, port))
 }
 
-fn server_addr(port: u16) -> SocketAddr {
-    SocketAddr::new(turmoil::lookup(SERVER_HOST), port)
-}
-
 #[cfg(feature = "tcp-tls")]
 fn certificate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/certificates")
@@ -85,7 +81,7 @@ fn reqrep_tcp_works_in_turmoil() -> Result {
 
     sim.client("client", async {
         let mut req = ReqSocket::new(Tcp::default());
-        req.connect_sync(server_addr(TCP_PORT));
+        req.connect(format!("{SERVER_HOST}:{TCP_PORT}")).await.unwrap();
 
         let hello = Bytes::from_static(b"hello over turmoil");
         let response = req.request(hello.clone()).await.unwrap();
@@ -123,7 +119,7 @@ fn reqrep_tcp_tls_works_in_turmoil() -> Result {
             tcp_tls::config::Client::new(domain).with_ssl_connector(ssl_connector),
         );
         let mut req = ReqSocket::new(tcp_tls_client);
-        req.connect_sync(server_addr(TLS_PORT));
+        req.connect(format!("{SERVER_HOST}:{TLS_PORT}")).await.unwrap();
 
         let hello = Bytes::from_static(b"hello over turmoil tls");
         let response = req.request(hello.clone()).await.unwrap();
