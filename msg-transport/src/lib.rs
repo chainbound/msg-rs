@@ -6,6 +6,17 @@
 #[cfg(all(not(feature = "turmoil"), any(target_os = "macos", target_os = "linux")))]
 extern crate libc;
 
+/// `Send + Sync` sibling of [`futures::future::BoxFuture`]. [`Transport`] requires
+/// `Self: Sync`, so any future stored on a transport field has to be `Sync` too,
+/// which [`BoxFuture`](futures::future::BoxFuture) (bounded only by `Send`) is not.
+///
+/// Used by the TCP and TCP-TLS transports under the `turmoil` feature to hold an
+/// in-progress `accept()` future, since `turmoil::net::TcpListener` only exposes
+/// an `async fn accept(&self)` (no `poll_accept`).
+#[cfg(feature = "turmoil")]
+pub(crate) type SyncBoxFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + Sync + 'a>>;
+
 use std::{
     fmt::Debug,
     hash::Hash,

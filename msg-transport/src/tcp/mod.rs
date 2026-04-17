@@ -1,4 +1,6 @@
 use futures::future::BoxFuture;
+#[cfg(feature = "turmoil")]
+use std::sync::Arc;
 use std::{
     io,
     net::SocketAddr,
@@ -9,6 +11,8 @@ use tracing::debug;
 
 use msg_common::async_error;
 
+#[cfg(feature = "turmoil")]
+use crate::SyncBoxFuture;
 use crate::net::{TcpListener, TcpStream};
 use crate::{Acceptor, PeerAddress, Transport, TransportExt};
 
@@ -27,31 +31,35 @@ pub struct Config;
 pub struct Tcp {
     #[allow(unused)]
     config: Config,
-    /// The bound listener. Only used when turmoil is disabled; under turmoil the
-    /// listener is owned by the background accept task (see [`Tcp::bind`]).
+    /// The bound listener.
+    ///
+    /// Under turmoil the listener is wrapped in an [`Arc`] so that the in-progress
+    /// accept future created in [`Tcp::poll_accept`] can hold a strong reference for
+    /// its `'static` lifetime. Both references are owned by this struct, so dropping
+    /// `Tcp` drops the listener synchronously, which in turmoil unbinds the port
+    /// from the simulated host immediately.
     #[cfg(not(feature = "turmoil"))]
     listener: Option<TcpListener>,
-    /// For turmoil: the bound address, captured before the listener is moved into the
-    /// accept task.
     #[cfg(feature = "turmoil")]
-    turmoil_local_addr: Option<SocketAddr>,
-    /// For turmoil: channel receiver for accepted connections.
+    listener: Option<Arc<TcpListener>>,
+    /// For turmoil: the in-progress accept future, if any.
+    ///
+    /// `turmoil::net::TcpListener` only exposes an `async fn accept(&self)`, so we
+    /// drive it by holding a pinned future here and polling it from `poll_accept`.
+    /// Back-pressure is therefore provided by turmoil's listener queue directly,
+    /// the same way `tokio::net::TcpListener::poll_accept` works in the default
+    /// build. There's no intermediate mpsc buffer that can fill up and stall the
+    /// listener.
     #[cfg(feature = "turmoil")]
-    accept_rx: Option<tokio::sync::mpsc::Receiver<io::Result<(TcpStream, SocketAddr)>>>,
+    accept_fut: Option<SyncBoxFuture<'static, io::Result<(TcpStream, SocketAddr)>>>,
 }
 
 impl std::fmt::Debug for Tcp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut dbg = f.debug_struct("Tcp");
-        dbg.field("config", &self.config);
-
-        #[cfg(not(feature = "turmoil"))]
-        dbg.field("listener", &self.listener.as_ref().map(|_| "<TcpListener>"));
-
-        #[cfg(feature = "turmoil")]
-        dbg.field("local_addr", &self.turmoil_local_addr);
-
-        dbg.finish()
+        f.debug_struct("Tcp")
+            .field("config", &self.config)
+            .field("listener", &self.listener.as_ref().map(|_| "<TcpListener>"))
+            .finish()
     }
 }
 
@@ -59,12 +67,9 @@ impl Tcp {
     pub fn new(config: Config) -> Self {
         Self {
             config,
-            #[cfg(not(feature = "turmoil"))]
             listener: None,
             #[cfg(feature = "turmoil")]
-            turmoil_local_addr: None,
-            #[cfg(feature = "turmoil")]
-            accept_rx: None,
+            accept_fut: None,
         }
     }
 }
@@ -88,40 +93,25 @@ impl Transport<SocketAddr> for Tcp {
     type Accept = BoxFuture<'static, Result<Self::Io, Self::Error>>;
 
     fn local_addr(&self) -> Option<SocketAddr> {
-        #[cfg(feature = "turmoil")]
-        {
-            self.turmoil_local_addr
-        }
-
-        #[cfg(not(feature = "turmoil"))]
-        {
-            self.listener.as_ref().and_then(|l| l.local_addr().ok())
-        }
+        self.listener.as_ref().and_then(|l| l.local_addr().ok())
     }
 
     async fn bind(&mut self, addr: SocketAddr) -> Result<(), Self::Error> {
+        // Bind first, then commit. A failed bind must leave the transport in its
+        // previous state, matching the non-turmoil path where the old listener is
+        // never disturbed unless a replacement is ready to take over.
         let listener = TcpListener::bind(addr).await?;
 
         #[cfg(feature = "turmoil")]
         {
-            // Turmoil's TcpListener cannot be polled and is not Clone, so we move it
-            // into a background task that forwards accepted connections over a channel.
-            // Capture the bound address up front because the listener is no longer
-            // reachable from `self` afterwards.
-            self.turmoil_local_addr = Some(listener.local_addr()?);
-
-            let (tx, rx) = tokio::sync::mpsc::channel(32);
-            self.accept_rx = Some(rx);
-
-            tokio::spawn(async move {
-                loop {
-                    let result = listener.accept().await;
-                    if tx.send(result).await.is_err() {
-                        // Channel closed, shut down the accept task
-                        break;
-                    }
-                }
-            });
+            // Drop the in-progress accept future before replacing the listener so
+            // that the old listener's last `Arc` is released in order, triggering
+            // its synchronous `Drop` which unbinds the port from turmoil's host.
+            // Because we always bind to a fresh address (the simulated host cannot
+            // hold two listeners on the same port), the new listener is already
+            // installed on its own port and will not conflict with the release.
+            self.accept_fut = None;
+            self.listener = Some(Arc::new(listener));
         }
 
         #[cfg(not(feature = "turmoil"))]
@@ -167,20 +157,25 @@ impl Transport<SocketAddr> for Tcp {
 
         #[cfg(feature = "turmoil")]
         {
-            let Some(ref mut rx) = this.accept_rx else {
+            let Some(listener) = this.listener.as_ref().cloned() else {
                 return Poll::Ready(async_error(io::ErrorKind::NotConnected.into()));
             };
 
-            // `poll_recv` registers the current waker with the channel, so the task is
-            // notified exactly when a connection arrives or the sender is dropped.
-            match rx.poll_recv(cx) {
-                Poll::Ready(Some(Ok((io, addr)))) => {
+            // Lazily build a `'static` accept future that owns its own strong
+            // reference to the listener, and keep it alive across pending polls.
+            let fut = this
+                .accept_fut
+                .get_or_insert_with(|| Box::pin(async move { listener.accept().await }));
+
+            match fut.as_mut().poll(cx) {
+                Poll::Ready(Ok((io, addr))) => {
+                    this.accept_fut = None;
                     debug!(%addr, "accepted connection");
                     Poll::Ready(Box::pin(async move { Ok(io) }))
                 }
-                Poll::Ready(Some(Err(e))) => Poll::Ready(async_error(e)),
-                Poll::Ready(None) => {
-                    Poll::Ready(async_error(io::ErrorKind::BrokenPipe.into()))
+                Poll::Ready(Err(e)) => {
+                    this.accept_fut = None;
+                    Poll::Ready(async_error(e))
                 }
                 Poll::Pending => Poll::Pending,
             }

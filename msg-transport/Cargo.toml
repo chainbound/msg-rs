@@ -52,4 +52,7 @@ tcp-tls = [
     "dep:thiserror",
     "dep:tokio-openssl",
 ]
+# Routes the TCP and TCP-TLS transports through `turmoil::net` for deterministic
+# network simulation. Composes with `tcp-tls`: under this feature, TLS traffic
+# also runs through the simulator via `SslStream<turmoil::net::TcpStream>`.
 turmoil = ["dep:turmoil"]

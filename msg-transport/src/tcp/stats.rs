@@ -118,7 +118,8 @@ mod os_stats {
             let smoothed_rtt = Duration::from_micros(info.tcpi_rtt as u64);
             let rtt_variance = Duration::from_micros(info.tcpi_rttvar as u64);
             let retransmitted_packets = info.tcpi_total_retrans as u64;
-            let retransmitted_bytes = retransmitted_packets.saturating_mul(info.tcpi_snd_mss as u64);
+            let retransmitted_bytes =
+                retransmitted_packets.saturating_mul(info.tcpi_snd_mss as u64);
             let retransmission_timeout = Duration::from_micros(info.tcpi_rto as u64);
 
             Self {

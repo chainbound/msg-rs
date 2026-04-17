@@ -188,7 +188,7 @@ impl<A: Address> Request<A> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "turmoil")))]
 mod tests {
     use std::{net::SocketAddr, time::Duration};
 
