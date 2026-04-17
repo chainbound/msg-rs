@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 use bytes::Bytes;
-use msg_socket::{RepSocket, ReqSocket};
+use msg_socket::{PubSocket, RepSocket, ReqSocket, SubSocket};
 use msg_transport::tcp::Tcp;
 #[cfg(feature = "tcp-tls")]
 use msg_transport::tcp_tls::{self, TcpTls};
@@ -11,6 +11,7 @@ use msg_transport::tcp_tls::{self, TcpTls};
 use openssl::ssl::{
     SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder, SslFiletype, SslMethod,
 };
+use tokio::time::{Duration, sleep};
 use tokio_stream::StreamExt;
 use turmoil::{Builder, IpVersion, Result};
 
@@ -18,6 +19,8 @@ const SERVER_HOST: &str = "server";
 const TCP_PORT: u16 = 17_301;
 #[cfg(feature = "tcp-tls")]
 const TLS_PORT: u16 = 17_302;
+const PUBSUB_PORT: u16 = 17_303;
+const TOPIC: &str = "test";
 
 fn build_sim() -> turmoil::Sim<'static> {
     let mut builder = Builder::new();
@@ -86,6 +89,39 @@ fn reqrep_tcp_works_in_turmoil() -> Result {
         let hello = Bytes::from_static(b"hello over turmoil");
         let response = req.request(hello.clone()).await.unwrap();
         assert_eq!(hello, response);
+
+        Ok(())
+    });
+
+    sim.run()
+}
+
+#[test]
+fn pubsub_tcp_works_in_turmoil() -> Result {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let mut sim = build_sim();
+
+    sim.host(SERVER_HOST, || async {
+        let mut publisher = PubSocket::new(Tcp::default());
+        publisher.bind(bind_addr(PUBSUB_PORT)).await.unwrap();
+
+        for _ in 0..20 {
+            sleep(Duration::from_millis(50)).await;
+            publisher.publish(TOPIC, Bytes::from_static(b"hello pubsub")).await.unwrap();
+        }
+
+        Ok(())
+    });
+
+    sim.client("client", async {
+        let mut subscriber = SubSocket::new(Tcp::default());
+        subscriber.connect(format!("{SERVER_HOST}:{PUBSUB_PORT}")).await.unwrap();
+        subscriber.subscribe(TOPIC).await.unwrap();
+
+        let msg = subscriber.next().await.unwrap();
+        assert_eq!(TOPIC, msg.topic());
+        assert_eq!(b"hello pubsub".as_slice(), msg.payload());
 
         Ok(())
     });
