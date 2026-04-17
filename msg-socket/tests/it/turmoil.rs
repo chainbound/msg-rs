@@ -20,6 +20,8 @@ const TCP_PORT: u16 = 17_301;
 #[cfg(feature = "tcp-tls")]
 const TLS_PORT: u16 = 17_302;
 const PUBSUB_PORT: u16 = 17_303;
+#[cfg(feature = "tcp-tls")]
+const PUBSUB_TLS_PORT: u16 = 17_304;
 const TOPIC: &str = "test";
 
 fn build_sim() -> turmoil::Sim<'static> {
@@ -122,6 +124,46 @@ fn pubsub_tcp_works_in_turmoil() -> Result {
         let msg = subscriber.next().await.unwrap();
         assert_eq!(TOPIC, msg.topic());
         assert_eq!(b"hello pubsub".as_slice(), msg.payload());
+
+        Ok(())
+    });
+
+    sim.run()
+}
+
+#[cfg(feature = "tcp-tls")]
+#[test]
+fn pubsub_tcp_tls_works_in_turmoil() -> Result {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let mut sim = build_sim();
+
+    sim.host(SERVER_HOST, || async {
+        let server_config = tcp_tls::config::Server::new(default_acceptor_builder().build().into());
+        let mut publisher = PubSocket::new(TcpTls::new_server(server_config));
+        publisher.bind(bind_addr(PUBSUB_TLS_PORT)).await.unwrap();
+
+        for _ in 0..20 {
+            sleep(Duration::from_millis(50)).await;
+            publisher.publish(TOPIC, Bytes::from_static(b"hello pubsub tls")).await.unwrap();
+        }
+
+        Ok(())
+    });
+
+    sim.client("client", async {
+        let domain = "localhost".to_string();
+        let ssl_connector = default_connector_builder().build();
+        let tcp_tls_client = TcpTls::new_client(
+            tcp_tls::config::Client::new(domain).with_ssl_connector(ssl_connector),
+        );
+        let mut subscriber = SubSocket::new(tcp_tls_client);
+        subscriber.connect(format!("{SERVER_HOST}:{PUBSUB_TLS_PORT}")).await.unwrap();
+        subscriber.subscribe(TOPIC).await.unwrap();
+
+        let msg = subscriber.next().await.unwrap();
+        assert_eq!(TOPIC, msg.topic());
+        assert_eq!(b"hello pubsub tls".as_slice(), msg.payload());
 
         Ok(())
     });
