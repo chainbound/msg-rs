@@ -4,6 +4,10 @@ use tokio_util::codec::{Decoder, Encoder};
 
 /// The ID of the auth codec on the wire.
 const WIRE_ID: u8 = 0x01;
+/// The number of bytes in an authentication frame header.
+const HEADER_LEN: usize = 5;
+/// The largest authentication token accepted by the decoder.
+const MAX_TOKEN_LEN: usize = 64 * 1024;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -11,6 +15,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Invalid wire ID: {0}")]
     WireId(u8),
+    #[error("Invalid authentication token length")]
+    InvalidLength,
     #[error("Rejected")]
     Rejected,
 }
@@ -72,19 +78,23 @@ impl Decoder for Codec {
                     return Err(Error::WireId(wire_id));
                 }
 
-                if src.len() < 4 {
+                if src.len() < HEADER_LEN {
                     return Ok(None);
                 }
 
-                let id_size = u32::from_be_bytes([src[1], src[2], src[3], src[4]]);
-                if src.len() < id_size as usize {
+                let id_size = u32::from_be_bytes([src[1], src[2], src[3], src[4]]) as usize;
+                if id_size > MAX_TOKEN_LEN {
+                    return Err(Error::InvalidLength);
+                }
+
+                let frame_len = HEADER_LEN.checked_add(id_size).ok_or(Error::InvalidLength)?;
+                if src.len() < frame_len {
                     return Ok(None);
                 }
 
-                src.advance(1);
-                src.advance(4);
+                src.advance(HEADER_LEN);
 
-                let id = src.split_to(id_size as usize).freeze();
+                let id = src.split_to(id_size).freeze();
                 self.state = State::Ack;
                 Ok(Some(Message::Auth(id)))
             }
@@ -141,5 +151,53 @@ impl Encoder<Message> for Codec {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+    use tokio_util::codec::Decoder;
+
+    use super::{Codec, Error, MAX_TOKEN_LEN, Message, WIRE_ID};
+
+    #[test]
+    fn fragmented_auth_header_waits_for_all_five_bytes() {
+        let mut codec = Codec::new_server();
+        let mut src = BytesMut::new();
+
+        for byte in [WIRE_ID, 0, 0, 0] {
+            src.extend_from_slice(&[byte]);
+            assert!(codec.decode(&mut src).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn fragmented_auth_token_waits_for_complete_frame() {
+        let mut codec = Codec::new_server();
+        let mut src = BytesMut::from(&[WIRE_ID, 0, 0, 0, 1][..]);
+
+        assert!(codec.decode(&mut src).unwrap().is_none());
+        assert_eq!(src.len(), 5);
+
+        src.extend_from_slice(&[0xaa]);
+        let message = codec.decode(&mut src).unwrap().unwrap();
+
+        let Message::Auth(token) = message else {
+            panic!("expected authentication message");
+        };
+        assert_eq!(token.as_ref(), &[0xaa]);
+        assert!(src.is_empty());
+    }
+
+    #[test]
+    fn oversized_auth_token_is_rejected() {
+        let mut codec = Codec::new_server();
+        let mut src = BytesMut::from(&[WIRE_ID][..]);
+        src.extend_from_slice(&((MAX_TOKEN_LEN + 1) as u32).to_be_bytes());
+
+        let error = codec.decode(&mut src).unwrap_err();
+
+        assert!(matches!(error, Error::InvalidLength));
     }
 }
