@@ -33,6 +33,9 @@ derive_more = { workspace = true, features = [
 quinn = { workspace = true, optional = true }
 rcgen = { workspace = true, optional = true }
 
+# Turmoil simulation
+turmoil = { workspace = true, optional = true }
+
 # TLS
 openssl = { workspace = true, optional = true }
 tokio-openssl = { workspace = true, optional = true }
@@ -49,3 +52,7 @@ tcp-tls = [
     "dep:thiserror",
     "dep:tokio-openssl",
 ]
+# Routes the TCP and TCP-TLS transports through `turmoil::net` for deterministic
+# network simulation. Composes with `tcp-tls`: under this feature, TLS traffic
+# also runs through the simulator via `SslStream<turmoil::net::TcpStream>`.
+turmoil = ["dep:turmoil"]

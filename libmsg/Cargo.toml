@@ -34,8 +34,12 @@ tikv-jemallocator = { version = "0.6.1", features = ["profiling"] }
 
 [features]
 default = []
-quic = ["msg-transport/quic"]
-tcp-tls = ["msg-transport/tcp-tls"]
+quic = ["msg-transport/quic", "msg-socket/quic"]
+tcp-tls = ["msg-transport/tcp-tls", "msg-socket/tcp-tls"]
+# Enables turmoil-based network simulation across the transport and socket
+# layers. TCP and TCP-TLS traffic both flow through `turmoil::net`, so TLS
+# integration tests can run inside a deterministic simulation.
+turmoil = ["msg-transport/turmoil", "msg-socket/turmoil"]
 
 [[bench]]
 name = "reqrep"

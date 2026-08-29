@@ -227,12 +227,14 @@ impl<S: Default> Default for SocketState<S> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "turmoil")))]
 mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use msg_transport::{quic::Quic, tcp::Tcp};
+    #[cfg(feature = "quic")]
+    use msg_transport::quic::Quic;
+    use msg_transport::tcp::Tcp;
     use msg_wire::compression::GzipCompressor;
     use tracing::info;
 
@@ -291,6 +293,7 @@ mod tests {
         assert_eq!("WORLD", msg.payload());
     }
 
+    #[cfg(feature = "quic")]
     #[tokio::test]
     async fn pubsub_auth_quic() {
         let _ = tracing_subscriber::fmt::try_init();
@@ -408,6 +411,7 @@ mod tests {
         assert_eq!("WORLD", msg.payload());
     }
 
+    #[cfg(feature = "quic")]
     #[tokio::test]
     async fn pubsub_durable_quic() {
         let _ = tracing_subscriber::fmt::try_init();

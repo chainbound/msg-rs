@@ -3,15 +3,14 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use arc_swap::Guard;
 use bytes::Bytes;
 use futures::stream::FuturesUnordered;
-use tokio::{
-    net::{ToSocketAddrs, lookup_host},
-    sync::broadcast,
-    task::JoinSet,
-};
+use tokio::{sync::broadcast, task::JoinSet};
 use tracing::{debug, trace, warn};
 
 use super::{PubError, PubMessage, PubOptions, SocketState, driver::PubDriver, stats::PubStats};
-use crate::{ConnectionHook, ConnectionHookErased};
+use crate::{
+    ConnectionHook, ConnectionHookErased,
+    resolve::{ToSocketAddrs, lookup_host},
+};
 
 use msg_transport::{Address, Transport};
 use msg_wire::compression::Compressor;

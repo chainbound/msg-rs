@@ -170,7 +170,7 @@ impl<A: Address> Default for SocketState<A> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "turmoil")))]
 mod tests {
     use std::net::SocketAddr;
 

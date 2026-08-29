@@ -2,6 +2,21 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+// Suppress unused crate warning for libc - it's used conditionally in tcp/stats.rs
+#[cfg(all(not(feature = "turmoil"), any(target_os = "macos", target_os = "linux")))]
+extern crate libc;
+
+/// `Send + Sync` sibling of [`futures::future::BoxFuture`]. [`Transport`] requires
+/// `Self: Sync`, so any future stored on a transport field has to be `Sync` too,
+/// which [`BoxFuture`](futures::future::BoxFuture) (bounded only by `Send`) is not.
+///
+/// Used by the TCP and TCP-TLS transports under the `turmoil` feature to hold an
+/// in-progress `accept()` future, since `turmoil::net::TcpListener` only exposes
+/// an `async fn accept(&self)` (no `poll_accept`).
+#[cfg(feature = "turmoil")]
+pub(crate) type SyncBoxFuture<'a, T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + Sync + 'a>>;
+
 use std::{
     fmt::Debug,
     hash::Hash,
@@ -26,6 +41,9 @@ pub mod quic;
 pub mod tcp;
 #[cfg(feature = "tcp-tls")]
 pub mod tcp_tls;
+
+/// Network type aliases for feature-gated turmoil integration.
+pub mod net;
 
 /// A trait for address types that can be used by any transport.
 pub trait Address: Clone + Debug + Send + Sync + Unpin + Hash + Eq + 'static {}

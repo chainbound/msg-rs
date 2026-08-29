@@ -8,7 +8,6 @@ use std::{
 
 use futures::{Stream, stream::FuturesUnordered};
 use tokio::{
-    net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
     task::{JoinHandle, JoinSet},
 };
@@ -18,6 +17,7 @@ use tracing::{debug, warn};
 use crate::{
     ConnectionHook, ConnectionHookErased, DEFAULT_QUEUE_SIZE, RepOptions, Request,
     rep::{RepError, SocketState, driver::RepDriver},
+    resolve::{ToSocketAddrs, lookup_host},
 };
 
 use msg_transport::{Address, Transport};

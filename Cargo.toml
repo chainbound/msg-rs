@@ -49,6 +49,7 @@ tokio = { version = "1", features = [
   "io-util",
   "macros",
   "fs",
+  "sync",
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
@@ -76,6 +77,10 @@ nix = { version = "0.30.1" }
 quinn = "0.11.9"
 rcgen = "0.14"
 openssl = { version = "0.10" }
+
+# turmoil simulation
+# Note: version must match tokio version for compatibility
+turmoil = { version = "0.7" }
 
 # benchmarking & profiling
 criterion = { version = "0.5", features = ["async_tokio"] }

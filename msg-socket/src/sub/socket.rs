@@ -9,17 +9,14 @@ use std::{
 
 use futures::Stream;
 use rustc_hash::FxHashMap;
-use tokio::{
-    net::{ToSocketAddrs, lookup_host},
-    sync::mpsc,
-    task::JoinSet,
-};
+use tokio::{sync::mpsc, task::JoinSet};
 
 use msg_common::{IpAddrExt, JoinMap};
 use msg_transport::{Address, Transport};
 
 use crate::{
     ConnectionHook, ConnectionHookErased,
+    resolve::{ToSocketAddrs, lookup_host},
     sub::{
         Command, DEFAULT_BUFFER_SIZE, PubMessage, SocketState, SubDriver, SubError, SubOptions,
         stats::SubStats,

@@ -26,12 +26,25 @@ tracing.workspace = true
 tokio-stream.workspace = true
 parking_lot.workspace = true
 arc-swap.workspace = true
+turmoil = { workspace = true, optional = true }
 
 derive_more = { workspace = true, features = ["deref"] }
 
 [dev-dependencies]
 rand.workspace = true
-msg-transport = { workspace = true, features = ["quic", "tcp-tls"] }
+# Transport features are forwarded through this crate's own feature flags below,
+# so tests pick them up via `--features` rather than being hardcoded here.
+msg-transport.workspace = true
 openssl.workspace = true
+turmoil.workspace = true
 
 tracing-subscriber = "0.3"
+
+[features]
+default = []
+# Transport forwarding. Downstream users (and this crate's integration tests)
+# opt into each transport via these flags without depending on `msg-transport`
+# directly. `turmoil` composes with `tcp-tls` and `quic`.
+tcp-tls = ["msg-transport/tcp-tls"]
+quic = ["msg-transport/quic"]
+turmoil = ["dep:turmoil", "msg-transport/turmoil"]
